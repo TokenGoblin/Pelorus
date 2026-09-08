@@ -1,0 +1,66 @@
+# The compat suite — forty sites you actually use (build-spec §8).
+#
+# This is the real progress meter for the project. Spec pass rates are not:
+# test262 measures the language, WPT measures conformance, and neither tells
+# you whether a site you depend on works. Forty sites that do is the number
+# that decides Phase 23.
+#
+# STATUS: EMPTY. The list is a Phase 0 deliverable and cannot be written by
+# anyone but the person who will daily-drive the browser. ci/check_compat_sites.py
+# fails until there are forty entries, each with at least one assertion. An
+# entry with no assertion is worse than a missing one: it counts towards forty
+# and tests nothing.
+#
+# Runs against RECORDED traffic, never the live web (§8). Live CI would be
+# flaky, slow, likely to get the IP blocked, arguably against several sites'
+# terms, and it would leak this list. Archives are captured once, committed,
+# and replayed. A separate weekly manual job runs live to detect drift.
+#
+# ONE THING TO DECIDE BEFORE FILLING THIS IN: §8 rejects live CI partly
+# because it leaks the test list — and then this file commits the list to the
+# repository. Those are only consistent while the repository is private, which
+# is open decision 9 in §13 and is also what invariant 10 implies until Phase
+# 20. If the repository is ever made public with this file in it, the leak §8
+# was avoiding has happened by another route, and the git history keeps it
+# there. Either settle decision 9 as "private through Phase 20", or hold
+# opaque ids here with the mapping kept outside the repository.
+#
+# Schema
+# ------
+#
+# [[site]]
+# id       = "short-slug"        required, unique, used as the archive name
+# url      = "https://..."       required, the entry point
+# why      = "..."               optional, why this site is on the list; the
+#                                answer decides whether it stays on the list
+# archive  = "archives/slug.har" optional, defaults to archives/<id>.har
+# login    = true                optional, part of the Phase 13 five-login gate
+# assert   = [...]               required, at least one
+#
+# An assertion is a table. The forms are defined by the runner, which does not
+# exist until the compat harness is built; these are the shapes the phases
+# already need:
+#
+#   { kind = "status",   equals = 200 }
+#   { kind = "text",     selector = "h1", contains = "..." }
+#   { kind = "present",  selector = "#main-content" }
+#   { kind = "absent",   selector = ".error-page" }
+#   { kind = "pixel",    baseline = "baselines/<id>.png", tolerance = 0 }
+#   { kind = "no-console-error" }
+#
+# Example of a complete entry, deliberately commented out so the count check
+# does not pass on a placeholder:
+#
+# [[site]]
+# id  = "example"
+# url = "https://example.com/"
+# why = "Smallest possible end-to-end path: DNS, TLS, HTML, layout, paint."
+# assert = [
+#     { kind = "status", equals = 200 },
+#     { kind = "text", selector = "h1", contains = "Example Domain" },
+#     { kind = "no-console-error" },
+# ]
+#
+# Choosing the forty: pick what you would actually be angry to lose, not what
+# exercises interesting engine features. A site that renders wrong and one that
+# renders slowly are both failures; a site you never open is neither.

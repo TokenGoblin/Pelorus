@@ -137,6 +137,17 @@ jobs:
       - name: Gate check 5
         run: tests/brand/gate-brand-leak.sh
 
+  # Not one of the five gate checks: a Phase 0 deliverable that only the
+  # person who will daily-drive the browser can produce. Red here means the
+  # list is outstanding, not that the phase gate failed.
+  compat-list:
+    name: compat-list
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Forty-site compat list
+        run: ci/gate-compat-list.sh
+
   structure:
     name: structure
     runs-on: ubuntu-latest

@@ -15,6 +15,10 @@ _fail_count=0
 # python3 is the name on Linux; on Windows the same interpreter is usually
 # `python`, and the bare `python3` resolves to a Microsoft Store stub that
 # exits without running anything. Resolve once, here, rather than in each gate.
+# Gate output contains section signs and em dashes. Without this, Python on a
+# Windows console falls back to cp1252 and mangles them.
+export PYTHONIOENCODING=utf-8
+
 PY_BIN=""
 for _c in python3 python; do
     if command -v "$_c" >/dev/null 2>&1 && "$_c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then

@@ -3,7 +3,6 @@
 # Repository structure invariants that no other gate covers.
 #
 #   - every crate carries a CLAUDE.md (build-spec §5, Phase 0 deliverable)
-#   - the compat site list is complete (build-spec §8)
 #   - px-brand does not hold the update URL or signing key (§14.1)
 #
 # OS-independent. CI runs it on Linux only.
@@ -34,12 +33,6 @@ if [ -f "$BRAND_SRC" ]; then
     else
         ok "px-brand holds no update endpoint or key (§14.1)"
     fi
-fi
-
-if [ -n "$PY_BIN" ]; then
-    "$PY_BIN" ci/check_compat_sites.py || fail "compat site list is not ready"
-else
-    fail "no python >= 3.11 on PATH; cannot check the compat site list"
 fi
 
 verdict "structure"
