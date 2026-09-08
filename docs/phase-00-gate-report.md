@@ -76,6 +76,14 @@ path-and-environment only. If a username ever leaks into a binary it will be
 through a path, which is remapped — but that is an argument, not a test, and it
 is recorded here as an argument.
 
+**And check 2 proves less than it looks like, for a reason worth writing down.**
+The path remapping it depends on has never actually been exercised. All
+twenty-one crates are empty, so no source path is embedded in either binary in
+the first place — the hashes would match with the remapping switched off
+entirely. The `--remap-path-prefix` logic gets its first real test when there is
+code with panic locations in it, which is Phase 1. Until then, a green check 2
+says the build is deterministic, not that the build is path-independent.
+
 Note that reproducibility on Windows required `/Brepro`: MSVC stamps the PE
 header with the wall-clock time of the link, so identical source cannot produce
 identical bytes without it. Cargo's `trim-paths` profile option is still

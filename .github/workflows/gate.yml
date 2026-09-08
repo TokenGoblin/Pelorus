@@ -69,11 +69,13 @@ jobs:
           # nothing. The two builds must share one toolchain anyway: invariant 7
           # is same source plus same toolchain, not same everything.
           export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-          export HOME="$RUNNER_TEMP/home-a"
+          # RUNNER_TEMP is a native path on Windows; every tool below is POSIX.
+          TMP="$(cygpath -u "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")"
+          export HOME="$TMP/home-a"
           export CARGO_HOME="$HOME/.cargo"
           mkdir -p "$CARGO_HOME"
-          ci/build-and-hash.sh "$RUNNER_TEMP/short" > "$RUNNER_TEMP/a.txt"
-          cat "$RUNNER_TEMP/a.txt"
+          ci/build-and-hash.sh "$TMP/short" > "$TMP/a.txt"
+          cat "$TMP/a.txt"
 
       - name: Build B (different user)
         if: runner.os == 'Linux'
@@ -100,15 +102,18 @@ jobs:
         shell: bash
         run: |
           export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-          export HOME="$RUNNER_TEMP/home-b-with-a-longer-name"
+          TMP="$(cygpath -u "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")"
+          export HOME="$TMP/home-b-with-a-longer-name"
           export CARGO_HOME="$HOME/.cargo"
           mkdir -p "$CARGO_HOME"
-          ci/build-and-hash.sh "$RUNNER_TEMP/a/considerably/deeper/path" > "$RUNNER_TEMP/b.txt"
-          cat "$RUNNER_TEMP/b.txt"
+          ci/build-and-hash.sh "$TMP/a/considerably/deeper/path" > "$TMP/b.txt"
+          cat "$TMP/b.txt"
 
       - name: Gate check 2
         shell: bash
-        run: ci/compare-hashes.sh "$RUNNER_TEMP/a.txt" "$RUNNER_TEMP/b.txt"
+        run: |
+          TMP="$(cygpath -u "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")"
+          ci/compare-hashes.sh "$TMP/a.txt" "$TMP/b.txt"
 
   supply-chain:
     name: supply-chain (${{ matrix.os }})

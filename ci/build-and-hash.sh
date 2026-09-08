@@ -13,6 +13,21 @@
 
 DEST="${1:?usage: build-and-hash.sh <build-dir>}"
 
+# On Windows the caller is usually handing us a native path (D:\_temp\...),
+# because that is what the CI runner exports. Every tool in this script is a
+# POSIX one from Git Bash and cannot open it. Normalise once, here, so a caller
+# may pass either form.
+posix_path() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s' "$1"; fi
+}
+# rustc, by contrast, is a native binary and reports native paths. A remap
+# prefix in POSIX form would silently match nothing.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
+DEST="$(posix_path "$DEST")"
+
 rm -rf "$DEST"
 mkdir -p "$DEST"
 # git archive, not cp: only tracked files, so a stray local file cannot make
@@ -24,9 +39,9 @@ git archive --format=tar HEAD | tar -x -C "$DEST"
 # unstable, so remap explicitly here, where both paths are known. Both runs
 # remap onto the SAME synthetic prefixes, which is what makes the hashes
 # comparable across machines.
-REMAP="--remap-path-prefix=$DEST=/src"
-REMAP="$REMAP --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
-REMAP="$REMAP --remap-path-prefix=$HOME=/home"
+REMAP="--remap-path-prefix=$(native_path "$DEST")=/src"
+REMAP="$REMAP --remap-path-prefix=$(native_path "${CARGO_HOME:-$HOME/.cargo}")=/cargo"
+REMAP="$REMAP --remap-path-prefix=$(native_path "$HOME")=/home"
 
 # MSVC's linker stamps the PE header with the wall-clock time of the link, so
 # two builds of identical source differ by construction. /Brepro replaces that
