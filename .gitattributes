@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+# Recorded traffic archives and rendering baselines are binary and must never
+# be line-ending-normalised — the compat and snapshot gates compare bytes.
+tests/compat/**/*.har   binary
+tests/compat/**/*.warc  binary
+tests/**/*.png          binary
+data/**                 binary

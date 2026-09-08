@@ -1,0 +1,18 @@
+/target/
+**/*.rs.bk
+*.pdb
+
+# Fuzzing
+/tests/fuzz/artifacts/
+/tests/fuzz/corpus/
+/tests/fuzz/target/
+
+# Local build and test output
+/artifacts/
+*.profraw
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
