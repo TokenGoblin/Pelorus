@@ -3,6 +3,10 @@
 Forty sites, each with at least one scripted assertion. The list is the real
 progress meter for the whole project, so an entry with no assertion is worse
 than a missing entry: it counts towards forty and tests nothing.
+
+Also asserts what the file must NOT contain. The repository is public, and
+which forty sites the maintainer uses daily is personal information; the ids
+are opaque and the urls live outside this repository entirely.
 """
 
 import sys
@@ -26,10 +30,15 @@ failures = 0
 
 for i, site in enumerate(sites):
     where = site.get("id") or f"site[{i}]"
-    for field in ("id", "url"):
-        if not site.get(field):
-            print(f"FAIL {where}: missing {field}", file=sys.stderr)
-            failures += 1
+    if not site.get("id"):
+        print(f"FAIL {where}: missing id", file=sys.stderr)
+        failures += 1
+    # The repository is public (docs/adr/002-public-repository.md). A url here
+    # names the site, which is the disclosure the opaque ids exist to avoid.
+    if site.get("url"):
+        print(f"FAIL {where}: carries a url; urls live in the private mapping, "
+              f"not in a public repository", file=sys.stderr)
+        failures += 1
     if not site.get("assert"):
         print(f"FAIL {where}: no assertions — an entry that tests nothing "
               f"still counts towards forty", file=sys.stderr)
