@@ -61,13 +61,18 @@ done < <(git ls-files -z 'ci/*' 'tests/*')
 # a GitHub noreply address. A check that grepped for the maintainer's real name
 # would have to contain the maintainer's real name, which is the leak it is
 # trying to prevent.
+#
+# Two forms are accepted. <id>+<user>@users.noreply.github.com is a person's
+# GitHub-provided address, which is the point. noreply@github.com is what
+# GitHub itself sets as committer for a commit made through the web UI, and
+# carries no identity at all.
 bad_ident=0
 while IFS='|' read -r hash ae ce; do
-    case "$ae" in *@users.noreply.github.com) ;; *)
+    case "$ae" in *@users.noreply.github.com | noreply@github.com) ;; *)
         fail "commit $hash has author email outside the noreply domain"
         bad_ident=1 ;;
     esac
-    case "$ce" in *@users.noreply.github.com) ;; *)
+    case "$ce" in *@users.noreply.github.com | noreply@github.com) ;; *)
         fail "commit $hash has committer email outside the noreply domain"
         bad_ident=1 ;;
     esac
