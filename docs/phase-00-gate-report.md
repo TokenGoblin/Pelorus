@@ -26,9 +26,24 @@ Plus one job that is a Phase 0 deliverable but not one of §9's gate checks:
 **CI has never run.** There is no git remote, so `.github/workflows/gate.yml`
 has not executed once. Every result above is a local run of the same scripts the
 workflow invokes — which is why the gate is scripts rather than YAML — but a
-local run is not the gate. Specifically unverified until a remote exists:
+local run is not the gate.
 
-- the workflow file's own syntax
+A static audit of the never-executed parts found three defects that would each
+have failed the first run on their own, and they are worth recording because
+they were invisible to every passing check above:
+
+1. **Every script was committed mode 0644.** `core.filemode` is false on a
+   Windows checkout, so `chmod +x` never reached git. The workflow invokes the
+   scripts directly, so the whole gate would have died with "Permission denied"
+   before running one check. `ci/gate-structure.sh` now asserts that a shebang
+   means executable in the index, which catches the next script written here.
+2. **All three build steps moved `HOME` without setting `RUSTUP_HOME`**, which
+   resolves the cargo shim to a toolchain directory that does not exist.
+3. `gate.yml` had never been parsed. It does parse, all seven jobs are
+   well-formed, and every script path a `run:` step names exists.
+
+Specifically still unverified until a remote exists:
+
 - everything on Linux, including check 1
 - the second-user half of check 2
 - `cargo install --locked cargo-deny cargo-vet cargo-auditable` on a clean
