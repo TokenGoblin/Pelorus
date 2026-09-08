@@ -63,6 +63,12 @@ jobs:
       - name: Build A
         shell: bash
         run: |
+          # Resolve the toolchain location BEFORE moving HOME. rustup finds its
+          # toolchains under $HOME/.rustup unless RUSTUP_HOME says otherwise, so
+          # a moved HOME with no RUSTUP_HOME means the cargo shim resolves to
+          # nothing. The two builds must share one toolchain anyway: invariant 7
+          # is same source plus same toolchain, not same everything.
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
           export HOME="$RUNNER_TEMP/home-a"
           export CARGO_HOME="$HOME/.cargo"
           mkdir -p "$CARGO_HOME"
@@ -73,8 +79,10 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
           sudo useradd -m -s /bin/bash builder2
-          sudo chmod 0755 "$HOME"
+          # builder2 needs to read the shared toolchain out of the runner's home.
+          chmod 0755 "$HOME"
           sudo mkdir -p /home/builder2/work
           sudo cp -r "$GITHUB_WORKSPACE" /home/builder2/work/a-considerably-longer-path
           sudo chown -R builder2:builder2 /home/builder2
@@ -91,6 +99,7 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: |
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
           export HOME="$RUNNER_TEMP/home-b-with-a-longer-name"
           export CARGO_HOME="$HOME/.cargo"
           mkdir -p "$CARGO_HOME"
