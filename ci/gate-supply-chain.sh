@@ -32,23 +32,34 @@ if need cargo-vet "cargo install --locked cargo-vet"; then
 fi
 
 if need cargo-auditable "cargo install --locked cargo-auditable"; then
-    info "cargo auditable build --release"
-    cargo auditable build --workspace --locked --release || fail "auditable build failed"
+    # Into a separate target directory, always. Cargo will not re-link a
+    # binary that is already up to date, so if a plain `cargo build` ran first
+    # the auditable build is a no-op and the SBOM assertion below fails on a
+    # stale artifact for a reason that has nothing to do with the SBOM.
+    AUDITABLE_DIR="target/auditable"
+    info "cargo auditable build --release (into $AUDITABLE_DIR)"
+    CARGO_TARGET_DIR="$AUDITABLE_DIR"         cargo auditable build --workspace --locked --release         || fail "auditable build failed"
+
     # Assert the SBOM reached the artifact. A flag that was passed is not
-    # evidence; a section in the binary is.
+    # evidence; a section in the binary is. cargo-auditable writes zlib-
+    # compressed JSON into a section named .dep-v0, so the section name is
+    # what is readable, not the contents.
     shopt -s nullglob
     checked=0
-    for bin in target/release/px-browser target/release/px-browser.exe \
-               target/release/px-content target/release/px-content.exe; do
-        [ -f "$bin" ] || continue
-        checked=1
-        if grep -a -q 'auditable' "$bin"; then
+    for stem in px-browser px-content; do
+        bin=""
+        for candidate in "$AUDITABLE_DIR/release/$stem.exe" "$AUDITABLE_DIR/release/$stem"; do
+            if [ -f "$candidate" ]; then bin="$candidate"; break; fi
+        done
+        [ -n "$bin" ] || { fail "$stem was not built"; continue; }
+        checked=$((checked + 1))
+        if grep -a -q 'dep-v0' "$bin"; then
             ok "$(basename "$bin") carries an embedded SBOM"
         else
-            fail "$(basename "$bin") has no embedded SBOM section"
+            fail "$(basename "$bin") has no .dep-v0 SBOM section"
         fi
     done
-    [ "$checked" -eq 1 ] || fail "no release binaries found to check for an SBOM"
+    [ "$checked" -gt 0 ] || fail "no release binaries found to check for an SBOM"
 fi
 
 BASELINE="ci/unsafe-baseline.json"

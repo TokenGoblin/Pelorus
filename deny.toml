@@ -32,6 +32,12 @@ allow = [
     "Zlib",
 ]
 exceptions = []
+# Our own crates carry no `license` field, deliberately: the licence is open
+# decision 9 in build-spec §13 and settling it by typing a default here would
+# be settling it by accident. They are all `publish = false`, so cargo-deny
+# treats them as private and does not ask. Delete this the day decision 9 is
+# made and the field is filled in.
+private = { ignore = true }
 
 [bans]
 # Duplicate versions of a crate mean duplicate unsafe, duplicate audit surface

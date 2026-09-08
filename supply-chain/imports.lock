@@ -1,0 +1,6 @@
+
+# cargo-vet imports lock
+
+[audits.google.audits]
+
+[audits.mozilla.audits]
