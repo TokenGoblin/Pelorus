@@ -5,6 +5,7 @@
 #   - every crate carries a CLAUDE.md (build-spec §5, Phase 0 deliverable)
 #   - px-brand does not hold the update URL or signing key (§14.1)
 #   - scripts CI executes are executable in the index
+#   - no personal identity in git metadata
 #
 # OS-independent. CI runs it on Linux only.
 
@@ -51,5 +52,34 @@ while IFS= read -r -d '' path; do
         fail "  fix with: git update-index --chmod=+x $path"
     fi
 done < <(git ls-files -z 'ci/*' 'tests/*')
+
+# This repository is public. Git metadata is the easiest place for a real name
+# or a personal address to end up, because git takes them from whatever the
+# machine happens to be configured with and nothing ever looks again.
+#
+# The rule is expressed as a shape, not as a name: commit identities must use
+# a GitHub noreply address. A check that grepped for the maintainer's real name
+# would have to contain the maintainer's real name, which is the leak it is
+# trying to prevent.
+bad_ident=0
+while IFS='|' read -r hash ae ce; do
+    case "$ae" in *@users.noreply.github.com) ;; *)
+        fail "commit $hash has author email outside the noreply domain"
+        bad_ident=1 ;;
+    esac
+    case "$ce" in *@users.noreply.github.com) ;; *)
+        fail "commit $hash has committer email outside the noreply domain"
+        bad_ident=1 ;;
+    esac
+done < <(git log --format='%h|%ae|%ce')
+[ "$bad_ident" -eq 0 ] && ok "every commit identity uses a noreply address"
+
+# Session links are account-scoped, useless to anyone reading the public repo,
+# and tie the history to a particular person's activity.
+if git log --format='%B' | grep -q 'claude\.ai/code/session'; then
+    fail "a commit message contains a Claude session URL"
+else
+    ok "no session URLs in commit messages"
+fi
 
 verdict "structure"
