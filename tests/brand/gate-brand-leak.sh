@@ -51,4 +51,12 @@ while IFS= read -r -d '' path; do
 done < <(git ls-files -z)
 
 info "scanned $scanned tracked files"
+
+# The scan is over `git ls-files`, so an untracked file is invisible to it. In
+# CI everything is tracked and this never fires. Locally it is the difference
+# between a clean gate and a gate that has not looked at your work yet.
+untracked="$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')"
+if [ "$untracked" != "0" ]; then
+    info "note: $untracked untracked file(s) were NOT scanned; stage them first"
+fi
 verdict "brand-leak"

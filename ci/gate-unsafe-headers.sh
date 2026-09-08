@@ -47,15 +47,29 @@ for dir in "${crates[@]}"; do
     [ "$found" -eq 1 ] || fail "$dir has no src/lib.rs or src/main.rs"
 done
 
-# Belt and braces: no crate other than px-sandbox may contain the token at all.
-# forbid(unsafe_code) already makes this a compile error, but the source check
-# catches an attribute removed in the same commit that adds the unsafe block.
+# The header check above is what makes unsafe a compile error. What it cannot
+# see is somebody switching the attribute off locally, so scan for the bypass
+# itself rather than for the word `unsafe`, which appears legitimately in prose.
 while IFS= read -r -d '' path; do
     case "$path" in crates/$SANDBOX/*) continue ;; esac
-    if grep -nE '(^|[^[:alnum:]_])unsafe[^[:alnum:]_]' "$path" >/dev/null 2>&1; then
-        fail "the unsafe keyword appears in $path (only $SANDBOX may use it)"
-        grep -nE '(^|[^[:alnum:]_])unsafe[^[:alnum:]_]' "$path" | head -n 5 | sed 's/^/       /' >&2
+    if grep -nE '(allow|expect)\(unsafe_code\)' "$path" >/dev/null 2>&1; then
+        fail "$path switches off unsafe_code locally; only $SANDBOX may use unsafe"
+        grep -nE '(allow|expect)\(unsafe_code\)' "$path" | head -n 5 | sed 's/^/       /' >&2
     fi
 done < <(git ls-files -z 'crates/*.rs')
+
+# CLAUDE.md, hard rules: "Clippy denies these; do not add allow attributes to
+# get around it." A denied lint that can be waived at the call site is a style
+# preference, not a rule, so the waiver is what the gate looks for.
+WAIVER='(allow|expect)\(clippy::(unwrap_used|expect_used|indexing_slicing|panic)\)'
+for crate in px-content px-net px-mcp; do
+    [ -d "crates/$crate" ] || continue
+    while IFS= read -r -d '' path; do
+        if grep -nE "$WAIVER" "$path" >/dev/null 2>&1; then
+            fail "$path waives a panic lint that CLAUDE.md denies in $crate"
+            grep -nE "$WAIVER" "$path" | head -n 5 | sed 's/^/       /' >&2
+        fi
+    done < <(git ls-files -z "crates/$crate/*.rs")
+done
 
 verdict "unsafe-headers"

@@ -1,0 +1,62 @@
+[workspace]
+resolver = "3"
+# Listed, not globbed. A crate that appears on disk without appearing here is
+# a crate nobody decided to add.
+members = [
+    "crates/px-a11y",
+    "crates/px-bindings",
+    "crates/px-block",
+    "crates/px-brand",
+    "crates/px-broker",
+    "crates/px-content",
+    "crates/px-css",
+    "crates/px-dom",
+    "crates/px-gpu",
+    "crates/px-ipc",
+    "crates/px-layout",
+    "crates/px-mcp",
+    "crates/px-net",
+    "crates/px-paint",
+    "crates/px-sandbox",
+    "crates/px-script",
+    "crates/px-store",
+    "crates/px-text",
+    "crates/px-ui",
+    "crates/px-update",
+    "crates/px-websec",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+# No `license` field: the licence is open decision 9 in build-spec §13, due
+# with the Phase 20 release decision. An unconsidered "MIT OR Apache-2.0"
+# here would settle it by accident.
+
+# build-spec §4.3. Applied by px-content, px-net and px-mcp only, via
+# `[lints] workspace = true` in those three manifests. The broker unwinds and
+# is allowed to; the crates that parse hostile input are not.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+
+# build-spec §4.2.
+[profile.release]
+overflow-checks = true   # geometry and length arithmetic must trap, not wrap
+lto = "fat"
+codegen-units = 1
+# Path remapping for invariant 7 is NOT here: Cargo's `trim-paths` profile
+# option is still unstable as of 1.98, and this project does not build on
+# nightly. ci/build-and-hash.sh sets --remap-path-prefix instead, which is
+# stable and which knows the actual source and CARGO_HOME paths it must map.
+# Move it here the release Cargo stabilises the option.
+# Not stripped: cargo-auditable's SBOM lives in a section that stripping can
+# remove, and the supply-chain gate asserts that section is present.
+strip = false
+# panic stays "unwind" here. build-spec §14.2 needs a second profile with
+# panic = "abort" for content processes; Cargo sets panic per profile, not per
+# crate, so that arrives in Phase 1 with the ADR that costs it out.

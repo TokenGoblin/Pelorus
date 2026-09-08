@@ -15,6 +15,11 @@
 
 . "$(dirname "$0")/lib.sh"
 
+if [ -z "$PY_BIN" ]; then
+    echo "FAIL no python >= 3.11 on PATH" >&2
+    exit 1
+fi
+
 VENDOR="$(mktemp -d)"
 trap 'rm -rf "$VENDOR"' EXIT
 
@@ -24,10 +29,17 @@ cargo vendor --locked --versioned-dirs "$VENDOR/crates" >/dev/null 2>&1 || {
 }
 
 "$PY_BIN" - "$VENDOR/crates" <<'PY'
-import json, os, re, sys
+import json
+import os
+import re
+import sys
+
+# LF on every platform: this output is compared byte-for-byte against a
+# committed baseline, and a CRLF would make every Windows run a false failure.
+sys.stdout.reconfigure(newline="\n")
 
 root = sys.argv[1]
-token = re.compile(rb'(?:^|[^\w])unsafe(?:[^\w]|$)')
+token = re.compile(rb"(?:^|[^\w])unsafe(?:[^\w]|$)")
 counts = {}
 
 if os.path.isdir(root):
@@ -38,13 +50,13 @@ if os.path.isdir(root):
         n = 0
         for dirpath, _, files in os.walk(crate_dir):
             for f in files:
-                if not f.endswith('.rs'):
+                if not f.endswith(".rs"):
                     continue
-                with open(os.path.join(dirpath, f), 'rb') as fh:
+                with open(os.path.join(dirpath, f), "rb") as fh:
                     n += len(token.findall(fh.read()))
         if n:
             counts[crate] = n
 
 json.dump(counts, sys.stdout, indent=2, sort_keys=True)
-sys.stdout.write('\n')
+sys.stdout.write("\n")
 PY

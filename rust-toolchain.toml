@@ -1,0 +1,7 @@
+# Pinned, not "stable" (build-spec §5). Reproducible builds mean same source
+# plus same toolchain, so the toolchain is part of the source. Raising this is
+# a deliberate commit with a rebuilt unsafe baseline, not a drift.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

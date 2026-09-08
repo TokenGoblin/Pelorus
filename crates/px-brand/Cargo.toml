@@ -1,0 +1,10 @@
+[package]
+name = "px-brand"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Phase 0 adds no dependency to any crate. build-spec §3 names what may
+# eventually go here; anything else needs an ADR before it is added.

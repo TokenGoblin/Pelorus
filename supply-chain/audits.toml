@@ -1,0 +1,5 @@
+# Audits performed by this project. Empty: Phase 0 has no dependencies to
+# audit. Entries here are ours; imported sets live in imports.lock, which
+# cargo-vet generates and which is committed once the tool has run.
+
+[audits]

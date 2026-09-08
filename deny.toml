@@ -1,0 +1,51 @@
+# cargo-deny policy (build-spec §5).
+#
+# UNVALIDATED as of the Phase 0 commit: cargo-deny is not installed on the
+# authoring machine, so this file has never been parsed by the tool it is
+# written for. The first CI run is what validates it. Treat a schema error
+# here as expected work, not as a surprise.
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+# The closure build-spec §3 permits: html5ever, stylo, rustls, swash,
+# cosmic-text, wgpu, image, boa_engine, postcard, url, idna, and what they
+# pull. MPL-2.0 is here because stylo is Gecko-derived. Anything not on this
+# list stops the build and needs an ADR, which is the point.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+exceptions = []
+
+[bans]
+# Duplicate versions of a crate mean duplicate unsafe, duplicate audit surface
+# and duplicate patching at a CVE. Denied, with skips added deliberately and
+# with a reason rather than tolerated silently.
+multiple-versions = "deny"
+wildcards = "deny"
+deny = []
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# A git dependency is a dependency on a moving target with no audit story.
+# Empty, and an addition needs an ADR.
+allow-git = []

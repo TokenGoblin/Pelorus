@@ -19,9 +19,18 @@ mkdir -p "$DEST"
 # two builds differ for a reason that has nothing to do with the source.
 git archive --format=tar HEAD | tar -x -C "$DEST"
 
+# Invariant 7: the binary must not contain the path it was built at or the
+# name of the user who built it. Cargo's `trim-paths` profile option is still
+# unstable, so remap explicitly here, where both paths are known. Both runs
+# remap onto the SAME synthetic prefixes, which is what makes the hashes
+# comparable across machines.
+REMAP="--remap-path-prefix=$DEST=/src"
+REMAP="$REMAP --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
+REMAP="$REMAP --remap-path-prefix=$HOME=/home"
+
 (
     cd "$DEST"
-    cargo build --workspace --locked --release >&2
+    RUSTFLAGS="$REMAP" cargo build --workspace --locked --release >&2
 )
 
 shopt -s nullglob

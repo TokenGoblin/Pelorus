@@ -1,0 +1,26 @@
+# cargo-vet configuration (build-spec §5).
+#
+# Mozilla's and Google's audit sets are imported rather than audited from
+# scratch, deliberately: auditing a browser dependency tree unaided is a
+# project of its own, and a gate that costs a month per dependency is a gate
+# that gets waived by month two.
+#
+# UNVALIDATED as of the Phase 0 commit: cargo-vet is not installed on the
+# authoring machine and the import URLs have not been fetched. Run
+# `cargo vet init` / `cargo vet regenerate imports` on the first machine that
+# has the tool, and correct anything here that the tool disagrees with.
+#
+# Phase 0 has zero third-party dependencies, so this is trivially satisfied
+# today. It is wired now so that Phase 3 — the first real dependency — lands
+# against a policy that already exists.
+
+[cargo-vet]
+version = "0.10"
+
+[imports.mozilla]
+url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
+
+[imports.google]
+url = "https://raw.githubusercontent.com/google/supply-chain/main/audits.toml"
+
+[policy]
