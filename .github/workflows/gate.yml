@@ -1,0 +1,146 @@
+# Phase gate. Every check here is a script under ci/ or tests/ that runs
+# identically on a developer machine — CI invokes the gate, it does not define
+# it. A gate you cannot reproduce locally is one you will learn to ignore.
+#
+# Phase 0 gate (build-spec §9):
+#   1. builds on both OSes                     -> build
+#   2. hashes reproducible across machines     -> reproducible
+#   3. supply-chain checks green               -> supply-chain
+#   4. forbid(unsafe_code) everywhere          -> unsafe-headers
+#   5. brand-leak gate proven by a violation   -> brand-leak
+#
+# Jobs that read source text rather than build it run on Linux only; running a
+# grep twice on two operating systems buys nothing and hides which checks are
+# genuinely platform-sensitive.
+
+name: gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        shell: bash
+        run: rustc --version && cargo --version
+      - name: Gate check 1
+        shell: bash
+        run: ci/gate-build.sh
+
+  reproducible:
+    name: reproducible (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build A and build B differ in checkout path, HOME and CARGO_HOME. On
+      # Linux they additionally run as different users, which is the condition
+      # the gate names. On Windows a second interactive account is not
+      # practical on a hosted runner; that gap is recorded in the gate report
+      # rather than papered over, and the two runs still differ in path, HOME
+      # and CARGO_HOME.
+      - name: Build A
+        shell: bash
+        run: |
+          export HOME="$RUNNER_TEMP/home-a"
+          export CARGO_HOME="$HOME/.cargo"
+          mkdir -p "$CARGO_HOME"
+          ci/build-and-hash.sh "$RUNNER_TEMP/short" > "$RUNNER_TEMP/a.txt"
+          cat "$RUNNER_TEMP/a.txt"
+
+      - name: Build B (different user)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo useradd -m -s /bin/bash builder2
+          sudo chmod 0755 "$HOME"
+          sudo mkdir -p /home/builder2/work
+          sudo cp -r "$GITHUB_WORKSPACE" /home/builder2/work/a-considerably-longer-path
+          sudo chown -R builder2:builder2 /home/builder2
+          sudo -u builder2 env \
+            HOME=/home/builder2 \
+            CARGO_HOME=/home/builder2/.cargo \
+            RUSTUP_HOME="$RUSTUP_HOME" \
+            PATH="$PATH" \
+            bash -c 'cd /home/builder2/work/a-considerably-longer-path && ci/build-and-hash.sh /home/builder2/work/build-b' \
+            > "$RUNNER_TEMP/b.txt"
+          cat "$RUNNER_TEMP/b.txt"
+
+      - name: Build B (different path)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          export HOME="$RUNNER_TEMP/home-b-with-a-longer-name"
+          export CARGO_HOME="$HOME/.cargo"
+          mkdir -p "$CARGO_HOME"
+          ci/build-and-hash.sh "$RUNNER_TEMP/a/considerably/deeper/path" > "$RUNNER_TEMP/b.txt"
+          cat "$RUNNER_TEMP/b.txt"
+
+      - name: Gate check 2
+        shell: bash
+        run: ci/compare-hashes.sh "$RUNNER_TEMP/a.txt" "$RUNNER_TEMP/b.txt"
+
+  supply-chain:
+    name: supply-chain (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      # Installed from source with --locked rather than through a third-party
+      # installer action. These tools sit in the trust path of a security
+      # project; adding a marketplace action to save four minutes would be the
+      # exact trade the working agreement exists to refuse.
+      - name: Install audit tools
+        shell: bash
+        run: cargo install --locked cargo-deny cargo-vet cargo-auditable
+      - name: Gate check 3
+        shell: bash
+        run: ci/gate-supply-chain.sh
+
+  unsafe-headers:
+    name: unsafe-headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gate check 4
+        run: ci/gate-unsafe-headers.sh
+
+  brand-leak:
+    name: brand-leak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gate check 5
+        run: tests/brand/gate-brand-leak.sh
+
+  structure:
+    name: structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repository structure invariants
+        run: ci/gate-structure.sh

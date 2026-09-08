@@ -1,0 +1,25 @@
+# Paths permitted to contain the product name (build-spec §2.2).
+#
+# A line ending in "/" is a directory prefix. Any other line is a glob matched
+# against the repository-relative path. Everything not listed here is scanned.
+#
+# §2.2 names five: px-brand, docs/, packaging/, README, and the workspace
+# Cargo.toml. Two more are added here, with reasons, because §2.2 was written
+# before the repository had these files:
+#
+#   CLAUDE.md            The working agreement names the product in its
+#   crates/*/CLAUDE.md   heading and prose. Excluding it would mean the gate
+#                        failed on legitimate content from its first run, which
+#                        would make the deliberate-violation proof meaningless.
+#                        Rename cost: one line per file, found by this list.
+#
+# Everything under crates/ that is NOT a CLAUDE.md or px-brand is scanned,
+# which is the boundary §2.1 actually protects: no brand in compiled code.
+
+crates/px-brand/
+docs/
+packaging/
+README.md
+Cargo.toml
+CLAUDE.md
+crates/*/CLAUDE.md
