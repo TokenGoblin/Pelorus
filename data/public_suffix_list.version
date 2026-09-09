@@ -1,0 +1,19 @@
+# Public Suffix List version.
+#
+# The PSL carries no version number of its own, so this file is the version:
+# the SHA-256 of the list as fetched, and the date it was fetched. Both are
+# asserted by ci/gate-network.sh.
+#
+# Why this file exists at all. Partitioning is keyed by eTLD+1 (invariant 2),
+# so a stale list does not degrade privacy gently — it draws the security
+# boundary in the wrong place, and nothing observable breaks. A new suffix
+# added upstream and missing here means two sites this browser believes are
+# one. There is no symptom to notice, which is why staleness has to be
+# measurable rather than felt.
+#
+# Refresh with ci/update-psl.sh, which rewrites both files together. Editing
+# either by hand defeats the assertion.
+
+sha256 = "4b673689999dbaca60b93fa3e1da5752505ef9717b1c4dc44acbfdafd35679ea"
+fetched = "2026-09-09"
+source = "https://publicsuffix.org/list/public_suffix_list.dat"
