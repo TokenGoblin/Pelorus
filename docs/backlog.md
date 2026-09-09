@@ -313,3 +313,24 @@ Format: one entry per defect.
   program is caught; what they cannot check is whether 117 is really `ptrace`
   on this ABI. Recorded so the table is treated as unverified rather than as
   tested-by-association with the x86_64 one.
+
+## The unsafe baseline does not count C or assembly
+
+- **Found in:** phase 3, `ci/unsafe-audit.sh`
+- **Belongs to:** unassigned, but it matters from now on
+- **What:** the audit counts `unsafe` tokens in Rust sources. ADR 016 brought
+  in `ring`, which is 120,164 lines of assembly and 5,413 lines of C. The
+  audit reports it as 230 tokens. That is not a rounding error, it is the
+  metric failing to see the majority of what was accepted — and it will be
+  wrong in the same direction for every future dependency with a native core,
+  which for a browser means the GPU stack, the font shaper and the image
+  decoders.
+- **Why deferred:** the fix is a decision rather than a line of code. Counting
+  C and assembly lines alongside Rust `unsafe` tokens puts two
+  non-comparable numbers in one file, and a combined total would be
+  meaningless. The honest options are a second baseline for native code, or a
+  per-crate note recording what the count omits. Both change the shape of
+  `ci/unsafe-baseline.json` and what the supply-chain gate compares, so it
+  wants doing deliberately rather than in the middle of a phase that needed a
+  TLS stack. Recorded now because the number is already misleading, and the
+  ADR that made it so says as much.

@@ -19,7 +19,9 @@
 //! resolves an ambiguity differently from an upstream cache is one half of a
 //! response-splitting bug.
 
+pub mod fetch;
 pub mod http1;
 pub mod partition;
 pub mod pool;
 pub mod psl;
+pub mod tls;

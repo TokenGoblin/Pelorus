@@ -1,12 +1,25 @@
 {
+  "cc-1.4.5": 19,
   "embedded-io-0.4.0": 2,
+  "find-msvc-tools-0.1.12": 55,
+  "getrandom-0.2.17": 59,
   "libc-0.2.189": 676,
+  "log-0.4.34": 8,
+  "once_cell-1.21.4": 53,
   "postcard-1.1.3": 12,
   "proc-macro2-1.0.107": 6,
+  "ring-0.17.14": 230,
+  "rustls-0.23.44": 5,
+  "rustls-pki-types-1.15.1": 1,
   "serde-1.0.229": 2,
   "serde_core-1.0.229": 2,
+  "shlex-2.0.1": 7,
+  "subtle-2.6.1": 2,
   "syn-3.0.5": 108,
   "thiserror-impl-2.0.20": 1,
   "unicode-ident-1.0.24": 2,
-  "windows-sys-0.61.2": 12530
+  "wasi-0.11.1+wasi-snapshot-preview1": 62,
+  "windows-sys-0.52.0": 3411,
+  "windows-sys-0.61.2": 12530,
+  "zeroize-1.9.0": 41
 }
