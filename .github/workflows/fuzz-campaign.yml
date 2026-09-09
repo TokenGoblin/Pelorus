@@ -1,8 +1,22 @@
 # The 24-hour fuzzing campaign Phase 1's gate requires (ADR 006).
 #
-# Scheduled and on demand, never on push. A gate that takes a day to report is
-# a gate that gets bypassed within a fortnight, so the push path runs a 60s
-# smoke instead and this runs the real thing.
+# Scheduled and on demand, never on push. A gate that takes a day to report is a
+# gate that gets bypassed within a fortnight, so the push path runs a 60-second
+# smoke and this runs the real thing.
+#
+# WHY THIS IS A MATRIX AND NOT ONE LONG JOB: a GitHub-hosted job is killed at
+# six hours. "Fuzz clean for 24h" therefore cannot be a single run, and writing
+# it as one would have produced a job that is cancelled every week and a gate
+# nobody could ever satisfy. Sharding gives the campaign its 24 hours as
+# targets x shards x hours-per-shard, in parallel, each job well inside the
+# limit.
+#
+#   2 targets x 3 shards x 4 hours = 24 hours of fuzzing, ~4 hours of wall clock
+#
+# Shards are not redundant: libFuzzer seeds from the clock and its own corpus,
+# so three shards of one target explore different paths rather than repeating
+# the same one. They share the committed corpus as a starting point and their
+# findings are unioned by whoever commits the reproducer.
 #
 # A crash here is a defect: file it, fix it, and commit the reproducing input to
 # fuzz/corpus so the smoke job catches its regression in sixty seconds.
@@ -14,31 +28,39 @@ on:
     - cron: "0 3 * * 0"
   workflow_dispatch:
     inputs:
-      seconds_per_target:
-        description: Seconds per target
+      seconds_per_shard:
+        description: Seconds per shard (4h default; 6h job limit is the ceiling)
         required: false
-        default: "86400"
+        default: "14400"
 
 permissions:
   contents: read
 
 jobs:
   campaign:
-    name: campaign
+    name: ${{ matrix.target }} shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    timeout-minutes: 1500
+    # Comfortably inside the six-hour hosted-runner limit, with room for the
+    # toolchain and cargo-fuzz install at the start.
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [frame_request, frame_response]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-fuzz
         run: cargo install --locked cargo-fuzz
       - name: Campaign
         env:
-          FUZZ_SECONDS: ${{ github.event.inputs.seconds_per_target || '86400' }}
+          FUZZ_TARGET: ${{ matrix.target }}
+          FUZZ_SECONDS: ${{ github.event.inputs.seconds_per_shard || '14400' }}
         run: ci/gate-fuzz-smoke.sh
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: fuzz-artifacts
+          name: fuzz-artifacts-${{ matrix.target }}-${{ matrix.shard }}
           path: fuzz/artifacts/
           if-no-files-found: ignore
