@@ -50,3 +50,45 @@ gate is three things:
 
 The second is the interesting one to build first, because it is the one that
 fails closed and the one a user will actually hit.
+
+## 04:20 UTC — ADRs drafted; campaign 1h45m in
+
+Campaign still running (started 02:35, six shards of four hours, so ~06:35).
+Nothing to do on Phase 1 until it lands, so I drafted the two Phase 2 ADRs into
+the scratchpad rather than committing Phase 2 content onto the Phase 1 branch.
+They go in as the first commit on `phase/02-sandbox`.
+
+**ADR 007 departs from §14.5, and the user should look at this specifically.**
+§14.5 frames the Linux question as binary — SUID helper, or refuse to run when
+the sandbox is unavailable. On Linux the sandbox is not one mechanism but four
+(`no_new_privs`, seccomp-bpf, Landlock, user namespaces), and **only the last
+is commonly restricted**. Treating its absence as "no sandbox" discards three
+mechanisms that are still available and still real, and it refuses in exactly
+the scenario §14.5 worries about — which is what drives a user to
+`--no-sandbox`.
+
+So ADR 007 takes §14.5's recommendation (refuse to run, never silently degrade)
+and adds a **floor**: the ladder is applied rung by rung, and refusal happens
+below a defined minimum rather than on the loss of any single rung. Floor on
+Linux is `no_new_privs` + seccomp-bpf; on Windows a restricted token + job
+object.
+
+A second thing §14.5 could not have known: **there is no single sysctl to
+name.** The restriction is `kernel.unprivileged_userns_clone` on Debian
+derivatives, `kernel.apparmor_restrict_unprivileged_userns` on recent Ubuntu,
+and `user.max_user_namespaces` on RHEL-family kernels. §14.5's recommendation
+is to name it precisely, and naming the wrong one sends a user to edit a
+setting that does not exist on their machine. The message has to be derived
+from the condition actually detected.
+
+The honest cost is in the ADR: on a kernel with user namespaces restricted,
+this browser runs with a weaker sandbox than Chromium would, because we will
+not ship a setuid binary. That is the trade.
+
+ADR 008 answers what ADR 005 deferred — `px-sandbox` owns every unsafe OS
+operation, not only sandboxing ones — and records the argument for the `px-os`
+split that was rejected, because the naming argument for it is good and will
+come back at Phase 17.
+
+Next: waiting on the campaign. A monitor is armed on it, so the merge starts
+the moment it reports.
