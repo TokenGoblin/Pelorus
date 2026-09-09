@@ -2,11 +2,6 @@
 **/*.rs.bk
 *.pdb
 
-# Fuzzing
-/tests/fuzz/artifacts/
-/tests/fuzz/corpus/
-/tests/fuzz/target/
-
 # Local build and test output
 /artifacts/
 *.profraw
@@ -24,3 +19,10 @@ target/auditable/
 # docs/adr/002-public-repository.md.
 /tests/compat/archives/
 /tests/compat/mapping*.toml
+
+# Fuzzing: reproducers are transient, the corpus is not. ADR 006 requires a
+# crash's input to be committed to corpus/ so the 60s smoke job catches its
+# regression instead of waiting for the next 24h campaign.
+/fuzz/artifacts/
+/fuzz/target/
+/fuzz/Cargo.lock

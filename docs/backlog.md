@@ -86,3 +86,182 @@ Format: one entry per defect.
   unused allowance.
 - **Why deferred:** correcting it against reality requires having the
   dependencies. Prune it when phase 3 lands the first ones.
+
+## IPC has no request/response correlation id
+
+- **Found in:** phase 1, `crates/px-ipc/src/message.rs`
+- **Belongs to:** phase 2, with the socket transport
+- **What:** `Request` and `Response` carry no id, so if a reply is ever lost or
+  reordered, response N answers request N-k and **neither side can detect it**.
+  `serve_once` closes the channel on any reply failure, which makes the state
+  unreachable today rather than merely unlikely — but the protocol has no way
+  to notice if a future caller is less strict.
+- **Why deferred:** it is a wire-format change, and the transport is being
+  replaced in phase 2 anyway (ADR 005). Doing both at once is one migration
+  instead of two.
+
+## Spec amendments owed after audit 001
+
+- **Found in:** phase 1, `docs/spec-audit-001.md`
+- **Belongs to:** whoever next edits the spec; several block later phases
+- **What:** thirteen findings. The spec is factually wrong in §14.5 (the Linux
+  sandbox is four mechanisms, not one, and "the sysctl" has three spellings),
+  §2.1 (Cargo cannot template a `[[bin]]` name), §2.2 (allowlist), §8 (tells a
+  maintainer to commit archives ADR 002 forbids), and §3/§9 Phase 1 (handle
+  passing, never delivered and moving to px-sandbox). §11 has no supply-chain
+  row and no row for the gate checks being the least-reviewed code. §13 is
+  missing four decisions that are now open.
+- **Why deferred:** amending the spec mid-phase, unattended, is how a
+  specification stops being a shared reference. These are recorded and should
+  be applied deliberately, together, by someone who can weigh them.
+
+## Nobody owns the broker's audit log or the consent prompts
+
+- **Found in:** phase 1, audit 001 finding 7
+- **Belongs to:** unassigned — needs a phase
+- **What:** §3 and §7.3 both assign the audit log to the broker. What exists is
+  a 256-entry in-memory ring buffer that a hostile channel can flush with 256
+  denials, which is exactly what an attacker generates. Not append-only, not
+  durable, not user-readable. Phase 21's gate ("every tool call denied *and*
+  logged") inherits it. §3 also assigns consent prompts to the broker and no
+  phase builds them.
+- **Why deferred:** it is a phase-assignment question, not a defect to fix in
+  place. The ring buffer is an honest Phase 1 skeleton; what is missing is
+  anyone owning its replacement.
+
+## Where the compat replay runs
+
+- **Found in:** phase 1, audit 001 finding 6
+- **Belongs to:** before phase 23, which has no venue without it
+- **What:** ADR 002 keeps the traffic archives out of this public repository.
+  §8's replay therefore cannot run here at all, and Phase 23's gate ("compat
+  suite green on all forty sites") has nowhere to execute.
+- **Why deferred:** it depends on the site list, which is the user's to write.
+
+## No test asserts the content process's environment is empty
+
+- **Found in:** phase 1, audit 001 finding 10
+- **Belongs to:** phase 2
+- **What:** `env_clear()` appears exactly once — at the call site. Nothing
+  asserts the child sees an empty environment, and it is currently the *only*
+  enforcement of invariant 1's "no ambient authority" before the sandbox
+  exists.
+- **Why deferred:** phase 2 is building the spawn path and will own this.
+
+## px-css cannot be forbid(unsafe_code) — a hard rule will have to bend
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** an ADR before phase 5, and an amendment to `/CLAUDE.md`
+- **What:** stylo's `TElement` trait declares six `unsafe fn` methods, so any
+  crate implementing it must write `unsafe fn` — which `#![forbid(unsafe_code)]`
+  rejects outright. Verified by compiling a probe against the pinned toolchain:
+  `error: implementation of an 'unsafe' method`. `/CLAUDE.md`'s first hard rule
+  and Phase 0's gate check 4 both say every crate but `px-sandbox` carries
+  `forbid(unsafe_code)`.
+- **Why deferred:** it is a rule change, and the useful version is *narrower*
+  than a waiver. The research note proposes: `unsafe fn` declarations permitted
+  in `px-css`, but zero `unsafe` blocks and zero `unsafe impl` — greppable, and
+  enforceable by `ci/gate-unsafe-headers.sh` as a distinct rule rather than an
+  exemption. Decide it before Phase 5, not during.
+
+## stylo's build script breaks the reproducible-build gate
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** an ADR before phase 5
+- **What:** stylo's `build.rs` shells out to Python 3 and Mako. Invariant 7 says
+  same source plus same toolchain gives the same binary hash; a build that
+  depends on an external interpreter and a template library does not, and Phase
+  0's reproducibility gate has held since the workspace was empty.
+- **Why deferred:** the options — pin and vendor the generator, commit its
+  output, or accept a documented exception to invariant 7 — are a decision, and
+  invariant 7 is load-bearing enough that it should not be amended by whoever
+  happens to hit this first.
+
+## Phase 4's gate omits the mutation-side snapshot path stylo needs
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** phase 4
+- **What:** stylo's invalidation needs prior-state snapshots recorded on the
+  mutation path (`ServoElementSnapshot`-shaped, keyed by an opaque node id).
+  That is a `px-dom` feature, it is absent from Phase 4's gate, and retrofitting
+  it means touching every attribute setter twice.
+- **Why deferred:** phase 4 owns it; recorded now so the gate can be written
+  with it rather than amended after.
+
+## Style fixtures must run with debug assertions on
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** phase 5
+- **What:** stylo's `ElementDataWrapper` is an `UnsafeCell` whose aliasing check
+  is `#[cfg(debug_assertions)]` only. In a release build, aliasing is silent
+  undefined behaviour rather than a panic — and `parallel.rs`'s module doc
+  claiming "we'll generally panic if something goes wrong" is stale relative to
+  `data.rs` at the same commit.
+- **Why deferred:** phase 5 owns the fixtures; the constraint needs to be in
+  their CI job when it is written.
+
+## Miri is not run on px-ipc
+
+- **Found in:** phase 1, `.github/workflows/gate.yml`
+- **Belongs to:** phase 2
+- **What:** build-spec §4.5 names Miri on `px-dom`, `px-ipc` and `px-store`
+  unit tests. `px-ipc` now exists and has 15 of them; there is no Miri job.
+- **Why deferred:** Miri needs a nightly toolchain, and ADR 006 fences nightly
+  to `fuzz/` with a CI assertion that nothing else resolves to it. Adding a
+  second nightly consumer means amending that ADR, which is a decision rather
+  than a chore. `px-ipc` has no `unsafe` and no FFI, so what Miri would add
+  today is UB detection in `std` calls — real but not urgent.
+
+## check_not_serializable cannot see an aliased derive macro
+
+- **Found in:** phase 1, `ci/check_not_serializable.py`
+- **Belongs to:** unassigned
+- **What:** `use serde::Serialize as Ser; #[derive(Ser)]` passes the textual
+  check.
+- **Why deferred:** the structural check beside it — `px-broker` has no `serde`
+  dependency, so it cannot name the trait under any alias — is what actually
+  holds the property. Defeating the textual check requires a deliberate hand
+  *and* adding the dependency the other check rejects. Recorded so nobody
+  mistakes the textual check for the guarantee.
+
+## Orphaned pipes leak a worker thread per restart
+
+- **Found in:** phase 1, `crates/px-broker/src/lib.rs`
+- **Belongs to:** phase 17
+- **What:** if a content process orphans its stdout to a grandchild and exits,
+  killing the child does not close the pipe, so the reader thread stays blocked
+  forever. Measured at exactly one leaked thread per restart. `MAX_RESTARTS`
+  now bounds it at 8 per process.
+- **Why deferred:** the real fix is process-tree teardown — Windows job objects
+  and Linux cgroups — which is phase 17's work. The cap turns an unbounded leak
+  an attacker drives into a bounded one.
+
+## Destroying a frame leaves its handle in every capability set
+
+- **Found in:** phase 1, `crates/px-broker/src/lib.rs`
+- **Belongs to:** the phase that adds `Request::DestroyFrame`
+- **What:** `FrameTree::destroy` frees the slot but touches neither the
+  owner's `ChannelCaps::hosts` nor any viewer's `ChannelCaps::visible`. Today
+  that is unreachable — `destroy` has no caller outside tests and `dispatch`
+  handles only `Ping`, `Echo` and `FrameHost` — but `destroy`'s own doc
+  comment anticipates `Request::DestroyFrame` arriving, and the obvious
+  wrapper for it inherits the problem.
+
+  There is no capability confusion. `can_see` and `holds_frame` both consult
+  `FrameTree::owner` first, so a destroyed frame fails closed however stale
+  the sets are, and slot reuse bumps the generation. The defect is unbounded
+  growth, and it has a second half that is easy to miss: `close_channel`
+  builds its `live` set by unioning every channel's `hosts`, so stale `hosts`
+  entries keep the matching stale `visible` entries alive through the very
+  purge that was added to stop those sets growing without bound.
+
+  Verified rather than reasoned about: a temporary in-crate test destroyed a
+  granted frame, closed an unrelated channel, and asserted both halves —
+  `hosts` retained the frame and the viewer's `visible` entry survived the
+  purge. Both passed. The test was reverted; it belongs to the phase that
+  makes the path reachable.
+- **Why deferred:** phase discipline. It is not a phase 1 gate item, no wire
+  message reaches it, and inventing `Broker::destroy_frame` now to fix a
+  defect nothing can trigger is exactly the scope creep the backlog exists to
+  absorb. Recorded so the wrapper is written with the capability sets in mind
+  rather than discovered leaking later.

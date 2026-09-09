@@ -151,6 +151,43 @@ jobs:
       - name: Gate check 5
         run: tests/brand/gate-brand-leak.sh
 
+  # Phase 1 gate: identity rejection, crash recovery, size limits, and the
+  # second build profile from ADR 004. Runs on both platforms — process spawn,
+  # pipe behaviour and process death are exactly where the two diverge.
+  ipc:
+    name: ipc (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 1 gate
+        shell: bash
+        run: ci/gate-ipc.sh
+
+  # ADR 006: 60s per target against the committed corpus. The 24h campaign
+  # Phase 1's gate requires is .github/workflows/fuzz-campaign.yml, on a
+  # schedule, because a day-long job on every push is a job that gets bypassed.
+  fuzz-smoke:
+    name: fuzz-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # cargo-fuzz is Linux and macOS only in practice: libFuzzer is not
+      # supported on the MSVC target. That is why this job has no matrix, and
+      # why the deserializers are also exercised by ordinary tests, which do
+      # run on both platforms.
+      #
+      # No explicit toolchain install: rustup provisions the nightly named in
+      # fuzz/rust-toolchain.toml, with its components, on first use inside that
+      # directory. Naming it again here would be a second place to update.
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+      - name: Smoke
+        run: ci/gate-fuzz-smoke.sh
+
   # Not one of the five gate checks: a Phase 0 deliverable that only the
   # person who will daily-drive the browser can produce. Red here means the
   # list is outstanding, not that the phase gate failed.

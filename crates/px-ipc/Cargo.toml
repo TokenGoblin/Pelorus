@@ -6,5 +6,13 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# ADR 003. postcard is a serde format with no derive of its own, so approving
+# postcard approves serde; the ADR records the closure that comes with it.
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+
+# build-spec §4.3 names px-content, px-net and px-mcp. px-ipc is held to the
+# same standard because it is the crate that decodes bytes written by a process
+# an attacker may fully control — see this crate's CLAUDE.md.
+[lints]
+workspace = true

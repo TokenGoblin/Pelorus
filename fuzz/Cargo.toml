@@ -1,0 +1,46 @@
+[package]
+name = "px-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Deliberately outside the workspace. It is built by a different toolchain
+# (ADR 006), never shipped, and must not appear in the workspace lockfile that
+# the reproducibility gate depends on.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+px-ipc = { path = "../crates/px-ipc" }
+px-broker = { path = "../crates/px-broker" }
+
+[[bin]]
+name = "frame_request"
+path = "fuzz_targets/frame_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_response"
+path = "fuzz_targets/frame_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "channel_stream"
+path = "fuzz_targets/channel_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "broker_sequence"
+path = "fuzz_targets/broker_sequence.rs"
+test = false
+doc = false
+bench = false
