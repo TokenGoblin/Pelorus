@@ -92,3 +92,36 @@ come back at Phase 17.
 
 Next: waiting on the campaign. A monitor is armed on it, so the merge starts
 the moment it reports.
+
+## 04:55 UTC — Phase 2 gate drafted, and it pulls §14.4 forward
+
+Campaign 2h20m in, ~1h40m to go. Drafted `ci/gate-sandbox.sh` into the
+scratchpad. Two things came out of writing it that change Phase 2's scope.
+
+**Phase 2 introduces the project's first test-only capability, so §14.4's
+release-artifact scan has to arrive now rather than at Phase 8.** The gate item
+"with the sandbox forced unavailable, the browser refuses" needs a way to force
+unavailability, and that override must not exist in a shipping binary. §14.4 is
+explicit that a feature flag being off is not evidence — absence of the symbol
+from the artifact is. `docs/backlog.md` files that scanner as a prerequisite for
+Phases 8 and 12; Phase 2 gets there first, and the backlog entry needs updating
+to say so.
+
+The override is `PX_TEST_FORCE_SANDBOX_UNAVAILABLE`, behind
+`#[cfg(feature = "testing")]`, and the gate greps the release binaries for the
+symbol.
+
+**The gate runs the browser.** Phase 1's most embarrassing finding was that
+`px-browser` exited FAILURE on a clean run while every check stayed green,
+because nothing executed it. The refusal check is exactly the shape that would
+repeat: it is easy to test `Sandbox::probe()` in a unit test and never confirm
+that the *product* refuses to start. So the Phase 2 gate runs the binary with
+the override set and asserts both that it exits non-zero and that the message
+names the missing mechanism — §14.5 requires the message to be specific, and a
+refusal that says nothing is what sends a user to `--no-sandbox` blind.
+
+The gate also asserts ADR 007's ladder is documented rung by rung. A rung
+nobody wrote down is a rung nobody can tell you that you lost.
+
+Still waiting on the campaign before any of this can be committed — it is Phase
+2 work and Phase 1 has not merged.
