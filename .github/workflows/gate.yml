@@ -183,6 +183,41 @@ jobs:
         shell: bash
         run: ci/gate-sandbox.sh
 
+  # ADR 011: sanitizers over the audited unsafe core. The second and only other
+  # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
+  # explicitly rather than by directory override, so the fence assertion in
+  # ci/gate-fuzz-smoke.sh keeps passing unmodified and keeps meaning what it
+  # meant. Nothing built here ships.
+  sanitizers:
+    name: sanitizers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      # Named explicitly here because `cargo +toolchain` does not provision on
+      # first use the way a rust-toolchain.toml override does. The version is
+      # read from fuzz/rust-toolchain.toml rather than written again: two pins
+      # that can drift apart would be two nightlies, which ADR 011 says it will
+      # not create.
+      - name: Install the pinned nightly
+        shell: bash
+        run: |
+          NIGHTLY="$(grep '^channel' fuzz/rust-toolchain.toml | cut -d'"' -f2)"
+          echo "pinned nightly: $NIGHTLY"
+          rustup toolchain install "$NIGHTLY" --profile minimal --component rust-src
+      # Before trusting a clean run, prove the sanitizer can still fail. A green
+      # sanitizer that cannot detect a fault converts an absence of evidence
+      # into apparent assurance, which is worse than not running one.
+      - name: Sanitizer is armed
+        shell: bash
+        run: ci/gate-sanitizers.sh --self-check
+      - name: ASAN and TSAN
+        shell: bash
+        run: ci/gate-sanitizers.sh
+
   # ADR 006: 60s per target against the committed corpus. The 24h campaign
   # Phase 1's gate requires is .github/workflows/fuzz-campaign.yml, on a
   # schedule, because a day-long job on every push is a job that gets bypassed.

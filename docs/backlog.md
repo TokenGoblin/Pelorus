@@ -266,24 +266,19 @@ Format: one entry per defect.
   absorb. Recorded so the wrapper is written with the capability sets in mind
   rather than discovered leaking later.
 
-## No ASAN or TSAN build of px-sandbox in CI
+## No ASAN or TSAN build of px-sandbox in CI — CLOSED
 
 - **Found in:** phase 2, `crates/px-sandbox/`
-- **Belongs to:** unassigned, but soon
-- **What:** `crates/px-sandbox/CLAUDE.md` states as a local invariant that ASAN
-  and TSAN builds of this crate run in CI, and §4.5 asks for them. Neither
-  exists: `.github/workflows/gate.yml` has no sanitizer job and nothing in
-  `ci/` mentions one. Phase 2 gave this crate the project's entire `unsafe`
-  surface — two operating systems' process-creation paths, hand-managed handle
-  lifetimes, and variable-length OS structs read into aligned buffers — so it
-  is now the crate where sanitizers would pay for themselves fastest.
-- **Why deferred:** sanitizers need `-Z sanitizer` and therefore nightly, and
-  ADR 006 fences nightly to `fuzz/` with a CI assertion that nothing else
-  resolves to it. Wiring them means amending that ADR, which is a decision
-  rather than a chore — the same shape as the Miri entry above, and it should
-  probably be settled in the same breath as that one. Recorded rather than
-  quietly dropped, because the invariant is written down as though it already
-  holds.
+- **Closed by:** ADR 011 and `ci/gate-sanitizers.sh`, phase 2.
+- **What it was:** the crate's CLAUDE.md stated as a local invariant that ASAN
+  and TSAN builds run in CI, and none existed. Phase 2 had just given this
+  crate the project's entire `unsafe` surface, which made the gap worse than
+  the wording admitted.
+- **How it closed:** ADR 011 amended ADR 006's nightly fence to admit exactly
+  one further consumer — the same pinned nightly, named explicitly so the
+  directory override and its CI assertion are untouched, and building only
+  test binaries that never ship. ASAN runs on both platforms, TSAN on Linux
+  only. The sanitizer is proved able to fail before a clean run is trusted.
 
 ## A content process exiting with code 259 reads as still running on Windows
 
