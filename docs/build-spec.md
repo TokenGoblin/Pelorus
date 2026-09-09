@@ -489,8 +489,8 @@ The plan is not wrong for being ambitious. It would be wrong to discover in year
 1. ~~Project name~~ — Pelorus, provisional, ADR-000.
 2. **WASM** — ship an interpreter, or not at all. Due Phase 10.
 3. **Video** — Rust decoders in a locked-down process, or none in v1. Due Phase 15.
-4. **Root store** — platform versus bundled. Due Phase 3.
-5. **DoH provider** — which, and the first-run choice design. Due Phase 3.
+4. **Root store** — platform versus bundled. Due Phase 3. **Settled by ADR 012**: platform, with the bundled store as a floor.
+5. **DoH provider** — which, and the first-run choice design. Due Phase 3. **Settled by ADR 014**: the system resolver by default, DoH by choice, no provider compiled in.
 6. **Federated login** — Storage Access API versus accepted breakage. Due Phase 13.
 7. **Linux sandbox fallback** — SUID helper versus refuse-to-run. Due Phase 2 (§14.5).
 8. **HTTP/3** — deferred; revisit after Phase 23. QUIC is a large new parser surface for latency you do not need yet.
