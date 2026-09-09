@@ -44,26 +44,52 @@ exist. Both were verified to fire on a synthetic violation, not merely to pass.
 
 ## What is outstanding
 
-**The 24-hour campaign.** ADR 006 splits fuzzing into a 60-second smoke on
-every push and a scheduled campaign, with the gate satisfied by one recorded
-campaign run. The smoke job passes in CI. The campaign is
-[34303798308](https://github.com/TokenGoblin/Pelorus/actions/runs/34303798308)
-— six shards, four hours each, against the rewritten codec.
+**The 24-hour campaign ran, was clean, and did not test what it was supposed
+to test.**
 
-Two earlier attempts are kept here rather than quietly superseded, because both
-say something about the gate. The first,
-[34298965894](https://github.com/TokenGoblin/Pelorus/actions/runs/34298965894),
-failed in **twelve seconds** on all six shards: the `FUZZ_TARGET` membership
-test used a space-delimited `case` match, and `cargo fuzz list` is
-newline-separated, so no target name is ever surrounded by spaces and none
-could ever match. The gate item this phase most depends on could not have gone
-green — and the run was dispatched and not checked, because a job that fails in
-twelve seconds looks exactly like a job that has just started. The second was
-cancelled deliberately: it was fuzzing a codec the adversarial review was about
-to change.
+Run [34303798308](https://github.com/TokenGoblin/Pelorus/actions/runs/34303798308):
+six shards, 14,401 seconds each — a genuine 24 CPU-hours — roughly 32 billion
+executions, **no crashes**.
 
-Until a campaign completes against the current code, **this phase's gate is not
-met.**
+| Target | Shard | Runs | cov | ft | corpus |
+|---|---|---|---|---|---|
+| `frame_request` | 1 | 7,166,320,831 | 164 | 202 | 87 |
+| `frame_request` | 2 | 7,354,072,260 | 170 | 209 | 97 |
+| `frame_response` | 1 | 8,789,936,877 | 152 | 191 | 85 |
+| `channel_stream` | 1 | 4,110,542,034 | 176 | 702 | 262 / 25 KiB |
+| `channel_stream` | 2 | 4,916,238,807 | 176 | 617 | 222 / 13.7 KiB |
+| `broker_sequence` | 1 | 17,778,828 | 343 | 2,104 | 636 / 122 KiB |
+
+And then the logs say, on every shard:
+
+```
+INFO: -max_len is not provided; libFuzzer will not generate inputs
+      larger than 4096 bytes
+```
+
+**The 4 KiB cap was still in force.** The `-max_len` fix an adversarial review
+called for — because the large-payload path is the only code in `recv` that
+allocates, and `MAX_MESSAGE_BYTES` is the boundary this gate names — was
+committed as a message and never applied to the file. Two separate edits to
+`ci/gate-fuzz-smoke.sh` were silent no-ops, and the commit describing them
+asserted work that had not happened. `grep max_len ci/gate-fuzz-smoke.sh`
+returned nothing.
+
+So the honest statement of this gate item is: **24 hours of fuzzing found no
+crash in inputs up to 4096 bytes.** That is not nothing — `channel_stream` and
+`broker_sequence` are new targets with real state space, and `broker_sequence`
+reached 343 coverage points and 2,104 features driving a live `Broker` — but it
+is not the item as written, and the size boundary remains unfuzzed.
+
+The script is fixed and verified this time by asserting the string is present
+after writing. A second campaign is running against the corrected script.
+
+Until it completes, **this phase's gate is not met.**
+
+The pattern is worth naming because it is the third instance tonight: a change
+that reports success without doing anything is indistinguishable from one that
+worked. It defeated two gate checks earlier and has now defeated the fix for a
+third.
 
 **The adversarial review.** Done, and it is the reason most of this report
 exists. §10 asks for "a dedicated session whose only job is attacking the
