@@ -36,6 +36,11 @@
 
 use std::fmt;
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "windows")]
+mod windows;
+
 /// One mechanism the platform may offer.
 ///
 /// Named per platform rather than abstracted into "filesystem isolation" and
@@ -190,13 +195,13 @@ impl Capabilities {
         self.missing_from_floor().is_empty()
     }
 
-    fn offer(&mut self, rung: Rung) {
+    pub(crate) fn offer(&mut self, rung: Rung) {
         if !self.available.contains(&rung) {
             self.available.push(rung);
         }
     }
 
-    fn deny(&mut self, rung: Rung, why: Restriction) {
+    pub(crate) fn deny(&mut self, rung: Rung, why: Restriction) {
         self.notes.retain(|(r, _)| *r != rung);
         self.notes.push((rung, why));
     }
@@ -267,11 +272,9 @@ pub fn detect() -> Capabilities {
     {
         // Both Windows rungs are creation-time operations rather than
         // queryable features: a restricted token and a job object are made,
-        // not detected. They are reported unavailable until the spawn path
-        // that creates them exists, which keeps the Phase 2 gate honestly red
-        // rather than passing on a probe that assumes success.
-        caps.deny(Rung::RestrictedToken, Restriction::Inconclusive);
-        caps.deny(Rung::JobObject, Restriction::Inconclusive);
+        // not detected. So the probe *makes* the cheap half of each rather
+        // than assuming it would work — see `windows::detect`.
+        windows::detect(&mut caps);
     }
 
     caps
@@ -312,17 +315,17 @@ fn detect_user_namespaces(caps: &mut Capabilities) {
     // Three spellings, checked in the order that gives the most specific
     // answer. §14.5 says to name "the sysctl"; there isn't one, and naming the
     // wrong one sends a user to edit a setting their kernel does not have.
-    if let Some(value) = read_trimmed("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") {
-        if value == "1" {
-            caps.deny(Rung::UserNamespaces, Restriction::ApparmorRestrictUserns);
-            return;
-        }
+    if let Some(value) = read_trimmed("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+        && value == "1"
+    {
+        caps.deny(Rung::UserNamespaces, Restriction::ApparmorRestrictUserns);
+        return;
     }
-    if let Some(value) = read_trimmed("/proc/sys/kernel/unprivileged_userns_clone") {
-        if value == "0" {
-            caps.deny(Rung::UserNamespaces, Restriction::UnprivilegedUsernsClone);
-            return;
-        }
+    if let Some(value) = read_trimmed("/proc/sys/kernel/unprivileged_userns_clone")
+        && value == "0"
+    {
+        caps.deny(Rung::UserNamespaces, Restriction::UnprivilegedUsernsClone);
+        return;
     }
     if let Some(value) = read_trimmed("/proc/sys/user/max_user_namespaces") {
         if value == "0" {
@@ -364,9 +367,304 @@ pub fn admit(caps: &Capabilities) -> Result<Vec<Rung>, Refusal> {
     Err(Refusal { missing, remedies })
 }
 
+/// A policy step that was required and did not take.
+///
+/// Separate from [`Refusal`], and the distinction matters. A `Refusal` is
+/// "this machine does not offer what we require", which a user can act on. A
+/// `PolicyError` is "this machine said it offered it, and applying it failed
+/// anyway" — a machine lying, a race, or a bug here. Both stop the launch;
+/// only the first has a remedy worth printing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PolicyError {
+    /// A rung could not be applied.
+    Failed {
+        /// Which mechanism.
+        rung: Rung,
+        /// What specifically went wrong, for the log.
+        detail: &'static str,
+    },
+    /// The floor was not cleared, so nothing was attempted.
+    Refused(Refusal),
+}
+
+impl fmt::Display for PolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Failed { rung, detail } => write!(
+                f,
+                "refusing to launch a content process: {rung} could not be applied ({detail}).                  The machine reported it was available, so this is a fault here rather than a                  missing kernel feature."
+            ),
+            Self::Refused(refusal) => write!(f, "{refusal}"),
+        }
+    }
+}
+
+impl std::error::Error for PolicyError {}
+
+/// A content process that was created under a policy.
+///
+/// The policy is not applied to this child; it is the policy the child was
+/// *made with*. See the platform modules for why that distinction is the whole
+/// point — a process confined after creation runs unconfined for the window
+/// before the confinement lands, and that window is attacker-reachable.
+///
+/// The broker keeps the supervisor — worker threads, deadline, restart policy
+/// — and is handed one of these (ADR 008).
+pub struct SandboxedChild {
+    /// The parent's end of the child's stdin. Taken once by the supervisor.
+    stdin: Option<std::fs::File>,
+    /// The parent's end of the child's stdout. Taken once by the supervisor.
+    stdout: Option<std::fs::File>,
+    applied: Vec<Rung>,
+    #[cfg(target_os = "windows")]
+    inner: windows::Child,
+    #[cfg(not(target_os = "windows"))]
+    inner: std::process::Child,
+}
+
+impl SandboxedChild {
+    /// Take the write end of the child's stdin. `None` after the first call.
+    pub fn take_stdin(&mut self) -> Option<std::fs::File> {
+        self.stdin.take()
+    }
+
+    /// Take the read end of the child's stdout. `None` after the first call.
+    pub fn take_stdout(&mut self) -> Option<std::fs::File> {
+        self.stdout.take()
+    }
+
+    /// The rungs this process was created under.
+    ///
+    /// Every entry was applied by the operating system as part of process
+    /// creation. Nothing here is a claim made afterwards, and nothing here was
+    /// reported by the child — a child describing its own confinement would be
+    /// authority taken from a message, which invariant 9 forbids.
+    pub fn applied(&self) -> &[Rung] {
+        &self.applied
+    }
+
+    /// The child's process identifier.
+    pub fn id(&self) -> u32 {
+        self.inner.id()
+    }
+
+    /// Whether the child has exited, without blocking.
+    pub fn try_wait(&mut self) -> std::io::Result<Option<i32>> {
+        #[cfg(target_os = "windows")]
+        {
+            self.inner.try_wait()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(self
+                .inner
+                .try_wait()?
+                .map(|status| status.code().unwrap_or(-1)))
+        }
+    }
+
+    /// Wait for the child to exit.
+    pub fn wait(&mut self) -> std::io::Result<i32> {
+        #[cfg(target_os = "windows")]
+        {
+            self.inner.wait()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(self.inner.wait()?.code().unwrap_or(-1))
+        }
+    }
+
+    /// Kill the child.
+    ///
+    /// On Windows this terminates the process; the job object it belongs to is
+    /// what will make killing the whole tree possible when Phase 17 sets
+    /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. On Linux it is a signal to the
+    /// one process, and the orphaned-grandchild case remains open until
+    /// Phase 17's cgroup — see `docs/backlog.md`.
+    pub fn kill(&mut self) -> std::io::Result<()> {
+        self.inner.kill()
+    }
+}
+
+/// Spawn a content process under a sandbox policy.
+///
+/// Fails closed, in this order and for this reason:
+///
+/// 1. Detect what the machine offers.
+/// 2. [`admit`] it against [`FLOOR`]. Below the floor, **nothing is spawned**
+///    — the refusal is returned before a process exists, which is what
+///    invariant 8 requires and what gate item 2 checks end to end.
+/// 3. Create the process with the policy, not beside it.
+///
+/// A failure at step 3 is a [`PolicyError::Failed`] rather than a refusal: the
+/// machine said it offered the mechanism and applying it did not work, which
+/// is a fault here rather than a missing kernel feature. Both stop the launch.
+pub fn spawn(executable: &std::path::Path) -> Result<SandboxedChild, PolicyError> {
+    let caps = detect();
+    admit(&caps).map_err(PolicyError::Refused)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let spawned = windows::spawn(executable)?;
+        Ok(SandboxedChild {
+            stdin: Some(windows::into_file(spawned.stdin)),
+            stdout: Some(windows::into_file(spawned.stdout)),
+            applied: spawned.applied,
+            inner: spawned.child,
+        })
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let spawned = linux::spawn(executable)?;
+        Ok(SandboxedChild {
+            stdin: Some(spawned.stdin),
+            stdout: Some(spawned.stdout),
+            applied: spawned.applied,
+            inner: spawned.child,
+        })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        let _ = executable;
+        // Unreachable in practice: FLOOR on an unknown platform lists rungs
+        // nothing offers, so `admit` above has already refused. Kept so that
+        // adding a platform to FLOOR without adding a policy fails to build
+        // rather than silently spawning unconfined.
+        Err(PolicyError::Failed {
+            rung: FLOOR[0],
+            detail: "this platform has no sandbox implementation",
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The content process stand-in these tests spawn.
+    ///
+    /// A real executable, not a mock: the question every test here asks is
+    /// whether the *operating system* accepted the policy, and only the OS can
+    /// answer it. `px-content` is not used because px-sandbox must not depend
+    /// on it; any process that stays alive long enough to be inspected does.
+    fn a_spawnable_executable() -> std::path::PathBuf {
+        if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\Windows\System32\cmd.exe")
+        } else {
+            std::path::PathBuf::from("/bin/cat")
+        }
+    }
+
+    /// The whole of gate item 1 in one assertion: a process launches, and it
+    /// launches *under* a policy rather than beside one.
+    #[test]
+    fn sandbox_policy_a_content_process_launches_under_a_policy() {
+        if !detect().clears_floor() {
+            // Refusing here would be correct behaviour, not a test failure —
+            // and asserting the floor is cleared would make this test a
+            // statement about the machine rather than about the code.
+            return;
+        }
+
+        let mut child = spawn(&a_spawnable_executable()).expect("a sandboxed content process");
+        let applied = child.applied().to_vec();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            !applied.is_empty(),
+            "a process launched under a policy must report the rungs it got"
+        );
+        for rung in FLOOR {
+            assert!(
+                applied.contains(rung),
+                "{rung} is in FLOOR but was not applied; the launch should not have happened"
+            );
+        }
+    }
+
+    /// Nothing may be reported applied that detection says is unavailable.
+    /// This is what keeps `applied()` usable as evidence rather than as an
+    /// intention.
+    #[test]
+    fn sandbox_policy_never_reports_a_rung_the_machine_does_not_offer() {
+        if !detect().clears_floor() {
+            return;
+        }
+        let caps = detect();
+        let mut child = spawn(&a_spawnable_executable()).expect("a sandboxed content process");
+        let applied = child.applied().to_vec();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        for rung in &applied {
+            assert!(
+                caps.has(*rung),
+                "{rung} was reported applied but detection says it is unavailable"
+            );
+        }
+    }
+
+    /// The child must be usable, not merely created. A policy that produces a
+    /// confined process the broker cannot talk to has broken the product to
+    /// secure it.
+    #[test]
+    fn sandbox_policy_leaves_the_child_talkable_to() {
+        if !detect().clears_floor() {
+            return;
+        }
+        let mut child = spawn(&a_spawnable_executable()).expect("a sandboxed content process");
+        assert!(
+            child.take_stdin().is_some(),
+            "the broker needs the write end of the child's stdin"
+        );
+        assert!(
+            child.take_stdout().is_some(),
+            "the broker needs the read end of the child's stdout"
+        );
+        assert!(
+            child.take_stdin().is_none(),
+            "a pipe end is handed over once; a second caller must get None"
+        );
+        assert!(child.id() > 0, "a spawned child has a process id");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// Gate item 2's precondition, at the library level: below the floor,
+    /// `spawn` refuses *before* a process exists, and says which mechanism is
+    /// missing.
+    #[test]
+    fn sandbox_policy_refusal_below_the_floor_names_the_mechanism() {
+        let caps = Capabilities::default();
+        let refusal = admit(&caps).expect_err("an empty machine clears no floor");
+        let error = PolicyError::Refused(refusal);
+        let message = error.to_string();
+        for rung in FLOOR {
+            assert!(
+                message.contains(rung.name()),
+                "the refusal must name {rung}; got: {message}"
+            );
+        }
+    }
+
+    /// A `PolicyError::Failed` must not read like a missing kernel feature.
+    /// The two have different remedies and conflating them sends a user to
+    /// change a setting that was never the problem.
+    #[test]
+    fn sandbox_policy_a_failure_to_apply_is_not_reported_as_a_missing_feature() {
+        let error = PolicyError::Failed {
+            rung: FLOOR[0],
+            detail: "a synthetic failure",
+        };
+        let message = error.to_string();
+        assert!(message.contains("could not be applied"));
+        assert!(
+            message.contains("fault here"),
+            "an application failure must say it is a fault on this side; got: {message}"
+        );
+    }
 
     fn with(available: &[Rung]) -> Capabilities {
         Capabilities::with_available(available)

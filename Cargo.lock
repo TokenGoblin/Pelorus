@@ -71,6 +71,7 @@ name = "px-broker"
 version = "0.0.0"
 dependencies = [
  "px-ipc",
+ "px-sandbox",
 ]
 
 [[package]]
@@ -79,6 +80,7 @@ version = "0.0.0"
 dependencies = [
  "px-broker",
  "px-ipc",
+ "px-sandbox",
 ]
 
 [[package]]

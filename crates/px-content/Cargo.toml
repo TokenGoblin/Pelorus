@@ -19,6 +19,15 @@ px-ipc = { path = "../px-ipc", version = "0.0.0" }
 # living in px-broker and hunting for the binary on disk.
 px-broker = { path = "../px-broker", version = "0.0.0" }
 
+# The refusal test drives the capability ladder directly, so it needs the
+# crate that owns it and the test-only override behind its feature.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+
+[features]
+# §14.4: forwards to px-sandbox, whose PX_TEST_FORCE_SANDBOX_UNAVAILABLE
+# override must not exist in a release artifact.
+testing = ["px-sandbox/testing"]
+
 # build-spec §4.3: this crate handles hostile input.
 [lints]
 workspace = true

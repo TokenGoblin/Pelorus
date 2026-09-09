@@ -17,3 +17,7 @@ path = "src/main.rs"
 # Version alongside path: cargo-deny treats a bare path dependency as a
 # wildcard, and "any version at all" is not a supply-chain position.
 px-ipc = { path = "../px-ipc", version = "0.0.0" }
+# ADR 008: the spawn path is unsafe FFI on both platforms, so it lives in the
+# one crate permitted unsafe. The broker keeps the supervisor and is handed a
+# child that was created under a policy.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }

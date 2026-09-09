@@ -38,7 +38,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
@@ -550,7 +549,7 @@ pub enum ServeError {
 /// its own sake — it is the only way the parent can apply a deadline to a peer
 /// that may simply stop, which `std`'s pipes offer no way to do directly.
 pub struct ContentProcess {
-    child: Child,
+    child: px_sandbox::SandboxedChild,
     id: ChannelId,
     executable: PathBuf,
     /// `None` once the workers have been abandoned; see [`Self::abandon`].
@@ -569,25 +568,32 @@ pub struct ContentProcess {
 }
 
 impl ContentProcess {
-    /// Spawn a content process and register its channel with the broker.
+    /// Spawn a content process **under a sandbox policy** and register its
+    /// channel with the broker.
+    ///
+    /// The spawn itself belongs to `px-sandbox` (ADR 008): this crate is
+    /// `forbid(unsafe_code)` and neither platform can apply a policy from
+    /// `std::process::Command` — Windows needs `CreateProcessAsUserW` with a
+    /// `PROC_THREAD_ATTRIBUTE_LIST`, Linux needs `pre_exec`. What stays here
+    /// is the supervisor: the worker threads, the deadline and the restart
+    /// policy.
+    ///
+    /// Fails closed, and that is the whole of gate item 2. If the machine does
+    /// not clear the sandbox floor, `px_sandbox::spawn` refuses before a
+    /// process exists — so there is no path through this function that yields
+    /// an unconfined content process, not even a short-lived one.
     pub fn spawn(broker: &mut Broker, executable: &Path) -> std::io::Result<Self> {
-        let mut child = Command::new(executable)
-            // The content process gets nothing it was not handed (invariant 1).
-            // Without env_clear it inherits the broker's entire environment,
-            // which on a developer or CI machine routinely carries tokens and
-            // paths. One line, and it does not have to wait for px-sandbox.
-            .env_clear()
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // stderr is inherited on purpose: a content process's diagnostics
-            // should reach the terminal without the broker relaying them.
-            .stderr(Stdio::inherit())
-            .spawn()?;
+        // The refusal is flattened into an io::Error rather than given its own
+        // variant here, because its Display is the message the user must see
+        // and §14.5 requires that message to name the missing mechanism. The
+        // typed error stays available to anyone calling px_sandbox directly.
+        let mut child = px_sandbox::spawn(executable)
+            .map_err(|refusal| std::io::Error::other(refusal.to_string()))?;
 
-        let stdout = child.stdout.take().ok_or_else(|| {
+        let stdout = child.take_stdout().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::BrokenPipe, "child has no stdout")
         })?;
-        let stdin = child.stdin.take().ok_or_else(|| {
+        let stdin = child.take_stdin().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::BrokenPipe, "child has no stdin")
         })?;
 
