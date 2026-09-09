@@ -78,8 +78,19 @@ fi
 
 for target in $targets; do
     info "fuzzing $target for ${SECONDS_PER_TARGET}s"
+    # -max_len is not optional. libFuzzer's default is 4096 bytes, which puts
+    # the entire large-payload path — the only code in recv that allocates,
+    # and the MAX_MESSAGE_BYTES boundary this gate specifically names — out
+    # of reach. A 24-hour campaign ran without it and reported clean while
+    # never testing what it was meant to test.
+    #
+    # -rss_limit_mb bounds the fuzzer itself: an OOM in the harness is not a
+    # finding about the code under test.
     if (cd fuzz && cargo fuzz run "$target" -- \
-            -max_total_time="$SECONDS_PER_TARGET" -print_final_stats=1); then
+            -max_total_time="$SECONDS_PER_TARGET" \
+            -max_len="${FUZZ_MAX_LEN:-1100000}" \
+            -rss_limit_mb=2048 \
+            -print_final_stats=1); then
         ok "$target"
     else
         fail "$target found a crash; the reproducer is under fuzz/artifacts/$target/"
