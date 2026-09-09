@@ -120,15 +120,29 @@ exercised by a real renderer. It will first meet one in Phase 4.
 
 ## What is outstanding
 
-One item from `crates/px-sandbox/CLAUDE.md` that this phase does not close, and one it does.
+Both items from `crates/px-sandbox/CLAUDE.md` are now closed. They are kept
+here rather than deleted, because what a phase left open and how it was closed
+is more useful than a report that only ever describes success.
 
-**ASAN and TSAN builds of this crate do not run in CI.** The local invariant
-requires them and §4.5 asks for them. They need `-Z sanitizer` and therefore
-nightly, and ADR 006 fences nightly to `fuzz/` with a CI assertion that nothing
-else resolves to it — so wiring them means amending that ADR, which is a
-decision rather than a chore. Same shape as the Miri item already in
-`docs/backlog.md`. **This crate now contains the project's only `unsafe`, which
-makes it the crate where sanitizers matter most**, so this should not sit long.
+**ASAN and TSAN now run in CI — this is closed.** It was the one item this
+report originally listed as outstanding, and it did not sit long. ADR 011
+amended ADR 006's nightly fence to admit exactly one further consumer: the same
+pinned nightly, named with `+toolchain` rather than by directory override, and
+building only test binaries that never ship. ASAN on both platforms, TSAN on
+Linux; `px-sandbox` and `px-broker` in scope.
+
+The job proves the sanitizer can fail before it trusts a clean run, because a
+sanitizer that cannot detect anything converts absence of evidence into
+apparent assurance. And `fuzz-smoke` still passes **unmodified** on a branch
+carrying a second nightly consumer, which is the evidence that the fence being
+amended was not weakened.
+
+Two things running it found. Doctests cannot be sanitized — `RUSTFLAGS` never
+reaches `rustdoc`, so the doctest crate mismatches its instrumented
+dependencies — and are excluded. And the first version of the script reported
+"TSAN reported a data race" for what was a build failure, naming a cause it had
+not established, inside a script whose whole purpose is to be believed about
+faults.
 
 **The adversarial review §10 requires for `px-sandbox` is done.** It found one
 real defect and produced two tests for properties that are invisible until they
@@ -152,8 +166,8 @@ that exited with code 259, so `is_alive` can report a dead content process as
 live; and the aarch64 syscall table has never been executed, because CI is
 x86_64 only. Both are in `docs/backlog.md`.
 
-Neither is a gate item. The sanitizer gap is listed because the phase closing
-is not the same thing as the crate being finished.
+Neither was a gate item. Both are recorded because the phase closing is not
+the same thing as the crate being finished.
 
 ## Verdict
 
