@@ -11,7 +11,7 @@
 # targets x shards x hours-per-shard, in parallel, each job well inside the
 # limit.
 #
-#   2 targets x 3 shards x 4 hours = 24 hours of fuzzing, ~4 hours of wall clock
+#   6 shards x 4 hours = 24 hours of fuzzing, ~4 hours of wall clock
 #
 # Shards are not redundant: libFuzzer seeds from the clock and its own corpus,
 # so three shards of one target explore different paths rather than repeating
@@ -48,8 +48,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [frame_request, frame_response]
-        shard: [1, 2, 3]
+        # Weighted towards the hostile direction and the properties that
+        # matter. frame_response is the direction whose own documentation says
+        # it matters less, and it used to get half the budget.
+        include:
+          - { target: frame_request, shard: 1 }
+          - { target: frame_request, shard: 2 }
+          - { target: channel_stream, shard: 1 }
+          - { target: channel_stream, shard: 2 }
+          - { target: broker_sequence, shard: 1 }
+          - { target: frame_response, shard: 1 }
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-fuzz
