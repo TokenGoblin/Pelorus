@@ -167,6 +167,22 @@ jobs:
         shell: bash
         run: ci/gate-ipc.sh
 
+  # Phase 2 gate: a policy is applied, refusal below the floor is real and
+  # says why, the ladder is documented, and no test-only capability reaches a
+  # release artifact (§14.4, pulled forward — this phase introduces the first).
+  sandbox:
+    name: sandbox (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 2 gate
+        shell: bash
+        run: ci/gate-sandbox.sh
+
   # ADR 006: 60s per target against the committed corpus. The 24h campaign
   # Phase 1's gate requires is .github/workflows/fuzz-campaign.yml, on a
   # schedule, because a day-long job on every push is a job that gets bypassed.
