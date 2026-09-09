@@ -7,13 +7,15 @@ each check actually proved, and — more usefully — what it did not.
 
 ## The five gate checks (build-spec §9)
 
-| # | Check | Job | Local result |
+| # | Check | Job | Result in CI |
 |---|---|---|---|
-| 1 | Builds on both OSes | `build` | **Pass on Windows.** Linux unverified — see below. |
-| 2 | Hashes reproducible across two machines, different paths and usernames | `reproducible` | **Pass, partially.** Paths and HOME/CARGO_HOME differ. Usernames do not. |
-| 3 | Supply-chain checks green | `supply-chain` | **Pass, and vacuous.** See below. |
+| 1 | Builds on both OSes | `build` | **Pass**, Ubuntu and Windows |
+| 2 | Hashes reproducible across two machines, different paths and usernames | `reproducible` | **Pass**, Ubuntu and Windows. Ubuntu varies the username; Windows does not. |
+| 3 | Supply-chain checks green | `supply-chain` | **Pass**, both — and vacuous. See below. |
 | 4 | `forbid(unsafe_code)` everywhere | `unsafe-headers` | **Pass.** 21 crates asserted from source text. |
-| 5 | Brand-leak gate proven by a deliberate violation | `brand-leak` | **Pass, proven.** |
+| 5 | Brand-leak gate proven by a deliberate violation | `brand-leak` | **Pass, and proven in CI.** |
+
+Green run: [34292751677](https://github.com/TokenGoblin/Pelorus/actions/runs/34292751677)
 
 Plus one job that is a Phase 0 deliverable but not one of §9's gate checks:
 
@@ -21,16 +23,33 @@ Plus one job that is a Phase 0 deliverable but not one of §9's gate checks:
 |---|---|---|
 | Forty-site compat list | `compat-list` | **Red. Outstanding.** |
 
-## What has not happened
+## The deliberate violation, proven in CI
 
-**CI has never run.** There is no git remote, so `.github/workflows/gate.yml`
-has not executed once. Every result above is a local run of the same scripts the
-workflow invokes — which is why the gate is scripts rather than YAML — but a
-local run is not the gate.
+§2.2 asks for the brand-leak gate to be proven by violating it and watching CI
+reject it. Run
+[34294066452](https://github.com/TokenGoblin/Pelorus/actions/runs/34294066452)
+is that proof: a branch off current HEAD adding `WINDOW_TITLE_SUFFIX` to
+`px-layout`, in which **`brand-leak` is the only gate job that fails**, and it
+fails with the right message —
 
-A static audit of the never-executed parts found three defects that would each
-have failed the first run on their own, and they are worth recording because
-they were invisible to every passing check above:
+```
+read PRODUCT_NAME from crates/px-brand/src/lib.rs (7 chars); scanning tracked files
+FAIL product name appears in crates/px-layout/src/lib.rs
+scanned 68 tracked files
+brand-leak: FAIL (1)
+```
+
+The branch is deleted; the run persists. An earlier attempt replayed the
+historical violation commit and was useless as evidence — that commit predates
+the executable-bit, `RUSTUP_HOME` and Windows-path fixes, so nine jobs failed
+and the one that mattered was indistinguishable from the noise. A proof needs
+the failure isolated, not merely present.
+
+## What the first CI runs found
+
+CI had never executed when the checks above first passed locally. Getting it
+green took three fixes, all in the machinery rather than the checks, and all
+invisible to every local run:
 
 1. **Every script was committed mode 0644.** `core.filemode` is false on a
    Windows checkout, so `chmod +x` never reached git. The workflow invokes the
@@ -39,22 +58,16 @@ they were invisible to every passing check above:
    means executable in the index, which catches the next script written here.
 2. **All three build steps moved `HOME` without setting `RUSTUP_HOME`**, which
    resolves the cargo shim to a toolchain directory that does not exist.
-3. `gate.yml` had never been parsed. It does parse, all seven jobs are
-   well-formed, and every script path a `run:` step names exists.
+3. **`RUNNER_TEMP` is a native Windows path** and every tool in
+   `build-and-hash.sh` is a POSIX one from Git Bash — `tar` could not open it.
+   The same mismatch was hiding in the remap prefixes in the opposite direction:
+   `rustc` is a native binary and reports native paths, so a POSIX remap prefix
+   would have matched nothing at all.
 
-Specifically still unverified until a remote exists:
-
-- everything on Linux, including check 1
-- the second-user half of check 2
-- `cargo install --locked cargo-deny cargo-vet cargo-auditable` on a clean
-  runner, and how long it adds to every supply-chain run
-
-**The deliberate violation was proven locally, not in CI.** Commit
-`Phase 0: deliberate brand-leak violation` is a knowingly-red commit kept in
-history precisely so that its CI run becomes the durable evidence the moment a
-remote exists. Local output is in `tests/brand/evidence/`, with the product name
-redacted, because that directory is not on the allowlist and an unredacted
-transcript would itself be the leak.
+Still unverified: how much `cargo install --locked cargo-deny cargo-vet
+cargo-auditable` adds to every supply-chain run on a cold runner. It is
+currently the slowest thing in the gate and will need caching or a vendored
+binary before it becomes annoying enough to be removed.
 
 ## What each passing check does and does not prove
 
@@ -67,14 +80,13 @@ initialised, `imports.lock` is pinned and committed, and the SBOM really does
 reach the binary. What is not proven: anything whatsoever about any dependency.
 The first real test of this gate is Phase 3.
 
-**Check 2 is missing one variable.** The two builds differ in checkout path,
-`HOME` and `CARGO_HOME`, and both were verified byte-identical locally on
-Windows. They do not differ in username. The workflow creates a second user on
-Linux and runs the second build as them; on a hosted Windows runner a second
-interactive account is not practical, so the Windows half of check 2 remains
-path-and-environment only. If a username ever leaks into a binary it will be
-through a path, which is remapped — but that is an argument, not a test, and it
-is recorded here as an argument.
+**Check 2 is missing one variable on Windows only.** On Ubuntu the job creates a
+second user and runs the second build as them, so path, `HOME`, `CARGO_HOME` and
+username all differ and the hashes still match. On a hosted Windows runner a
+second interactive account is not practical, so that half varies path and
+environment only. If a username ever leaks into a binary it will be through a
+path, which is remapped — but that is an argument, not a test, and it is
+recorded here as an argument.
 
 **And check 2 proves less than it looks like, for a reason worth writing down.**
 The path remapping it depends on has never actually been exercised. All
@@ -172,7 +184,15 @@ cargo-deny warns about every unused allowance until Phase 3.
 
 ## Verdict
 
-Five of five gate checks pass locally on Windows, with check 2 short one
-variable and check 3 vacuous by construction. Phase 0 is **not closeable** until
-CI runs green on both operating systems, which requires a remote — and until the
-compat list exists, without which Phase 23 has no meter.
+All five of §9's gate checks pass in CI on both Ubuntu and Windows, and the
+brand-leak gate is proven by an isolated failing run. What that does not mean:
+
+- Check 3 is vacuous and stays vacuous until Phase 3.
+- Check 2 has never exercised path remapping, because there is no code with a
+  path in it yet.
+- Check 2 does not vary the username on Windows.
+
+Phase 0 is **not closeable**, for one reason that has nothing to do with the
+gate: `tests/compat/sites.toml` has no entries, so Phase 23 has no meter. Also
+outstanding are the licence half of open decision 9 — now open in public with a
+default nobody chose — and the name reservations due before Phase 3.
