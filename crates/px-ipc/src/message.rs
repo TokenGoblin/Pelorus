@@ -75,6 +75,15 @@ pub enum DenyReason {
     NotYourFrame,
     /// The frame does not exist, or its slot has been reused since.
     NoSuchFrame,
+    /// The channel is not open. Nothing arriving on it is served, whatever it
+    /// asks for — a closed channel that still answers `Ping` has not really
+    /// been closed.
+    UnknownChannel,
+    /// The broker failed while handling the request and refused rather than
+    /// guessing. Distinct from the frame reasons on purpose: `DenyReason` is
+    /// documented as being for the audit log, and reporting an internal fault
+    /// as a frame-resolution failure sends an investigator to the wrong place.
+    Internal,
 }
 
 /// Content process to broker.

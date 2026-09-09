@@ -35,9 +35,13 @@ publish = false
 # with the Phase 20 release decision. An unconsidered "MIT OR Apache-2.0"
 # here would settle it by accident.
 
-# build-spec §4.3. Applied by px-content, px-net and px-mcp only, via
-# `[lints] workspace = true` in those three manifests. The broker unwinds and
-# is allowed to; the crates that parse hostile input are not.
+# build-spec §4.3. Applied via `[lints] workspace = true` by px-content, px-net,
+# px-mcp — and px-ipc, which §4.3 does not name but which decodes bytes written
+# by a process an attacker may fully control. The broker unwinds and is allowed
+# to; the crates that parse hostile input are not.
+#
+# ci/gate-unsafe-headers.sh scans this same set for per-site allow() waivers.
+# Adding a crate here means adding it there.
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

@@ -68,17 +68,24 @@ pub struct FrameTree {
 }
 
 impl FrameTree {
-    /// Create a frame owned by `owner`.
-    pub fn create(&mut self, owner: ChannelId) -> FrameId {
+    /// Create a frame owned by `owner`, or `None` if no handle can be minted.
+    ///
+    /// Returns `Option` for the same reason every accessor here does. The
+    /// failure needs more than `u32::MAX` live slots and is remote — but the
+    /// alternative was `u32::try_from(index).unwrap_or(u32::MAX)`, which
+    /// silently mints the *same* `FrameId` for two different slots. In a
+    /// function whose entire purpose is that handles are unambiguous, that is
+    /// capability confusion rather than a rounding error.
+    pub fn create(&mut self, owner: ChannelId) -> Option<FrameId> {
         // Reuse a free, non-retired slot before growing.
         for (index, slot) in self.slots.iter_mut().enumerate() {
             if slot.owner.is_none() && !slot.retired {
                 match slot.generation.checked_add(1) {
                     Some(next) => {
+                        let index = u32::try_from(index).ok()?;
                         slot.generation = next;
                         slot.owner = Some(owner);
-                        let index = u32::try_from(index).unwrap_or(u32::MAX);
-                        return FrameId::new(index, slot.generation);
+                        return Some(FrameId::new(index, slot.generation));
                     }
                     None => {
                         // §14.3: retire permanently rather than wrap.
@@ -87,13 +94,15 @@ impl FrameTree {
                 }
             }
         }
+        // Compute the index before pushing, so a tree too large to address is
+        // refused rather than grown into a state that cannot be described.
+        let index = u32::try_from(self.slots.len()).ok()?;
         self.slots.push(FrameSlot {
             generation: 0,
             owner: Some(owner),
             retired: false,
         });
-        let index = u32::try_from(self.slots.len().saturating_sub(1)).unwrap_or(u32::MAX);
-        FrameId::new(index, 0)
+        Some(FrameId::new(index, 0))
     }
 
     /// Destroy a frame, freeing its slot for reuse at a higher generation.
@@ -190,8 +199,18 @@ impl Broker {
     }
 
     /// Create a frame owned by a channel and grant that channel access to it.
+    ///
+    /// The channel is checked *before* the tree is touched. Creating first and
+    /// validating second leaks a slot on every failure: the slot is left owned
+    /// by a channel that will never be closed again, `FrameTree::create` skips
+    /// owned slots, and `ChannelId`s are never reused — so nothing can ever
+    /// reclaim it. A crash loop recreating frames against a cached channel id
+    /// would leak one slot per iteration.
     pub fn create_frame(&mut self, channel: ChannelId) -> Option<FrameId> {
-        let frame = self.frames.create(channel);
+        if !self.capabilities.contains_key(&channel) {
+            return None;
+        }
+        let frame = self.frames.create(channel)?;
         self.capabilities.get_mut(&channel)?.frames.insert(frame);
         Some(frame)
     }
@@ -237,7 +256,7 @@ impl Broker {
             Err(_) => {
                 self.close_channel(channel);
                 Response::Denied {
-                    reason: DenyReason::NoSuchFrame,
+                    reason: DenyReason::Internal,
                 }
             }
         }
@@ -254,6 +273,17 @@ impl Broker {
             !self.panic_on_dispatch,
             "deliberate panic for the unwind test"
         );
+
+        // Fail closed, before looking at the request at all. Without this,
+        // "closing the channel" only revoked frames: Ping still answered and
+        // Echo still echoed, so a caller holding the id of a killed, restarted
+        // or panicking process kept being served by a broker that believed it
+        // had cut that process off.
+        if !self.capabilities.contains_key(&channel) {
+            return Response::Denied {
+                reason: DenyReason::UnknownChannel,
+            };
+        }
 
         match request {
             Request::Ping => Response::Pong,
@@ -353,11 +383,19 @@ impl ContentProcess {
     /// the same rule §7.3 states for `px-mcp`, for the same reason: a process
     /// that can crash its way back to its old authority can crash its way into
     /// somebody else's.
+    /// Spawning happens first, deliberately. Closing the old channel before a
+    /// spawn that then fails leaves `self` holding a `ChannelId` the broker no
+    /// longer knows about and a dead `Child`, while the caller sees only an
+    /// error — a half-restarted object that looks alive to everything except
+    /// the broker.
     pub fn restart(&mut self, broker: &mut Broker) -> std::io::Result<()> {
+        let executable = self.executable.clone();
+        let replacement = Self::spawn(broker, &executable)?;
+
+        let previous = self.id;
         let _ = self.kill();
-        broker.close_channel(self.id);
-        let replacement = Self::spawn(broker, &self.executable)?;
         *self = replacement;
+        broker.close_channel(previous);
         Ok(())
     }
 }
@@ -506,11 +544,12 @@ mod tests {
         let response = broker.dispatch_guarded(faulty, Request::FrameHost { frame });
         broker.panic_on_dispatch = false;
 
-        // Fail closed: the answer is a denial, not an invented success.
+        // Fail closed: the answer is a denial, not an invented success, and
+        // it names the internal fault rather than blaming the frame tree.
         assert_eq!(
             response,
             Response::Denied {
-                reason: DenyReason::NoSuchFrame
+                reason: DenyReason::Internal
             }
         );
 
@@ -536,18 +575,111 @@ mod tests {
         assert_eq!(broker.channel_count(), 1, "a clean dispatch closes nothing");
     }
 
+    /// A closed channel must be refused everything, not merely stripped of its
+    /// frames. Before this, `close_channel` revoked capabilities while `Ping`
+    /// still answered and `Echo` still echoed — a channel the broker believed
+    /// it had cut off was still being served.
+    #[test]
+    fn hostile_identity_a_closed_channel_is_served_nothing() {
+        let mut broker = Broker::new();
+        let channel = broker.open_channel();
+        assert_eq!(broker.dispatch(channel, Request::Ping), Response::Pong);
+
+        broker.close_channel(channel);
+
+        for request in [
+            Request::Ping,
+            Request::Echo {
+                payload: b"still there?".to_vec(),
+            },
+            Request::FrameHost {
+                frame: FrameId::new(0, 0),
+            },
+        ] {
+            assert_eq!(
+                broker.dispatch(channel, request.clone()),
+                Response::Denied {
+                    reason: DenyReason::UnknownChannel
+                },
+                "a closed channel must be refused {request:?}"
+            );
+        }
+    }
+
+    /// The same, for the channel a restarted process left behind. A caller
+    /// holding the old id must not keep being answered.
+    #[test]
+    fn crash_restart_the_old_channel_id_stops_being_served() {
+        let mut broker = Broker::new();
+        let first = broker.open_channel();
+        broker.close_channel(first);
+        let second = broker.open_channel();
+
+        assert_eq!(
+            broker.dispatch(first, Request::Ping),
+            Response::Denied {
+                reason: DenyReason::UnknownChannel
+            }
+        );
+        assert_eq!(broker.dispatch(second, Request::Ping), Response::Pong);
+    }
+
+    /// Creating a frame for a channel that is not open must touch nothing.
+    /// Mutating first and validating second left the slot owned by a channel
+    /// that can never be closed again, so nothing could reclaim it.
+    #[test]
+    fn create_frame_for_an_unknown_channel_leaks_no_slot() {
+        let mut broker = Broker::new();
+        let live = broker.open_channel();
+        let dead = broker.open_channel();
+        broker.close_channel(dead);
+
+        for _ in 0..8 {
+            assert!(broker.create_frame(dead).is_none());
+        }
+        assert!(
+            broker.frames.slots.is_empty(),
+            "a refused create_frame must not have grown the tree"
+        );
+
+        // And the tree still works for a channel that is open.
+        let frame = broker.create_frame(live).expect("frame");
+        assert!(broker.holds_frame(live, frame));
+        assert_eq!(broker.frames.slots.len(), 1);
+    }
+
+    /// §4.3's audit log has to point at the right thing: a panic is an internal
+    /// fault, not a frame-resolution failure.
+    #[test]
+    fn a_caught_panic_is_reported_as_internal() {
+        let mut broker = Broker::new();
+        let channel = broker.open_channel();
+
+        broker.panic_on_dispatch = true;
+        let response = broker.dispatch_guarded(channel, Request::Ping);
+        broker.panic_on_dispatch = false;
+
+        assert_eq!(
+            response,
+            Response::Denied {
+                reason: DenyReason::Internal
+            },
+            "a panic while handling Ping must not be logged as a frame problem"
+        );
+    }
+
     #[test]
     fn a_retired_slot_is_never_handed_out_again() {
         let mut tree = FrameTree::default();
         let channel = ChannelId(0);
-        let frame = tree.create(channel);
+        let frame = tree.create(channel).expect("first frame");
         tree.destroy(frame);
 
         // Force the slot to the brink of overflow, then past it.
         if let Some(slot) = tree.slots.first_mut() {
             slot.generation = u32::MAX;
         }
-        let next = tree.create(channel);
+        let next = tree.create(channel).expect("second frame");
         assert_ne!(
             next.index(),
             frame.index(),

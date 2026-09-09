@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       seconds_per_shard:
-        description: Seconds per shard (4h default; 6h job limit is the ceiling)
+        description: Seconds per shard (4h default; 5h ceiling, see timeout-minutes)
         required: false
         default: "14400"
 
@@ -40,8 +40,10 @@ jobs:
   campaign:
     name: ${{ matrix.target }} shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    # Comfortably inside the six-hour hosted-runner limit, with room for the
-    # toolchain and cargo-fuzz install at the start.
+    # Inside the six-hour hosted-runner limit with room for the toolchain and
+    # cargo-fuzz install, which run before the fuzzing starts. Anything above
+    # 18000 seconds per shard will be cancelled by this timeout rather than
+    # finishing, so that is the real ceiling for the input above.
     timeout-minutes: 330
     strategy:
       fail-fast: false

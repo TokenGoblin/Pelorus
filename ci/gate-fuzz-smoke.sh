@@ -30,8 +30,12 @@ fi
 # `rustup show active-toolchain` prints installation progress and warnings on
 # the first call for a toolchain that is not yet downloaded, so take the last
 # line rather than the first.
-root_tc="$(rustup show active-toolchain 2>/dev/null | tail -1 | cut -d' ' -f1)"
-fuzz_tc="$(cd fuzz && rustup show active-toolchain 2>/dev/null | tail -1 | cut -d' ' -f1)"
+# `|| true` on each: ci/lib.sh sets `set -euo pipefail`, so an assignment whose
+# command substitution fails aborts the script at that line and the diagnostics
+# below never run. A gate that dies with a bare non-zero exit and no message is
+# a gate somebody has to reverse-engineer at midnight.
+root_tc="$(rustup show active-toolchain 2>/dev/null | tail -1 | cut -d' ' -f1 || true)"
+fuzz_tc="$(cd fuzz && rustup show active-toolchain 2>/dev/null | tail -1 | cut -d' ' -f1 || true)"
 info "toolchain at repository root: $root_tc"
 info "toolchain inside fuzz/:      $fuzz_tc"
 case "$root_tc" in
@@ -45,13 +49,27 @@ esac
 # FUZZ_TARGET restricts the run to one target. The campaign uses it to shard
 # across jobs, because a GitHub-hosted job is capped at six hours and a 24-hour
 # campaign therefore cannot be one job.
-targets="$(cd fuzz && cargo fuzz list 2>/dev/null)"
+targets="$(cd fuzz && cargo fuzz list 2>/dev/null || true)"
+
+# FUZZ_TARGET restricts the run to one target. The campaign uses it to shard
+# across jobs, because a GitHub-hosted job is capped at six hours and a 24-hour
+# campaign therefore cannot be one job.
+#
+# Matched with an explicit loop. The obvious `case " $targets " in *" $t "*`
+# does NOT work: `cargo fuzz list` is newline-separated, so no name is ever
+# surrounded by spaces and every shard fails with "not a known target". That
+# shipped, and the first real campaign died in twelve seconds instead of
+# running for four hours.
 if [ -n "${FUZZ_TARGET:-}" ]; then
-    case " $targets " in
-        *" $FUZZ_TARGET "*) targets="$FUZZ_TARGET" ;;
-        *) fail "FUZZ_TARGET=$FUZZ_TARGET is not a known target"
-           verdict "fuzz-smoke" ;;
-    esac
+    found=""
+    for candidate in $targets; do
+        [ "$candidate" = "$FUZZ_TARGET" ] && found="$candidate"
+    done
+    if [ -z "$found" ]; then
+        fail "FUZZ_TARGET=$FUZZ_TARGET is not a known target; have: $(echo $targets)"
+        verdict "fuzz-smoke"
+    fi
+    targets="$found"
 fi
 if [ -z "$targets" ]; then
     fail "no fuzz targets defined"

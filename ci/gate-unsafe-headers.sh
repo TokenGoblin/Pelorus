@@ -62,7 +62,10 @@ done < <(git ls-files -z 'crates/*.rs')
 # get around it." A denied lint that can be waived at the call site is a style
 # preference, not a rule, so the waiver is what the gate looks for.
 WAIVER='(allow|expect)\(clippy::(unwrap_used|expect_used|indexing_slicing|panic)\)'
-for crate in px-content px-net px-mcp; do
+# Must match the crates carrying `[lints] workspace = true`. px-ipc was added
+# to that set and omitted here, which left an allow() in the crate that decodes
+# hostile bytes passing CI silently — the exact bypass this scan exists for.
+for crate in px-content px-net px-mcp px-ipc; do
     [ -d "crates/$crate" ] || continue
     while IFS= read -r -d '' path; do
         if grep -nE "$WAIVER" "$path" >/dev/null 2>&1; then

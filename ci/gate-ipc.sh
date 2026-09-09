@@ -82,10 +82,18 @@ fi
 # ChannelId is the broker's answer to "who sent this". If it were ever
 # serialisable it could travel inside a message, and then it would be a claim
 # rather than an observation.
-if [ ! -f "$BROKER_SRC" ]; then
-    fail "$BROKER_SRC does not exist"
-elif grep -B3 'pub struct ChannelId' "$BROKER_SRC" | grep -q 'Serialize'; then
-    fail "ChannelId derives Serialize; it must never be able to reach the wire"
+# Search the whole crate, not one file, and prove the type was found before
+# drawing a conclusion from its absence. The `derive(` filter is not decoration:
+# without it the check matches the word "Serialize" in the type's own doc
+# comment, which explains why it must never be serialisable. `grep -B3 X | grep -q Y` reports
+# success when X matches nothing at all, so renaming or moving the type would
+# have turned this into a check that passed having inspected nothing.
+channel_id_decl="$(grep -rn 'struct ChannelId' crates/px-broker/src/ 2>/dev/null || true)"
+if [ -z "$channel_id_decl" ]; then
+    fail "no 'struct ChannelId' found under crates/px-broker/src/; this check"
+    fail "  cannot pass by not finding what it is looking for"
+elif grep -rn -B6 'struct ChannelId' crates/px-broker/src/ | grep 'derive(' | grep -q 'Serialize'     || grep -rn 'impl .*Serialize for ChannelId' crates/px-broker/src/ >/dev/null 2>&1; then
+    fail "ChannelId is serialisable; it must never be able to reach the wire"
 else
     ok "ChannelId cannot be serialised onto the wire"
 fi
