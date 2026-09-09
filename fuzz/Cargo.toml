@@ -15,6 +15,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 px-ipc = { path = "../crates/px-ipc" }
+px-broker = { path = "../crates/px-broker" }
 
 [[bin]]
 name = "frame_request"
@@ -26,6 +27,20 @@ bench = false
 [[bin]]
 name = "frame_response"
 path = "fuzz_targets/frame_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "channel_stream"
+path = "fuzz_targets/channel_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "broker_sequence"
+path = "fuzz_targets/broker_sequence.rs"
 test = false
 doc = false
 bench = false

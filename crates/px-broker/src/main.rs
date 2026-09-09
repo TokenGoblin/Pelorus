@@ -6,13 +6,21 @@
 //! carries the brand, and `packaging/` supplies the user-facing name (§2.1).
 //!
 //! Phase 1 has no chrome and no engine, so this spawns one content process,
-//! proves the boundary is real, and exits. `px-ui` takes over at Phase 18.
+//! serves it under a deadline until it goes away, and exits. `px-ui` takes
+//! over at Phase 18.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
-use px_broker::{Broker, ContentProcess};
-use px_ipc::{Request, Response};
+use px_broker::{Broker, ContentProcess, ServeError, serve_once};
+
+/// How long a content process may stay silent before it is reaped.
+///
+/// A stalled peer is cheaper for an attacker than a crashing one, and without
+/// a deadline it is also more effective: the broker is the process that may
+/// not die, and nothing else in the design stops it waiting forever.
+const DEADLINE: Duration = Duration::from_secs(5);
 
 fn main() -> ExitCode {
     let Some(executable) = content_executable() else {
@@ -29,24 +37,26 @@ fn main() -> ExitCode {
         }
     };
 
-    let request = Request::Echo {
-        payload: b"phase 1".to_vec(),
-    };
-    match content.round_trip(&request) {
-        Ok(Response::Echo { payload }) if payload == b"phase 1" => {
-            println!(
-                "content process on channel {} answered",
-                content.channel_id().as_u64()
-            );
-            ExitCode::SUCCESS
-        }
-        Ok(other) => {
-            eprintln!("px-browser: unexpected response: {other:?}");
-            ExitCode::FAILURE
-        }
-        Err(error) => {
-            eprintln!("px-browser: {error}");
-            ExitCode::FAILURE
+    let channel = content.channel_id();
+    let mut served = 0u32;
+    loop {
+        match serve_once(&mut broker, &mut content, DEADLINE) {
+            Ok(_) => served = served.saturating_add(1),
+            Err(ServeError::Closed) => {
+                println!(
+                    "content process on channel {} served {served} requests",
+                    channel.as_u64()
+                );
+                return ExitCode::SUCCESS;
+            }
+            Err(reason) => {
+                // Every one of these is the peer's choice, not an accident:
+                // it stalled, desynchronised the stream, or stopped reading.
+                eprintln!("px-browser: reaping content process: {reason:?}");
+                let _ = content.kill();
+                broker.close_channel(channel);
+                return ExitCode::FAILURE;
+            }
         }
     }
 }

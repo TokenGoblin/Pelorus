@@ -14,6 +14,16 @@
 //! otherwise. The distinction is the whole design. "I am tab 7" is
 //! unrepresentable; "tell me about frame 7" is a question the broker is
 //! entitled to refuse.
+//!
+//! # Nothing here explains a refusal
+//!
+//! [`Response::Denied`] carries no reason. It used to distinguish "no such
+//! frame" from "not yours", which let a hostile content process sweep the
+//! `FrameId` space and read off — exactly, with no false positives — which
+//! slots hold live frames belonging to other sites, and how often those slots
+//! churn as tabs open and close. That is a cross-site side channel in a
+//! browser whose thesis is site isolation. The reason still exists broker-side
+//! for the audit log; it does not cross the boundary.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,10 +35,8 @@ use serde::{Deserialize, Serialize};
 /// index-plus-reuse rather than of the DOM, and a frame handle crosses a
 /// process boundary — where the holder of a stale one may be hostile.
 ///
-/// The fields are private and there is no constructor here. A content process
-/// cannot mint a `FrameId`; it can only echo back one the broker gave it, and
-/// the broker checks the generation. Forging one is possible on the wire —
-/// it is two integers — which is exactly why possession is never authority.
+/// Forging one is trivial: it is two integers on the wire. That is expected.
+/// Possession is never authority; the broker checks ownership.
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FrameId {
     index: u32,
@@ -36,9 +44,9 @@ pub struct FrameId {
 }
 
 impl FrameId {
-    /// Mint a handle. Broker-side only in practice; a content process has no
-    /// reason to call this and gains nothing by it, since the broker checks
-    /// ownership rather than trusting the value.
+    /// Mint a handle. Broker-side in practice; a content process gains nothing
+    /// by calling it, since the broker checks ownership rather than trusting
+    /// the value.
     pub fn new(index: u32, generation: u32) -> Self {
         Self { index, generation }
     }
@@ -68,30 +76,12 @@ pub enum FrameHost {
     Remote,
 }
 
-/// Why the broker refused.
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DenyReason {
-    /// The channel does not hold the frame it named.
-    NotYourFrame,
-    /// The frame does not exist, or its slot has been reused since.
-    NoSuchFrame,
-    /// The channel is not open. Nothing arriving on it is served, whatever it
-    /// asks for — a closed channel that still answers `Ping` has not really
-    /// been closed.
-    UnknownChannel,
-    /// The broker failed while handling the request and refused rather than
-    /// guessing. Distinct from the frame reasons on purpose: `DenyReason` is
-    /// documented as being for the audit log, and reporting an internal fault
-    /// as a frame-resolution failure sends an investigator to the wrong place.
-    Internal,
-}
-
 /// Content process to broker.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     /// Liveness.
     Ping,
-    /// Return the payload unchanged. The whole of Phase 1's content process.
+    /// Return the payload unchanged. The whole of Phase 1's traffic.
     Echo {
         /// Bounded by `MAX_MESSAGE_BYTES` at the framing layer.
         payload: Vec<u8>,
@@ -119,12 +109,9 @@ pub enum Response {
         /// Local or elsewhere. Never which elsewhere.
         host: FrameHost,
     },
-    /// Refused, and why. Fail closed: anything the broker cannot decide
-    /// affirmatively arrives here.
-    Denied {
-        /// The reason, for the audit log.
-        reason: DenyReason,
-    },
+    /// Refused. Fail closed: anything the broker cannot decide affirmatively
+    /// arrives here, and it says nothing about why — see the module docs.
+    Denied,
 }
 
 #[cfg(test)]
@@ -132,9 +119,9 @@ mod tests {
     use super::*;
 
     /// A `FrameId` is two integers on the wire, so a hostile peer can produce
-    /// any value it likes. This test exists to record that this is *expected*:
-    /// the defence is that the broker checks ownership, never that the handle
-    /// is unforgeable.
+    /// any value it likes. This test records that this is *expected*: the
+    /// defence is that the broker checks ownership, never that the handle is
+    /// unforgeable.
     #[test]
     fn a_frame_id_is_forgeable_and_that_is_fine() {
         let forged = FrameId::new(u32::MAX, u32::MAX);
@@ -145,5 +132,17 @@ mod tests {
     #[test]
     fn frame_ids_of_different_generations_are_different_handles() {
         assert_ne!(FrameId::new(3, 1), FrameId::new(3, 2));
+    }
+
+    /// The oracle this variant used to be. If a reason ever returns to the
+    /// wire, it must not let a peer distinguish "gone" from "not yours".
+    #[test]
+    fn a_denial_carries_no_information() {
+        let encoded = postcard::to_allocvec(&Response::Denied).expect("encode");
+        assert_eq!(
+            encoded.len(),
+            1,
+            "Denied must be a bare discriminant; it encoded to {encoded:?}"
+        );
     }
 }
