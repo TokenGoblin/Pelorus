@@ -110,6 +110,22 @@ says so when it cannot.
 passes `-Z build-std` for TSAN, which needs the `rust-src` component — already
 present in the pinned nightly, for `fuzz/`.
 
+**Doctests cannot be sanitized, so they are excluded.** `RUSTFLAGS` does not
+reach `rustdoc`, so a doctest crate is compiled *without* the sanitizer while
+its dependencies are compiled with it, and rustc rejects the combination:
+`mixing -Zsanitizer will cause an ABI mismatch`. This surfaced on the first CI
+run as twenty-six errors in `px-broker` that had nothing to do with threads.
+`--all-targets` excludes doctests, which costs nothing here — a documentation
+example is not where a data race hides, and ordinary `cargo test` still runs
+them unsanitized on every push.
+
+The way it presented is the more useful lesson. The script reported "TSAN
+reported a data race" because the command exited non-zero, which was a cause it
+had not established; the run had failed to *build*. A check that names a cause
+it did not verify is how a report stops being worth reading, so both messages
+now say what is actually known — that the run failed, and the output says
+whether it was a finding or the build.
+
 **CI gets slower.** Sanitized builds do not share artifacts with the ordinary
 ones, so this is a second full build of the affected crates on each platform.
 

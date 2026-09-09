@@ -153,14 +153,25 @@ if [ "${1:-}" = "--self-check" ]; then
     exit 0
 fi
 
-# ASAN, both platforms. No -Z build-std: it is not needed for ASAN to find
-# faults in this crate's own code, and it triples the build.
+# --all-targets is what excludes doctests, and it is not a tidiness choice.
+# RUSTFLAGS does not reach rustdoc, so a doctest crate is built *without* the
+# sanitizer while its dependencies are built with it, and rustc rejects the
+# mix: "mixing -Zsanitizer will cause an ABI mismatch". Found on the first CI
+# run, where it surfaced as 26 errors in px-broker rather than as anything to
+# do with threads. Sanitizing documentation examples buys nothing anyway;
+# ordinary `cargo test` still runs them, unsanitized, on every push.
+#
+# No -Z build-std for ASAN: it is not needed to find faults in this project's
+# own code, and it triples the build.
 info "ASAN: px-sandbox, px-broker"
 if RUSTFLAGS="-Zsanitizer=address" cargo "+$NIGHTLY" test \
-        -p px-sandbox -p px-broker --target "$SANITIZER_TARGET"; then
+        -p px-sandbox -p px-broker --all-targets --target "$SANITIZER_TARGET"; then
     ok "ASAN clean"
 else
-    fail "ASAN reported a fault"
+    # Deliberately not "ASAN reported a fault": this branch is also reached by
+    # a build failure, and naming a cause the run did not establish is how a
+    # report stops being worth reading.
+    fail "the ASAN run failed — a detected fault, or the build. See above."
 fi
 
 # TSAN, Linux only — there is no Windows support. -Z build-std because TSAN
@@ -168,11 +179,11 @@ fi
 if [ "$HOST_OS" = "linux" ]; then
     info "TSAN: px-sandbox, px-broker"
     if RUSTFLAGS="-Zsanitizer=thread" cargo "+$NIGHTLY" test \
-            -Z build-std -p px-sandbox -p px-broker \
+            -Z build-std -p px-sandbox -p px-broker --all-targets \
             --target "$SANITIZER_TARGET"; then
         ok "TSAN clean"
     else
-        fail "TSAN reported a data race"
+        fail "the TSAN run failed — a detected race, or the build. See above."
     fi
 else
     info "TSAN skipped: no Windows support (ADR 011)"
