@@ -26,6 +26,7 @@ unsafe-headers:ci/gate-unsafe-headers.sh
 brand-leak:tests/brand/gate-brand-leak.sh
 structure:ci/gate-structure.sh
 compat-list:ci/gate-compat-list.sh
+ipc:ci/gate-ipc.sh
 "
 
 failed=""
