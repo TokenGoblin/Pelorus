@@ -19,6 +19,7 @@
 //! resolves an ambiguity differently from an upstream cache is one half of a
 //! response-splitting bug.
 
+pub mod cookie;
 pub mod fetch;
 pub mod hsts;
 pub mod http1;
