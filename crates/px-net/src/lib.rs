@@ -20,6 +20,7 @@
 //! response-splitting bug.
 
 pub mod fetch;
+pub mod hsts;
 pub mod http1;
 pub mod partition;
 pub mod pool;

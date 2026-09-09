@@ -57,6 +57,13 @@ pub enum FetchError {
     /// The request could not be built — a path with a control character, a
     /// header value that would split the request.
     BadRequest(&'static str),
+    /// The host is on the HSTS preload list and the origin is plaintext.
+    ///
+    /// Refused rather than upgraded, because upgrading would change the origin
+    /// — scheme and port are both part of it — and therefore move the request
+    /// into a partition the caller did not build a key for. The caller
+    /// consults `hsts::PreloadList::upgrade` first; see `crate::hsts`.
+    PlaintextToPreloadedHost,
 }
 
 impl std::fmt::Display for FetchError {
@@ -67,6 +74,10 @@ impl std::fmt::Display for FetchError {
             Self::Protocol(error) => write!(f, "malformed response: {error}"),
             Self::Io(error) => write!(f, "transport error: {error}"),
             Self::BadRequest(detail) => write!(f, "cannot build the request: {detail}"),
+            Self::PlaintextToPreloadedHost => write!(
+                f,
+                "this host is on the HSTS preload list and must be reached over                  https; build the key from the upgraded origin"
+            ),
         }
     }
 }
@@ -100,7 +111,33 @@ impl Response {
 /// caller holding a full URL resolves it to a key and a path first, which is
 /// what forces the partition decision to be made rather than inferred.
 pub fn fetch(key: &PartitionKey, path: &str) -> Result<Response, FetchError> {
+    fetch_with_hsts(key, path, None)
+}
+
+/// Fetch, checking the origin against an HSTS preload list first.
+///
+/// Separate from [`fetch`] rather than folded into it because the list is
+/// large and loading it per request would be absurd — the caller owns it and
+/// passes a reference. A `None` list means the check is skipped, which is
+/// correct for a caller that has already done it and wrong for one that has
+/// not; that is why the parameter is explicit rather than defaulted.
+pub fn fetch_with_hsts(
+    key: &PartitionKey,
+    path: &str,
+    preload: Option<&crate::hsts::PreloadList>,
+) -> Result<Response, FetchError> {
     let origin = key.origin();
+
+    // Before anything is built or connected. A plaintext request to a
+    // preloaded host is the sslstrip position, and it must not leave the
+    // machine even once.
+    if let Some(list) = preload
+        && !origin.is_secure()
+        && list.requires_https(origin.host())
+    {
+        return Err(FetchError::PlaintextToPreloadedHost);
+    }
+
     let request = build_request(origin.host(), path)?;
 
     let address = format!("{}:{}", origin.host(), origin.port());
