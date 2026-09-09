@@ -9,7 +9,7 @@ after this is written against a boundary that already exists.
 
 | Item | Where | Result |
 |---|---|---|
-| IPC deserializers fuzz clean for 24h | `fuzz-campaign` workflow | **Outstanding** — see below |
+| IPC deserializers fuzz clean for 24h | `fuzz-campaign` workflow | **Pass** — second campaign, see below |
 | Broker rejects any message asserting its own identity | `hostile_identity_*` ×5, plus two source checks | **Pass** |
 | Killing the content process is recovered from cleanly | `crash_restart_*` ×5, real processes, both OSes | **Pass** |
 | Message size limits enforced, tested with a hostile length prefix | `size_limit_*` ×5 | **Pass** |
@@ -42,10 +42,56 @@ Two source checks in `ci/gate-ipc.sh` guard the property against future code,
 because tests cannot prove that a field which does not exist yet will never
 exist. Both were verified to fire on a synthetic violation, not merely to pass.
 
-## What is outstanding
+## The fuzzing gate item
 
-**The 24-hour campaign ran, was clean, and did not test what it was supposed
-to test.**
+It took two campaigns. The first was clean and did not test what it was
+supposed to test; the second did, and is the one this gate closes on.
+
+### Campaign 2 — the one that counts
+
+Run [34320581865](https://github.com/TokenGoblin/Pelorus/actions/runs/34320581865):
+six shards, `-max_total_time=14400` each, **no crashes and no artifacts
+written**.
+
+| Target | Shard | Runs | cov | ft | corpus |
+|---|---|---|---|---|---|
+| `frame_request` | 1 | 6,159,406,185 | 170 | 208 | 94 / 1,377 b |
+| `frame_request` | 2 | 7,187,748,436 | 170 | 208 | 101 / 1,279 b |
+| `frame_response` | 1 | 8,551,169,682 | 152 | 190 | 85 / 1,259 b |
+| `channel_stream` | 1 | 3,087,919,159 | 178 | 653 | 264 / 1,020 KiB |
+| `channel_stream` | 2 | 2,596,913,344 | 178 | 668 | 254 / 1,229 KiB |
+| `broker_sequence` | 1 | 2,973,383 | 512 | 3,346 | 1,025 / 270 KiB |
+
+**The flag applied this time, and it was verified rather than assumed.** Three
+independent checks, because the failure being guarded against is an edit that
+reports success without doing anything:
+
+- `-max_len=1100000` appears on the `Running` line of all six shards.
+- The `-max_len is not provided` warning appears **zero** times. It appeared on
+  every shard of campaign 1.
+- libFuzzer's own `lim:` field climbs to `1100000` and stays there for 1,360
+  log lines. This is the load-bearing one: the flag being on the command line
+  proves it was passed, but `lim:` proves libFuzzer acted on it.
+
+`-max_len` is 1,100,000 against a `MAX_MESSAGE_BYTES` of 1,048,576, so the
+limit is straddled deliberately: inputs were generated on both sides of the
+boundary, and the over-limit rejection path in `recv` was reachable rather than
+merely present.
+
+**The larger inputs changed the result, which is the proof they mattered.**
+`channel_stream`'s corpora are now 1,020 KiB and 1,229 KiB — sizes structurally
+unreachable under a 4 KiB cap — and `broker_sequence` went from 343 cov / 2,104
+ft to **512 cov / 3,346 ft**, a ~49% coverage gain against a live `Broker`.
+Campaign 1's clean result was not merely under-scoped; it was measurably
+blind to the state this one reached.
+
+The honest statement of this gate item is now the item as written: **24 CPU-hours
+of fuzzing across the IPC deserializers, with inputs spanning the message-size
+boundary, found no crash.**
+
+### Campaign 1 — kept because the failure is the lesson
+
+**It ran, was clean, and did not test what it was supposed to test.**
 
 Run [34303798308](https://github.com/TokenGoblin/Pelorus/actions/runs/34303798308):
 six shards, 14,401 seconds each — a genuine 24 CPU-hours — roughly 32 billion
@@ -81,10 +127,9 @@ crash in inputs up to 4096 bytes.** That is not nothing — `channel_stream` and
 reached 343 coverage points and 2,104 features driving a live `Broker` — but it
 is not the item as written, and the size boundary remains unfuzzed.
 
-The script is fixed and verified this time by asserting the string is present
-after writing. A second campaign is running against the corrected script.
-
-Until it completes, **this phase's gate is not met.**
+The script was fixed and the fix verified by asserting the string is present in
+the file after writing, rather than trusting the edit to have happened.
+Campaign 2 above is that corrected script, and it closes the item.
 
 The pattern is worth naming because it is the third instance tonight: a change
 that reports success without doing anything is indistinguishable from one that
@@ -94,9 +139,53 @@ third.
 **The adversarial review.** Done, and it is the reason most of this report
 exists. §10 asks for "a dedicated session whose only job is attacking the
 previous session's output"; it found the wedges, the amplification, the oracle,
-and the fact that `dispatch` had never run on the IPC path. A second adversarial
-pass against the rewritten code is warranted before this phase closes — the
-supervisor and the direction inversion are new code that no adversary has seen.
+and the fact that `dispatch` had never run on the IPC path.
+
+### The second adversarial pass
+
+The one this report asked for before the phase closed, against the code the
+first review caused: the supervisor, the direction inversion and the tagged
+codec, none of which an adversary had seen. It attacked the codec's framing,
+the worker threads and lifecycle, and the capability model.
+
+**It found one defect, and it is latent rather than live.** `FrameTree::destroy`
+frees a slot without removing the handle from the owner's `hosts` set or from
+any viewer's `visible` set — and `close_channel`'s purge computes its `live`
+set by unioning every channel's `hosts`, so stale `hosts` entries preserve the
+matching stale `visible` entries through the very purge written to bound those
+sets. Confirmed with a temporary in-crate test asserting both halves, then
+reverted. It is unreachable today: `destroy` has no caller outside tests and
+`dispatch` handles only `Ping`, `Echo` and `FrameHost`. It is in the backlog
+against the phase that adds `Request::DestroyFrame`, which `destroy`'s own doc
+comment already anticipates.
+
+**What it tried and did not break.** Recorded because a review that reports
+only findings does not say how hard it looked:
+
+- *Reflecting the broker's bytes back.* Per-direction tags make an echoing
+  child produce `Malformed`.
+- *A length prefix that is never honoured.* Chunked reads mean a declared
+  megabyte costs 8 KiB until the bytes actually arrive.
+- *A valid prefix with junk appended.* `take_from_bytes` plus a non-empty
+  remainder check keeps the frame-to-message mapping injective.
+- *Unbounded broker memory.* Both queues are `sync_channel` at `QUEUE_DEPTH`,
+  `reply` uses `try_send` and reports `NotDraining` rather than absorbing.
+- *Sweeping the handle space.* `DenyReason` never reaches the wire;
+  `Decision::deny` always emits a bare `Response::Denied`, pinned by a test
+  asserting it encodes to one byte.
+- *Forging a handle.* `FrameId::new(u32::MAX, u32::MAX)` misses the slot
+  vector and resolves to `None`; every accessor returns `Option` and there is
+  no infallible variant.
+- *Reviving authority across a restart.* `restart` spawns before it closes,
+  mints a new `ChannelId`, and `dispatch` denies an unknown channel before it
+  looks at the request at all.
+- *Half-open and stale states.* `send` refuses oversized frames before writing
+  a byte; any error that could misalign the stream poisons the channel
+  permanently and poisoning is never cleared.
+
+The leaked reader thread on an orphaned pipe was re-examined and left alone: it
+is documented at `abandon`, bounded by `MAX_RESTARTS`, and already in the
+backlog against Phase 17's process-tree teardown.
 
 ## What the phase found
 
@@ -237,13 +326,23 @@ structure is not there, because nothing navigates yet.
 
 ## Verdict
 
-Three of four gate items pass in CI on both operating systems. The phase is
-**not closeable** until a campaign completes against the current code.
+**All four gate items pass in CI on both operating systems.** The phase closes.
 
-Two things about that verdict are worth saying plainly. The three passing items
-pass against code that was substantially rewritten after review — the
-supervisor, the direction inversion and the tagged codec are new, so a second
-adversarial pass is warranted before this closes. And the gate that reports
-those three greens is itself seven repairs old: it is more trustworthy than it
-was this morning, and that is a statement about how much it was worth before,
-not a claim that it is finished.
+The two conditions this report set for closing are both met. The campaign ran
+against the current code with `-max_len` verified applied three independent
+ways, and the coverage it gained over the capped run is the evidence it tested
+something the first campaign could not reach. The second adversarial pass ran
+against the rewritten supervisor, direction inversion and tagged codec; it
+found one latent defect, which is recorded in the backlog against the phase
+that makes it reachable.
+
+The one CI job still red is `compat-list`, which is Phase 0's outstanding
+deliverable and no part of this phase's gate. It is red on `main` as well.
+
+Two things are worth saying plainly rather than leaving implied. The gate that
+reports these greens is itself seven repairs old — it is more trustworthy than
+it was, which is a statement about how little it was worth before, not a claim
+that it is finished. And the fuzzing item is closed on 24 CPU-hours against
+four targets, not on a proof: the honest claim is that no crash was found in
+inputs spanning the size boundary, which is weaker than "there is none" and is
+the strongest thing fuzzing ever says.

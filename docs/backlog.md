@@ -235,3 +235,33 @@ Format: one entry per defect.
 - **Why deferred:** the real fix is process-tree teardown — Windows job objects
   and Linux cgroups — which is phase 17's work. The cap turns an unbounded leak
   an attacker drives into a bounded one.
+
+## Destroying a frame leaves its handle in every capability set
+
+- **Found in:** phase 1, `crates/px-broker/src/lib.rs`
+- **Belongs to:** the phase that adds `Request::DestroyFrame`
+- **What:** `FrameTree::destroy` frees the slot but touches neither the
+  owner's `ChannelCaps::hosts` nor any viewer's `ChannelCaps::visible`. Today
+  that is unreachable — `destroy` has no caller outside tests and `dispatch`
+  handles only `Ping`, `Echo` and `FrameHost` — but `destroy`'s own doc
+  comment anticipates `Request::DestroyFrame` arriving, and the obvious
+  wrapper for it inherits the problem.
+
+  There is no capability confusion. `can_see` and `holds_frame` both consult
+  `FrameTree::owner` first, so a destroyed frame fails closed however stale
+  the sets are, and slot reuse bumps the generation. The defect is unbounded
+  growth, and it has a second half that is easy to miss: `close_channel`
+  builds its `live` set by unioning every channel's `hosts`, so stale `hosts`
+  entries keep the matching stale `visible` entries alive through the very
+  purge that was added to stop those sets growing without bound.
+
+  Verified rather than reasoned about: a temporary in-crate test destroyed a
+  granted frame, closed an unrelated channel, and asserted both halves —
+  `hosts` retained the frame and the viewer's `visible` entry survived the
+  purge. Both passed. The test was reverted; it belongs to the phase that
+  makes the path reachable.
+- **Why deferred:** phase discipline. It is not a phase 1 gate item, no wire
+  message reaches it, and inventing `Broker::destroy_frame` now to fix a
+  defect nothing can trigger is exactly the scope creep the backlog exists to
+  absorb. Recorded so the wrapper is written with the capability sets in mind
+  rather than discovered leaking later.
