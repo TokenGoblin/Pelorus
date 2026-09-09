@@ -211,7 +211,13 @@ structure is not there, because nothing navigates yet.
 
 ## Verdict
 
-Three of four gate items pass on both operating systems. The phase is **not
-closeable** until a 24-hour campaign is recorded and `px-ipc` has had its
-adversarial review — the second of which is, by §10's design, not something this
-session can do.
+Three of four gate items pass in CI on both operating systems. The phase is
+**not closeable** until a campaign completes against the current code.
+
+Two things about that verdict are worth saying plainly. The three passing items
+pass against code that was substantially rewritten after review — the
+supervisor, the direction inversion and the tagged codec are new, so a second
+adversarial pass is warranted before this closes. And the gate that reports
+those three greens is itself seven repairs old: it is more trustworthy than it
+was this morning, and that is a statement about how much it was worth before,
+not a claim that it is finished.
