@@ -10,11 +10,11 @@ after this is written against a boundary that already exists.
 | Item | Where | Result |
 |---|---|---|
 | IPC deserializers fuzz clean for 24h | `fuzz-campaign` workflow | **Outstanding** — see below |
-| Broker rejects any message asserting its own identity | `hostile_identity_*` ×4, plus two source checks | **Pass** |
-| Killing the content process is recovered from cleanly | `crash_restart_*` ×4, real processes, both OSes | **Pass** |
+| Broker rejects any message asserting its own identity | `hostile_identity_*` ×5, plus two source checks | **Pass** |
+| Killing the content process is recovered from cleanly | `crash_restart_*` ×5, real processes, both OSes | **Pass** |
 | Message size limits enforced, tested with a hostile length prefix | `size_limit_*` ×5 | **Pass** |
 
-28 tests, six of which cross a real process boundary. All CI jobs green on
+32 tests, six of which cross a real process boundary. All CI jobs green on
 Ubuntu and Windows except `compat-list`, which is Phase 0's outstanding
 deliverable.
 
@@ -46,12 +46,25 @@ exist. Both were verified to fire on a synthetic violation, not merely to pass.
 
 **The 24-hour campaign.** ADR 006 splits fuzzing into a 60-second smoke on every
 push and a scheduled campaign, with the gate satisfied by one recorded campaign
-run. The smoke job passes in CI. The campaign workflow is validated but has only
-been run at 120 seconds per target:
-[34297716092](https://github.com/TokenGoblin/Pelorus/actions/runs/34297716092)
-— 7,195,763 executions of `frame_response`, coverage 167, no crashes.
+run. The smoke job passes in CI. The full campaign is
+[34300051078](https://github.com/TokenGoblin/Pelorus/actions/runs/34300051078)
+— six shards, four hours each, 24 hours of fuzzing.
 
-Until a full campaign completes, **this phase's gate is not met.**
+The first attempt at it,
+[34298965894](https://github.com/TokenGoblin/Pelorus/actions/runs/34298965894),
+failed in twelve seconds on all six shards and is worth keeping in this report
+rather than quietly superseding. A code review found the cause: the
+`FUZZ_TARGET` membership test used `case " $targets " in *" $t "*`, and
+`cargo fuzz list` is newline-separated, so no target name is ever surrounded by
+spaces and none could ever match. Every shard exited immediately with "not a
+known target".
+
+Two things about that are worth stating plainly. The gate item this phase most
+depends on could never have gone green, and the run was dispatched and not
+checked — a job that fails in twelve seconds looks exactly like a job that has
+just started.
+
+Until the campaign completes, **this phase's gate is not met.**
 
 **The adversarial review.** §10 requires `px-ipc` to get "a dedicated session
 whose only job is attacking the previous session's output". That cannot be done
@@ -86,6 +99,48 @@ the `catch_unwind` deleted. The replacement drives a real panic through
 The second was subtler: suppressing the deliberate panic's output with
 `take_hook`/`set_hook` makes libtest fail the test, because the harness tracks
 panics through its own hook. The suppression is gone and the noise is accepted.
+
+## What the code review found
+
+Ten findings, all real. The critical one is above. The rest fall into two
+groups, and the second group is the uncomfortable one.
+
+**Three fail-closed gaps in the broker**, each of which made a stated guarantee
+mean less than it said:
+
+- `dispatch` never checked the channel was open. `close_channel` revoked frames,
+  but `Ping` still answered and `Echo` still echoed — a caller holding the id of
+  a killed, restarted or panicking process was still being served by a broker
+  that believed it had cut that process off. The existing test asserted
+  `channel_count` and `holds_frame` and passed straight over it.
+- `create_frame` mutated the tree before validating the channel, leaving an
+  unreclaimable slot on every failure. A crash loop leaked one per iteration.
+- `restart` closed the old channel before spawning, so a failed respawn left a
+  half-restarted object holding a `ChannelId` the broker had forgotten.
+
+Plus `FrameTree::create` minting the same `FrameId` for two slots on truncation,
+and `DenyReason` reporting an internal fault as a frame problem in a field
+documented as being for the audit log.
+
+**Three defects in the gate checks themselves**, which is the part worth
+noticing. The checks were the weakest code in the phase:
+
+- `px-ipc` was put under §4.3's panic lints and left out of the waiver scan, so
+  an `allow(clippy::unwrap_used)` in the crate that decodes hostile bytes would
+  have passed CI silently. `clippy.toml`'s comment asserted the opposite.
+- The `ChannelId` check was `grep -B3 X | grep -q Y`, which reports success when
+  `X` matches nothing at all. Renaming or moving the type would have turned it
+  into a check that passed having inspected nothing — the exact silent-absence
+  failure the `SUITES` loop three lines above it was written to prevent. The
+  first fix for it then matched the word "Serialize" in the type's own doc
+  comment explaining why it must never be serialisable.
+- `ci/gate-fuzz-smoke.sh` aborted under `set -e` before reaching its own
+  diagnostics.
+
+The pattern across all three: **a check that cannot fail is indistinguishable
+from a check that passes.** Every gate check in this phase now has a recorded
+negative control — the thing it detects was introduced deliberately and the
+check was watched to fire.
 
 ## What a passing check does not mean
 
