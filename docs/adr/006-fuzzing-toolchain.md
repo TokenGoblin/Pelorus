@@ -30,7 +30,7 @@ asserts that the release build resolves to the stable pin.
 | | Runs | Duration | Blocks |
 |---|---|---|---|
 | Smoke | Every push and PR | 60s per target, against the committed corpus | Yes |
-| Campaign | Scheduled, and on demand | 24h total across targets | No — reports |
+| Campaign | Scheduled, and on demand | 24h total, sharded | No — reports |
 
 Phase 1's gate item is satisfied by **one completed 24h campaign, recorded in
 the gate report with its run URL**, not by every push doing the impossible.
@@ -70,6 +70,15 @@ drift either.
 Fuzz binaries are never released, never hashed by the reproducibility gate, and
 never built by the release profile. Invariant 7 constrains what ships; `fuzz/`
 does not ship.
+
+**A GitHub-hosted job is killed at six hours, so the campaign cannot be one
+run.** This was found when the campaign was first dispatched for real, and it
+would have produced a gate nobody could ever satisfy: a weekly job cancelled at
+the six-hour mark, forever. The campaign is a matrix instead — targets x shards
+— giving 24 hours of fuzzing in about four hours of wall clock, each job well
+inside the limit. The shards are not redundant work: libFuzzer seeds from the
+clock and its own corpus, so three shards of one target explore different paths
+from the same committed starting corpus.
 
 **The 24h number is a floor that will need revisiting.** Twenty-four hours of
 libFuzzer against a small message enum will exhaust the interesting space quickly

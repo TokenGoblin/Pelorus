@@ -42,7 +42,17 @@ case "$fuzz_tc" in
     *) fail "fuzz/ does not resolve to a nightly toolchain; cargo-fuzz needs one" ;;
 esac
 
+# FUZZ_TARGET restricts the run to one target. The campaign uses it to shard
+# across jobs, because a GitHub-hosted job is capped at six hours and a 24-hour
+# campaign therefore cannot be one job.
 targets="$(cd fuzz && cargo fuzz list 2>/dev/null)"
+if [ -n "${FUZZ_TARGET:-}" ]; then
+    case " $targets " in
+        *" $FUZZ_TARGET "*) targets="$FUZZ_TARGET" ;;
+        *) fail "FUZZ_TARGET=$FUZZ_TARGET is not a known target"
+           verdict "fuzz-smoke" ;;
+    esac
+fi
 if [ -z "$targets" ]; then
     fail "no fuzz targets defined"
     verdict "fuzz-smoke"
