@@ -34,5 +34,10 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   OS documentation, not against what happened to work.
 - Fail closed. If a policy cannot be applied, the process does not launch
   (invariant 8). Never a silent fallback to unsandboxed.
-- ASAN and TSAN builds of this crate run in CI (§4.5).
+- ASAN and TSAN builds of this crate run in CI (§4.5, ADR 011). ASAN on
+  both platforms; TSAN on Linux only, because TSAN has no Windows support.
+  `ci/gate-sanitizers.sh --self-check` proves the sanitizer can still
+  detect a fault before a clean run is believed — this was written as an
+  invariant here for a phase and a half before it was true, so it now
+  points at the thing that makes it true.
 - Adversarial review required (§10).
