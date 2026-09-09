@@ -6,5 +6,13 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# No dependencies. Detection is file reads under /proc and /sys, which is the
+# interface the kernel documents for it. Applying a policy will need prctl and
+# CreateProcessAsUserW, and whether that arrives as hand-declared externs or as
+# libc/windows-sys is an open question for the user — neither is named in
+# build-spec §3.
+
+[features]
+# §14.4: test-only capabilities live behind this and are scanned for in release
+# artifacts, because a flag being off is not evidence.
+testing = []

@@ -1,9 +1,492 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-//! Process sandboxing; the only crate permitted unsafe.
+//! Process sandboxing, and the audited unsafe core (ADR 008).
 //!
-//! The one crate permitted to use unsafe. Every block carries a
-//! SAFETY comment justified against the OS documentation.
+//! # What is here, and what is not, as of Phase 2
 //!
-//! Phase 0 skeleton: no implementation. Phase 2 fills this in;
-//! see docs/build-spec.md §9 and this crate's CLAUDE.md.
+//! **Here:** capability detection and the refusal path. Which rungs of the
+//! ladder this machine offers, whether that clears the floor, and — when it
+//! does not — a refusal that names the mechanism actually missing and the
+//! remedy for the condition actually detected.
+//!
+//! **Not here yet:** applying a policy. That needs `prctl`/seccomp on Linux and
+//! `CreateProcessAsUserW` on Windows, and the Phase 2 gate keeps failing until
+//! it exists. Detection is deliberately separate because it is pure, testable
+//! on both platforms, and contains no `unsafe` at all — every probe below is a
+//! file read.
+//!
+//! # The ladder (ADR 007)
+//!
+//! §14.5 frames the Linux question as binary: sandbox available or not, SUID
+//! helper or refuse to run. That framing is wrong. On Linux the sandbox is four
+//! mechanisms with independent availability, and **only user namespaces is
+//! commonly restricted**. Treating its absence as "no sandbox" discards three
+//! that still work — and refuses in exactly the scenario §14.5 exists to
+//! survive, which is what drives a user to `--no-sandbox`.
+//!
+//! So: apply every rung available, record which applied, refuse below a floor.
+//!
+//! # Probes fail closed
+//!
+//! A probe that wrongly reports *success* launches an unsandboxed process
+//! believing it is sandboxed. A probe that wrongly reports failure refuses to
+//! start. The second is recoverable and the first is not, so anything
+//! inconclusive — a missing file, an unreadable file, an unparseable value —
+//! counts as unavailable.
+
+use std::fmt;
+
+/// One mechanism the platform may offer.
+///
+/// Named per platform rather than abstracted into "filesystem isolation" and
+/// friends: an operator reading a refusal needs the name their kernel or their
+/// documentation uses, not ours.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Rung {
+    /// Linux: a process cannot gain privileges through `execve`.
+    NoNewPrivs,
+    /// Linux: syscall filtering.
+    Seccomp,
+    /// Linux: filesystem restriction. Kernel 5.13+.
+    Landlock,
+    /// Linux: mount, PID and network isolation. The one commonly restricted.
+    UserNamespaces,
+    /// Windows: a token with privileges and SIDs removed.
+    RestrictedToken,
+    /// Windows: the object that makes killing a process tree possible, and
+    /// that carries the memory cap at Phase 17.
+    JobObject,
+}
+
+impl Rung {
+    /// The name to print. Deliberately the platform's spelling.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::NoNewPrivs => "no_new_privs",
+            Self::Seccomp => "seccomp-bpf",
+            Self::Landlock => "Landlock",
+            Self::UserNamespaces => "user namespaces",
+            Self::RestrictedToken => "restricted token",
+            Self::JobObject => "job object",
+        }
+    }
+}
+
+impl fmt::Display for Rung {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// The minimum that must be present for a content process to launch (ADR 007).
+///
+/// Below this, refuse. This is invariant 8 made specific: "if a security
+/// control cannot be applied, the operation does not proceed" needs a
+/// definition of *the* control, and this is it — in one place, so Phase 17 can
+/// raise it in one edit.
+pub const FLOOR: &[Rung] = if cfg!(target_os = "linux") {
+    &[Rung::NoNewPrivs, Rung::Seccomp]
+} else if cfg!(target_os = "windows") {
+    &[Rung::RestrictedToken, Rung::JobObject]
+} else {
+    // An unknown platform has no floor we can verify, so nothing clears it.
+    // Fail closed by construction rather than by remembering to.
+    &[Rung::NoNewPrivs, Rung::Seccomp, Rung::Landlock]
+};
+
+/// What this machine offers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Capabilities {
+    available: Vec<Rung>,
+    /// Why a rung is missing, when the platform told us something specific.
+    /// Keyed by rung, and used to produce a remedy for the condition actually
+    /// detected rather than a guess.
+    notes: Vec<(Rung, Restriction)>,
+}
+
+/// Why a mechanism is unavailable, specifically enough to act on.
+///
+/// §14.5 says to name the sysctl. There is no single sysctl: the restriction is
+/// spelled three different ways depending on the distribution, and naming the
+/// wrong one sends a user to edit a setting that does not exist on their
+/// machine. So the remedy comes from what was actually observed.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Restriction {
+    /// Debian and derivatives, historically.
+    UnprivilegedUsernsClone,
+    /// Recent Ubuntu.
+    ApparmorRestrictUserns,
+    /// RHEL-family and hardened kernels.
+    MaxUserNamespacesZero,
+    /// The kernel does not offer it at all.
+    NotSupported,
+    /// The probe could not reach a conclusion. Counts as unavailable.
+    Inconclusive,
+}
+
+impl Restriction {
+    /// What to tell the user, for the condition actually detected.
+    pub fn remedy(self) -> &'static str {
+        match self {
+            Self::UnprivilegedUsernsClone => {
+                "enable with: sysctl -w kernel.unprivileged_userns_clone=1"
+            }
+            Self::ApparmorRestrictUserns => {
+                "enable with: sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+            }
+            Self::MaxUserNamespacesZero => "enable with: sysctl -w user.max_user_namespaces=N",
+            Self::NotSupported => "this kernel does not provide it; a newer kernel is required",
+            Self::Inconclusive => {
+                "the check could not reach a conclusion, so it is treated as unavailable"
+            }
+        }
+    }
+}
+
+impl Capabilities {
+    /// Build a capability set directly.
+    ///
+    /// For callers that know what a machine offers without probing it —
+    /// tests, and eventually the spawn path reporting back which rungs it
+    /// actually managed to apply, which is not the same question as which
+    /// ones were detected.
+    pub fn with_available(available: &[Rung]) -> Self {
+        let mut caps = Self::default();
+        for rung in available {
+            caps.offer(*rung);
+        }
+        caps
+    }
+
+    /// Whether a rung is available.
+    pub fn has(&self, rung: Rung) -> bool {
+        self.available.contains(&rung)
+    }
+
+    /// Every rung available, in a stable order.
+    pub fn available(&self) -> &[Rung] {
+        &self.available
+    }
+
+    /// Why a rung is missing, if the probe learned something specific.
+    pub fn restriction(&self, rung: Rung) -> Option<Restriction> {
+        self.notes
+            .iter()
+            .find(|(r, _)| *r == rung)
+            .map(|(_, why)| *why)
+    }
+
+    /// Rungs in [`FLOOR`] that this machine does not offer.
+    pub fn missing_from_floor(&self) -> Vec<Rung> {
+        FLOOR
+            .iter()
+            .copied()
+            .filter(|rung| !self.has(*rung))
+            .collect()
+    }
+
+    /// Whether a content process may be launched at all.
+    pub fn clears_floor(&self) -> bool {
+        self.missing_from_floor().is_empty()
+    }
+
+    fn offer(&mut self, rung: Rung) {
+        if !self.available.contains(&rung) {
+            self.available.push(rung);
+        }
+    }
+
+    fn deny(&mut self, rung: Rung, why: Restriction) {
+        self.notes.retain(|(r, _)| *r != rung);
+        self.notes.push((rung, why));
+    }
+}
+
+/// Why a content process was refused, in a form a person can act on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal {
+    missing: Vec<Rung>,
+    remedies: Vec<(Rung, Restriction)>,
+}
+
+impl Refusal {
+    /// The mechanisms that were required and absent.
+    pub fn missing(&self) -> &[Rung] {
+        &self.missing
+    }
+}
+
+impl fmt::Display for Refusal {
+    /// The message a user meets. It names the mechanism and the remedy for the
+    /// condition detected, because §14.5's whole point is that a refusal
+    /// saying nothing is what sends someone to `--no-sandbox` blind.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "refusing to launch a content process: ")?;
+        for (index, rung) in self.missing.iter().enumerate() {
+            if index > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{rung} is unavailable")?;
+            if let Some((_, why)) = self.remedies.iter().find(|(r, _)| r == rung) {
+                write!(f, " ({})", why.remedy())?;
+            }
+        }
+        write!(
+            f,
+            ". A content process runs untrusted code; without this it would run \
+             with the same authority as the browser."
+        )
+    }
+}
+
+/// Detect what this machine offers.
+///
+/// Contains no `unsafe`. Every Linux probe is a file read under `/proc` or
+/// `/sys`, which is the interface the kernel documents for exactly this, and it
+/// keeps detection — the part that decides whether to refuse — free of FFI.
+pub fn detect() -> Capabilities {
+    let mut caps = Capabilities::default();
+
+    #[cfg(feature = "testing")]
+    if std::env::var_os("PX_TEST_FORCE_SANDBOX_UNAVAILABLE").is_some() {
+        // Test-only, and gated so it cannot exist in a release artifact.
+        // §14.4: a flag being off is not evidence; absence of the symbol from
+        // the shipped binary is, and ci/gate-sandbox.sh scans for it.
+        for rung in FLOOR {
+            caps.deny(*rung, Restriction::Inconclusive);
+        }
+        return caps;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        detect_linux(&mut caps);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Both Windows rungs are creation-time operations rather than
+        // queryable features: a restricted token and a job object are made,
+        // not detected. They are reported unavailable until the spawn path
+        // that creates them exists, which keeps the Phase 2 gate honestly red
+        // rather than passing on a probe that assumes success.
+        caps.deny(Rung::RestrictedToken, Restriction::Inconclusive);
+        caps.deny(Rung::JobObject, Restriction::Inconclusive);
+    }
+
+    caps
+}
+
+#[cfg(target_os = "linux")]
+fn detect_linux(caps: &mut Capabilities) {
+    // no_new_privs is a prctl with no query interface and no kernel config
+    // that removes it; it has been unconditionally present since 3.5. Treated
+    // as available, and the spawn path will still check the prctl's return
+    // value rather than trusting this.
+    caps.offer(Rung::NoNewPrivs);
+
+    // seccomp: the kernel exposes the actions it supports here when
+    // CONFIG_SECCOMP_FILTER is on. Absence means no filtering.
+    match read_trimmed("/proc/sys/kernel/seccomp/actions_avail") {
+        Some(actions) if actions.contains("errno") || actions.contains("kill") => {
+            caps.offer(Rung::Seccomp);
+        }
+        Some(_) => caps.deny(Rung::Seccomp, Restriction::NotSupported),
+        None => caps.deny(Rung::Seccomp, Restriction::Inconclusive),
+    }
+
+    // Landlock advertises itself in the active LSM list.
+    match read_trimmed("/sys/kernel/security/lsm") {
+        Some(lsms) if lsms.split(',').any(|lsm| lsm.trim() == "landlock") => {
+            caps.offer(Rung::Landlock);
+        }
+        Some(_) => caps.deny(Rung::Landlock, Restriction::NotSupported),
+        None => caps.deny(Rung::Landlock, Restriction::Inconclusive),
+    }
+
+    detect_user_namespaces(caps);
+}
+
+#[cfg(target_os = "linux")]
+fn detect_user_namespaces(caps: &mut Capabilities) {
+    // Three spellings, checked in the order that gives the most specific
+    // answer. §14.5 says to name "the sysctl"; there isn't one, and naming the
+    // wrong one sends a user to edit a setting their kernel does not have.
+    if let Some(value) = read_trimmed("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") {
+        if value == "1" {
+            caps.deny(Rung::UserNamespaces, Restriction::ApparmorRestrictUserns);
+            return;
+        }
+    }
+    if let Some(value) = read_trimmed("/proc/sys/kernel/unprivileged_userns_clone") {
+        if value == "0" {
+            caps.deny(Rung::UserNamespaces, Restriction::UnprivilegedUsernsClone);
+            return;
+        }
+    }
+    if let Some(value) = read_trimmed("/proc/sys/user/max_user_namespaces") {
+        if value == "0" {
+            caps.deny(Rung::UserNamespaces, Restriction::MaxUserNamespacesZero);
+            return;
+        }
+        caps.offer(Rung::UserNamespaces);
+        return;
+    }
+    // No max_user_namespaces at all means the kernel lacks user namespace
+    // support. Inconclusive would also be defensible; NotSupported is more
+    // useful to a reader and both refuse.
+    caps.deny(Rung::UserNamespaces, Restriction::NotSupported);
+}
+
+/// Read a sysctl-style file, or `None` if it cannot be read.
+///
+/// Unreadable is not "permitted". Every caller treats `None` as unavailable.
+#[cfg(target_os = "linux")]
+fn read_trimmed(path: &str) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|contents| contents.trim().to_owned())
+}
+
+/// Decide whether a content process may launch.
+///
+/// `Ok` carries the rungs that will be applied; `Err` is the refusal, with the
+/// message a user sees.
+pub fn admit(caps: &Capabilities) -> Result<Vec<Rung>, Refusal> {
+    let missing = caps.missing_from_floor();
+    if missing.is_empty() {
+        return Ok(caps.available().to_vec());
+    }
+    let remedies = missing
+        .iter()
+        .filter_map(|rung| caps.restriction(*rung).map(|why| (*rung, why)))
+        .collect();
+    Err(Refusal { missing, remedies })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with(available: &[Rung]) -> Capabilities {
+        Capabilities::with_available(available)
+    }
+
+    #[test]
+    fn sandbox_ladder_reports_what_this_machine_offers() {
+        let caps = detect();
+        // Detection must not panic and must be deterministic across calls —
+        // a probe that varies run to run cannot be reasoned about.
+        assert_eq!(caps, detect());
+    }
+
+    #[test]
+    fn sandbox_ladder_missing_rungs_are_named_not_counted() {
+        let caps = with(&[Rung::NoNewPrivs]);
+        let missing = caps.missing_from_floor();
+        if cfg!(target_os = "linux") {
+            assert_eq!(missing, vec![Rung::Seccomp]);
+        } else {
+            assert!(
+                !missing.is_empty(),
+                "a partial set must not clear the floor"
+            );
+        }
+    }
+
+    #[test]
+    fn sandbox_refuses_below_the_floor() {
+        let caps = Capabilities::default();
+        let refusal = admit(&caps).expect_err("an empty machine must be refused");
+        assert_eq!(refusal.missing(), FLOOR);
+    }
+
+    #[test]
+    fn sandbox_refuses_and_says_which_mechanism_is_missing() {
+        let mut caps = Capabilities::default();
+        for rung in FLOOR {
+            caps.deny(*rung, Restriction::NotSupported);
+        }
+        let refusal = admit(&caps).expect_err("refused");
+        let message = refusal.to_string();
+
+        for rung in FLOOR {
+            assert!(
+                message.contains(rung.name()),
+                "the refusal must name {rung}; got: {message}"
+            );
+        }
+        assert!(
+            message.contains("newer kernel") || message.contains("sysctl"),
+            "the refusal must carry a remedy; got: {message}"
+        );
+    }
+
+    /// §14.5 says to name the sysctl. There are three, and the message must
+    /// come from the condition detected rather than a guess — naming the wrong
+    /// one sends a user to edit a setting that does not exist.
+    #[test]
+    fn sandbox_refuses_with_the_remedy_for_the_condition_detected() {
+        let cases = [
+            (
+                Restriction::UnprivilegedUsernsClone,
+                "kernel.unprivileged_userns_clone",
+            ),
+            (
+                Restriction::ApparmorRestrictUserns,
+                "kernel.apparmor_restrict_unprivileged_userns",
+            ),
+            (
+                Restriction::MaxUserNamespacesZero,
+                "user.max_user_namespaces",
+            ),
+        ];
+        for (restriction, expected) in cases {
+            assert!(
+                restriction.remedy().contains(expected),
+                "{restriction:?} must name {expected}"
+            );
+            for (other, unexpected) in cases {
+                if other != restriction {
+                    assert!(
+                        !restriction.remedy().contains(unexpected),
+                        "{restriction:?} must not also name {unexpected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sandbox_refuses_when_a_probe_is_inconclusive() {
+        // Fail closed: an unreadable or unparseable probe is not permission.
+        let mut caps = Capabilities::default();
+        for rung in FLOOR {
+            caps.deny(*rung, Restriction::Inconclusive);
+        }
+        assert!(admit(&caps).is_err());
+        assert!(!caps.clears_floor());
+    }
+
+    #[test]
+    fn a_full_floor_is_admitted() {
+        let caps = with(FLOOR);
+        let applied = admit(&caps).expect("a machine at the floor must be admitted");
+        assert_eq!(applied, FLOOR.to_vec());
+    }
+
+    /// The ladder's point: losing a rung above the floor is not a refusal.
+    /// Refusing on the loss of user namespaces is what §14.5 recommends and
+    /// what ADR 007 rejects, because it refuses in the common case and drives
+    /// the user to --no-sandbox.
+    #[test]
+    fn sandbox_ladder_a_rung_above_the_floor_is_not_required() {
+        let mut caps = with(FLOOR);
+        caps.deny(Rung::UserNamespaces, Restriction::ApparmorRestrictUserns);
+        assert!(
+            caps.clears_floor(),
+            "losing user namespaces must not refuse the launch"
+        );
+        assert!(!caps.has(Rung::UserNamespaces));
+    }
+}
