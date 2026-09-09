@@ -20,4 +20,6 @@
 //! response-splitting bug.
 
 pub mod http1;
+pub mod partition;
+pub mod pool;
 pub mod psl;
