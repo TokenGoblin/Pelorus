@@ -145,7 +145,13 @@ fn sandbox_refuses_only_when_it_should_and_otherwise_launches() {
 
     if !px_sandbox::detect().clears_floor() {
         // This machine genuinely cannot clear the floor. Refusing is correct,
-        // and asserting a launch would make this a test about the machine.
+        // and asserting a launch would make this a test about the machine —
+        // but a silent skip is indistinguishable from a pass, so CI sets
+        // PX_REQUIRE_SANDBOX and turns the skip into a failure.
+        assert!(
+            std::env::var_os("PX_REQUIRE_SANDBOX").is_none(),
+            "PX_REQUIRE_SANDBOX is set, but this machine does not clear the sandbox floor.              The positive control would pass without launching anything."
+        );
         return;
     }
 

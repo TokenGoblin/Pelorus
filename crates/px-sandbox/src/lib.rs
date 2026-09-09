@@ -542,6 +542,28 @@ pub fn spawn(executable: &std::path::Path) -> Result<SandboxedChild, PolicyError
 mod tests {
     use super::*;
 
+    /// Whether this machine can actually exercise a policy — and a loud
+    /// failure when it cannot but was promised it could.
+    ///
+    /// The tests below return early on a machine below the floor, because
+    /// refusing there is correct behaviour and asserting a launch would make
+    /// them tests about the machine. But a silent skip is indistinguishable
+    /// from a pass, which is this project's most expensive recurring bug. So
+    /// CI sets `PX_REQUIRE_SANDBOX`, and under it a machine that cannot clear
+    /// the floor fails the suite rather than quietly skipping the only tests
+    /// that exercise the policy at all.
+    fn can_exercise_a_policy() -> bool {
+        if detect().clears_floor() {
+            return true;
+        }
+        assert!(
+            std::env::var_os("PX_REQUIRE_SANDBOX").is_none(),
+            "PX_REQUIRE_SANDBOX is set, but this machine does not clear the sandbox floor              ({:?} missing). The policy tests would pass without testing anything.",
+            detect().missing_from_floor()
+        );
+        false
+    }
+
     /// The content process stand-in these tests spawn.
     ///
     /// A real executable, not a mock: the question every test here asks is
@@ -560,10 +582,7 @@ mod tests {
     /// launches *under* a policy rather than beside one.
     #[test]
     fn sandbox_policy_a_content_process_launches_under_a_policy() {
-        if !detect().clears_floor() {
-            // Refusing here would be correct behaviour, not a test failure —
-            // and asserting the floor is cleared would make this test a
-            // statement about the machine rather than about the code.
+        if !can_exercise_a_policy() {
             return;
         }
 
@@ -589,7 +608,7 @@ mod tests {
     /// intention.
     #[test]
     fn sandbox_policy_never_reports_a_rung_the_machine_does_not_offer() {
-        if !detect().clears_floor() {
+        if !can_exercise_a_policy() {
             return;
         }
         let caps = detect();
@@ -611,7 +630,7 @@ mod tests {
     /// secure it.
     #[test]
     fn sandbox_policy_leaves_the_child_talkable_to() {
-        if !detect().clears_floor() {
+        if !can_exercise_a_policy() {
             return;
         }
         let mut child = spawn(&a_spawnable_executable()).expect("a sandboxed content process");

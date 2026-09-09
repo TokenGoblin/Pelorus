@@ -61,7 +61,13 @@ for entry in $SUITES; do
     ok "$item: $matched test(s), $in_home in $home, none ignored"
 done
 
-info "cargo test --workspace --locked --features testing"
+# A machine below the floor makes the policy tests skip, and a silent skip is
+# indistinguishable from a pass — the failure that has cost this project more
+# than any other. Under PX_REQUIRE_SANDBOX those skips become failures, so a
+# CI runner that cannot sandbox reports that instead of a green gate.
+export PX_REQUIRE_SANDBOX=1
+
+info "cargo test --workspace --locked --features testing (PX_REQUIRE_SANDBOX=1)"
 cargo test --workspace --locked --features testing || fail "tests failed"
 
 # ---------------------------------------------------------------------------
