@@ -234,3 +234,31 @@ implementing a stub `TElement` over a toy chunked arena before the tree builder
 is written — belongs in Phase 4's decomposition.
 
 Campaign still running at 3h05m.
+
+## 06:05 UTC — ADR 009 drafted, deliberately undecided
+
+Campaign 3h30m in; shards are four hours, so ~06:35.
+
+Drafted ADR 009, the IPC protocol shape, into the scratchpad. **This one is not
+taken on the standing overnight authorisation, and that is the point of the
+entry.** ADRs 007 and 008 were: 007 had a recommendation in §14.5, 008 had a
+forced answer in the code — `px-broker` is `forbid(unsafe_code)` and cannot
+spawn under a policy, so the operation moves or the gate fails. Neither
+required inventing a position.
+
+009 does. It is a protocol design with four defensible shapes and consequences
+reaching Phase 21, and the spec never framed the question at all. The overnight
+authorisation covers proceeding on a recommendation; it does not cover
+manufacturing one. So the draft lays out the alternatives, recommends, and
+stops.
+
+The recommendation is symmetric request/response with correlation ids, with
+three specifics: the id scopes a conversation and is **never** authority —
+invariant 9 has to survive the change, and the broker still learns who from the
+channel; a bounded number of outstanding requests per direction, because
+concurrency must not undo the reason `QUEUE_DEPTH` exists; and oversized
+payloads chunked, with shared memory deferred to Phase 8, where in-band handle
+passing gets its first real consumer anyway.
+
+The reason it wants deciding in Phase 2 despite nothing needing it until Phase
+4: it is a wire-format change, and Phase 3 writes against whatever shape exists.
