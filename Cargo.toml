@@ -57,6 +57,17 @@ codegen-units = 1
 # Not stripped: cargo-auditable's SBOM lives in a section that stripping can
 # remove, and the supply-chain gate asserts that section is present.
 strip = false
-# panic stays "unwind" here. build-spec §14.2 needs a second profile with
-# panic = "abort" for content processes; Cargo sets panic per profile, not per
-# crate, so that arrives in Phase 1 with the ADR that costs it out.
+# panic stays "unwind" here. The broker is the one process that may not die,
+# and it wraps IPC dispatch in catch_unwind (§4.3).
+
+# build-spec §14.2, ADR 004. Cargo sets the panic strategy per profile, not per
+# crate, so a content process that aborts needs a profile of its own and a
+# second build invocation:
+#
+#   cargo build --profile content-release -p px-content
+#
+# A content process that dies is contained. One that unwinds through a
+# half-mutated DOM is not.
+[profile.content-release]
+inherits = "release"
+panic = "abort"
