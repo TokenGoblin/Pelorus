@@ -9,7 +9,13 @@ Full specification: `docs/build-spec.md`. Root working agreement:
 
 - postcard over typed enums, with size limits. No serde_json in IPC.
 - No length prefix from untrusted bytes drives an allocation without a
-  bound check (§4.4).
+  bound check (§4.4) — and the bound is not enough on its own. Read payloads
+  incrementally: a declared megabyte that never arrives must cost a chunk, not
+  a megabyte. Return the buffer afterwards; Vec::clear keeps its capacity.
+- Every direction has a tag, and trailing bytes are rejected. Without both, a
+  peer that reflects the bytes it was sent produces valid-looking replies.
+- Any error that could leave the stream misaligned poisons the channel
+  permanently. A channel that cannot resynchronise must not look healthy.
 - Every message type needs a cargo-fuzz target for its deserializer (§4.5).
 - Held to §4.3's panic lints (`[lints] workspace = true`) even though §4.3
   names only px-content, px-net and px-mcp. This crate decodes bytes written

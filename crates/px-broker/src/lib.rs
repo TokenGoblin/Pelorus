@@ -230,9 +230,18 @@ impl FrameTree {
 /// What a channel is permitted to do.
 ///
 /// Keyed by channel in [`Broker::capabilities`], never carried in a message.
+///
+/// Hosting and visibility are separate sets, and that separation is the whole
+/// of build-spec §3's "a `FrameId` may resolve to a remote process from Phase 1
+/// onward". A process that renders a page needs to know its cross-origin child
+/// frame *exists and is elsewhere* long before out-of-process iframes work
+/// (Phase 14) — but it must not learn anything about frames nobody handed it.
 #[derive(Debug, Default)]
 struct ChannelCaps {
-    frames: HashSet<FrameId>,
+    /// Frames this channel hosts. Implies visibility.
+    hosts: HashSet<FrameId>,
+    /// Frames this channel may ask about, hosted here or elsewhere.
+    visible: HashSet<FrameId>,
 }
 
 /// The capability broker.
@@ -295,8 +304,43 @@ impl Broker {
             return None;
         }
         let frame = self.frames.create(channel)?;
-        self.capabilities.get_mut(&channel)?.frames.insert(frame);
+        let caps = self.capabilities.get_mut(&channel)?;
+        caps.hosts.insert(frame);
+        caps.visible.insert(frame);
         Some(frame)
+    }
+
+    /// Let `viewer` ask about a frame it does not host.
+    ///
+    /// This is how a `FrameId` comes to resolve remotely. The grant is made by
+    /// the broker, never requested by a peer: a content process cannot ask to
+    /// see a frame, it can only be handed one. Returns `false` if the frame
+    /// does not exist or the viewer is not a channel.
+    ///
+    /// What the viewer learns is deliberately thin — [`FrameHost::Remote`],
+    /// with no channel id and no pid. Routing stays the broker's job, and an
+    /// identifier a process never had is one it cannot be tricked into
+    /// repeating.
+    pub fn grant_visibility(&mut self, viewer: ChannelId, frame: FrameId) -> bool {
+        if self.frames.owner(frame).is_none() {
+            return false;
+        }
+        match self.capabilities.get_mut(&viewer) {
+            Some(caps) => caps.visible.insert(frame),
+            None => false,
+        }
+    }
+
+    /// Whether a channel may ask about a frame at all.
+    ///
+    /// Fails closed. Everything not granted is indistinguishable from a frame
+    /// that never existed — see [`Response::Denied`].
+    pub fn can_see(&self, channel: ChannelId, frame: FrameId) -> bool {
+        self.frames.owner(frame).is_some()
+            && self
+                .capabilities
+                .get(&channel)
+                .is_some_and(|caps| caps.visible.contains(&frame))
     }
 
     /// Whether a channel holds a frame. Fails closed: an unknown channel, a
@@ -306,7 +350,7 @@ impl Broker {
             && self
                 .capabilities
                 .get(&channel)
-                .is_some_and(|caps| caps.frames.contains(&frame))
+                .is_some_and(|caps| caps.hosts.contains(&frame))
     }
 
     /// How many channels are open. For tests and logging.
@@ -370,22 +414,30 @@ impl Broker {
         match request {
             Request::Ping => Decision::allow(Response::Pong),
             Request::Echo { payload } => Decision::allow(Response::Echo { payload }),
-            Request::FrameHost { frame } => match self.frames.owner(frame) {
-                None => Decision::deny(DenyReason::NoSuchFrame),
-                Some(owner) if owner == channel => {
-                    if self.holds_frame(channel, frame) {
-                        Decision::allow(Response::FrameHost {
-                            host: FrameHost::Local,
-                        })
-                    } else {
-                        Decision::deny(DenyReason::NotYourFrame)
-                    }
+            Request::FrameHost { frame } => {
+                // Visibility first, and it is what closes the oracle. A peer
+                // learns Local or Remote only for frames it was handed; every
+                // other answer is a flat Denied, so sweeping the handle space
+                // reveals nothing about frames belonging to other sites.
+                if !self.can_see(channel, frame) {
+                    return match self.frames.owner(frame) {
+                        None => Decision::deny(DenyReason::NoSuchFrame),
+                        Some(_) => Decision::deny(DenyReason::NotYourFrame),
+                    };
                 }
-                // Owned by another process. The peer is told only "Denied",
-                // with no way to tell this apart from a frame that never
-                // existed — otherwise it can enumerate everyone else's frames.
-                Some(_) => Decision::deny(DenyReason::NotYourFrame),
-            },
+                if self.holds_frame(channel, frame) {
+                    Decision::allow(Response::FrameHost {
+                        host: FrameHost::Local,
+                    })
+                } else {
+                    // §3: a FrameId may resolve to a remote process from Phase
+                    // 1 onward, before out-of-process iframes exist. Which
+                    // process is not disclosed, and never will be.
+                    Decision::allow(Response::FrameHost {
+                        host: FrameHost::Remote,
+                    })
+                }
+            }
         }
     }
 }
@@ -666,6 +718,111 @@ mod tests {
         assert_ne!(
             someone_elses.audit, never_existed.audit,
             "the log must still distinguish what the peer must not"
+        );
+    }
+
+    /// build-spec §3: a `FrameId` may resolve to a remote process from Phase 1
+    /// onward, before out-of-process iframes exist. Without this the claim was
+    /// a dead enum variant nothing could produce.
+    #[test]
+    fn a_frame_id_resolves_remotely_when_it_is_hosted_elsewhere() {
+        let mut broker = Broker::new();
+        let host = broker.open_channel().expect("channel");
+        let viewer = broker.open_channel().expect("channel");
+        let frame = broker.create_frame(host).expect("frame");
+
+        // Before the grant, the viewer cannot tell this frame from one that
+        // never existed.
+        assert_eq!(
+            broker
+                .dispatch(viewer, Request::FrameHost { frame })
+                .response,
+            Response::Denied
+        );
+
+        assert!(broker.grant_visibility(viewer, frame));
+
+        // After it, the viewer learns the frame is elsewhere — and nothing
+        // more. There is no channel id and no pid in the answer.
+        assert_eq!(
+            broker
+                .dispatch(viewer, Request::FrameHost { frame })
+                .response,
+            Response::FrameHost {
+                host: FrameHost::Remote
+            }
+        );
+        // The host still sees it as local. Same handle, two answers, decided
+        // by which channel asked.
+        assert_eq!(
+            broker.dispatch(host, Request::FrameHost { frame }).response,
+            Response::FrameHost {
+                host: FrameHost::Local
+            }
+        );
+    }
+
+    /// A grant conveys visibility, never hosting. Otherwise "one process per
+    /// site" would be a naming convention.
+    #[test]
+    fn visibility_is_not_ownership() {
+        let mut broker = Broker::new();
+        let host = broker.open_channel().expect("channel");
+        let viewer = broker.open_channel().expect("channel");
+        let frame = broker.create_frame(host).expect("frame");
+        assert!(broker.grant_visibility(viewer, frame));
+
+        assert!(broker.can_see(viewer, frame));
+        assert!(
+            !broker.holds_frame(viewer, frame),
+            "a viewer must not host it"
+        );
+        assert!(broker.holds_frame(host, frame));
+    }
+
+    /// When the hosting process dies, a viewer's handle stops resolving. The
+    /// viewer learns the frame is gone, which is exactly what a parent frame
+    /// needs when a child process crashes — and nothing about who hosted it.
+    #[test]
+    fn a_remote_handle_stops_resolving_when_its_host_dies() {
+        let mut broker = Broker::new();
+        let host = broker.open_channel().expect("channel");
+        let viewer = broker.open_channel().expect("channel");
+        let frame = broker.create_frame(host).expect("frame");
+        assert!(broker.grant_visibility(viewer, frame));
+
+        broker.close_channel(host);
+
+        let decision = broker.dispatch(viewer, Request::FrameHost { frame });
+        assert_eq!(decision.response, Response::Denied);
+        assert_eq!(decision.audit, Some(DenyReason::NoSuchFrame));
+    }
+
+    /// A grant for a frame that does not exist must not be recorded, or a
+    /// later slot reuse would silently hand the viewer somebody else's frame.
+    #[test]
+    fn hostile_identity_visibility_cannot_be_granted_for_a_forged_handle() {
+        let mut broker = Broker::new();
+        let host = broker.open_channel().expect("channel");
+        let viewer = broker.open_channel().expect("channel");
+
+        let forged = FrameId::new(0, 0);
+        assert!(!broker.grant_visibility(viewer, forged));
+
+        // The slot is now created for real, and reuse must not resurrect the
+        // rejected grant.
+        let frame = broker.create_frame(host).expect("frame");
+        assert_eq!(frame.index(), forged.index());
+        assert_eq!(frame.generation(), forged.generation());
+        assert!(
+            !broker.can_see(viewer, frame),
+            "a rejected grant must not become valid when the slot fills"
+        );
+        assert_eq!(
+            broker
+                .dispatch(viewer, Request::FrameHost { frame })
+                .response,
+            Response::Denied
         );
     }
 

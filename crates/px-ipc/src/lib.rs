@@ -114,8 +114,6 @@ pub enum IpcError {
     /// The channel is unusable because an earlier error may have left the
     /// stream misaligned. Permanent: the caller must tear the channel down.
     Poisoned,
-    /// The operation did not complete within its deadline.
-    TimedOut,
     /// The underlying transport failed.
     Io(std::io::Error),
 }
@@ -130,7 +128,6 @@ impl std::fmt::Display for IpcError {
             ),
             Self::Malformed => write!(f, "payload is not a valid message"),
             Self::Poisoned => write!(f, "channel is poisoned by an earlier error"),
-            Self::TimedOut => write!(f, "operation exceeded its deadline"),
             Self::Io(e) => write!(f, "transport error: {e}"),
         }
     }

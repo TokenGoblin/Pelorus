@@ -19,8 +19,10 @@ use px_ipc::{FrameHost, FrameId, Request, Response};
 fuzz_target!(|data: &[u8]| {
     let mut broker = Broker::new();
     let mut channels: Vec<ChannelId> = Vec::new();
-    // What we believe each channel legitimately holds.
+    // What we believe each channel legitimately hosts.
     let mut issued: Vec<(ChannelId, FrameId)> = Vec::new();
+    // What we believe each channel was explicitly allowed to ask about.
+    let mut granted: Vec<(ChannelId, FrameId)> = Vec::new();
 
     let mut bytes = data.iter().copied();
     while let Some(op) = bytes.next() {
@@ -32,7 +34,7 @@ fuzz_target!(|data: &[u8]| {
             }
         };
 
-        match op % 5 {
+        match op % 6 {
             0 => {
                 if let Some(id) = broker.open_channel() {
                     channels.push(id);
@@ -48,7 +50,17 @@ fuzz_target!(|data: &[u8]| {
             2 => {
                 if let Some(id) = pick(&channels, bytes.next().unwrap_or(0)) {
                     broker.close_channel(id);
+                    // Closing releases the frames it hosted, so nobody's
+                    // grant for them is valid any more either.
+                    let lost: Vec<FrameId> = issued
+                        .iter()
+                        .filter(|(owner, _)| *owner == id)
+                        .map(|(_, frame)| *frame)
+                        .collect();
                     issued.retain(|(owner, _)| *owner != id);
+                    granted.retain(|(viewer, frame)| {
+                        *viewer != id && !lost.contains(frame)
+                    });
                 }
             }
             3 => {
@@ -58,16 +70,37 @@ fuzz_target!(|data: &[u8]| {
                 if let Some(id) = pick(&channels, bytes.next().unwrap_or(0)) {
                     let frame = FrameId::new(index, generation);
                     let decision = broker.dispatch(id, Request::FrameHost { frame });
-                    if decision.response
-                        == (Response::FrameHost {
+                    match decision.response {
+                        Response::FrameHost {
                             host: FrameHost::Local,
-                        })
-                    {
-                        assert!(
+                        } => assert!(
                             issued.contains(&(id, frame)),
-                            "channel {id:?} was told it owns {frame:?}, which it \
-                             was never issued"
-                        );
+                            "channel was told it hosts a frame it was never issued"
+                        ),
+                        // Remote is still an answer, and answers are only
+                        // owed to a channel that was handed the frame.
+                        // Otherwise sweeping the handle space enumerates
+                        // the frames of other sites.
+                        Response::FrameHost {
+                            host: FrameHost::Remote,
+                        } => assert!(
+                            granted.contains(&(id, frame)),
+                            "channel learned a frame is remote without ever being granted it"
+                        ),
+                        _ => {}
+                    }
+                }
+            }
+            4 => {
+                // Grant one channel sight of another's frame — the operation
+                // that makes FrameHost::Remote reachable at all.
+                let viewer = pick(&channels, bytes.next().unwrap_or(0));
+                let nth = usize::from(bytes.next().unwrap_or(0));
+                if let (Some(viewer), false) = (viewer, issued.is_empty()) {
+                    if let Some((_, frame)) = issued.get(nth % issued.len()).copied() {
+                        if broker.grant_visibility(viewer, frame) {
+                            granted.push((viewer, frame));
+                        }
                     }
                 }
             }

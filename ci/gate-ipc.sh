@@ -19,7 +19,23 @@
 
 if ! command -v cargo >/dev/null 2>&1; then
     fail "cargo is not on PATH"
-    verdict "ipc"
+    # The fuzz targets carry gate item 1 and are compiled by exactly one CI job,
+# which installs cargo-fuzz first and takes minutes. A target that stops
+# compiling would silently stop testing anything, and would look like a slow
+# job rather than a broken one. Type-check them here in seconds, on the stable
+# pin — fuzz/ overrides to nightly, and nothing about `cargo check` needs it.
+if [ -d fuzz ] && command -v rustup >/dev/null 2>&1; then
+    stable_tc="$(grep -oE 'channel = "[^"]+"' rust-toolchain.toml | head -1 | cut -d'"' -f2 || true)"
+    if [ -z "$stable_tc" ]; then
+        fail "cannot read the pinned toolchain from rust-toolchain.toml"
+    elif (cd fuzz && cargo "+$stable_tc" check --all-targets --quiet); then
+        ok "fuzz targets compile"
+    else
+        fail "a fuzz target does not compile; gate item 1 tests nothing"
+    fi
+fi
+
+verdict "ipc"
 fi
 
 # Each entry is "gate item::test filter::file that must carry it".
@@ -130,6 +146,22 @@ elif "$PY_BIN" ci/check_not_serializable.py ChannelId $channel_id_home; then
     ok "ChannelId cannot be serialised onto the wire"
 else
     fail "ChannelId is serialisable; it must never be able to reach the wire"
+fi
+
+# The fuzz targets carry gate item 1 and are compiled by exactly one CI job,
+# which installs cargo-fuzz first and takes minutes. A target that stops
+# compiling would silently stop testing anything, and would look like a slow
+# job rather than a broken one. Type-check them here in seconds, on the stable
+# pin — fuzz/ overrides to nightly, and nothing about `cargo check` needs it.
+if [ -d fuzz ] && command -v rustup >/dev/null 2>&1; then
+    stable_tc="$(grep -oE 'channel = "[^"]+"' rust-toolchain.toml | head -1 | cut -d'"' -f2 || true)"
+    if [ -z "$stable_tc" ]; then
+        fail "cannot read the pinned toolchain from rust-toolchain.toml"
+    elif (cd fuzz && cargo "+$stable_tc" check --all-targets --quiet); then
+        ok "fuzz targets compile"
+    else
+        fail "a fuzz target does not compile; gate item 1 tests nothing"
+    fi
 fi
 
 verdict "ipc"
