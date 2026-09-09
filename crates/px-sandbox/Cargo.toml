@@ -6,5 +6,28 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# Detection is file reads under /proc and /sys, which is the interface the
+# kernel documents for it, and needs nothing. Applying a policy needs the OS,
+# and that is what these are: declarations of the platform's own entry points,
+# not libraries acting on our behalf. ADR 010 records the decision and its
+# cost. Deliberately target-scoped — neither crate exists on the other
+# platform's build — and deliberately confined to this crate, which is the
+# only one build-spec §4 permits `unsafe` in at all.
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Console",
+] }
+
+[features]
+# §14.4: test-only capabilities live behind this and are scanned for in release
+# artifacts, because a flag being off is not evidence.
+testing = []

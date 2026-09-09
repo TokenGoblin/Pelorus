@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+#
+# Size of the project, written into README.md between the SIZE markers.
+#
+# Why a script and not a number somebody types: a hand-maintained count is
+# wrong the commit after it is written, and this project has already been
+# bitten three times by a figure that was asserted rather than measured. The
+# README section is generated, and it carries the commit it was generated from
+# so that a stale number is visibly stale rather than quietly wrong.
+#
+#   ci/count-lines.sh           rewrite the README section
+#   ci/count-lines.sh --check   exit 1 if the section is out of date, print
+#                               nothing else. Not wired into a gate: the count
+#                               changes on nearly every commit, so gating it
+#                               would fail constantly and teach people to
+#                               ignore it. Available for anyone who wants it.
+#
+# Code and comments are counted separately on purpose. This codebase carries an
+# unusual amount of prose — the working agreement requires the reasoning to be
+# written down where the decision lives — so a single total would flatter it.
+
+. "$(dirname "$0")/lib.sh"
+
+if [ -z "$PY_BIN" ]; then
+    echo "FAIL no python >= 3.11 on PATH" >&2
+    exit 1
+fi
+
+MODE="${1:-write}"
+
+"$PY_BIN" - "$MODE" <<'PY'
+import pathlib
+import subprocess
+import sys
+
+mode = sys.argv[1] if len(sys.argv) > 1 else "write"
+root = pathlib.Path(".")
+
+BEGIN = "<!-- SIZE:BEGIN -->"
+END = "<!-- SIZE:END -->"
+
+
+ALL_TRACKED = [
+    pathlib.Path(line)
+    for line in subprocess.run(
+        ["git", "ls-files"], capture_output=True, text=True, check=True
+    ).stdout.split("\n")
+    if line
+]
+
+
+def tracked(predicate):
+    """Files git knows about, matching a predicate.
+
+    Filtered in Python rather than by a git pathspec, because the crates that
+    arrive from Phase 4 onward will have nested module directories and a
+    `crates/*/src/*.rs` glob would quietly stop counting them — which is the
+    exact failure this script exists to prevent.
+    """
+    return [path for path in ALL_TRACKED if predicate(path)]
+
+
+def under(path, *segments):
+    """Whether `path` sits beneath a directory sequence. `*` matches any one."""
+    parts = path.parts
+    if len(parts) <= len(segments):
+        return False
+    return all(
+        segment == "*" or parts[index] == segment
+        for index, segment in enumerate(segments)
+    )
+
+
+def measure(paths, comment_prefixes):
+    """Split lines into code, comment and blank."""
+    code = comment = blank = 0
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # splitlines(), not split("\n"): the latter yields a phantom empty
+        # element after a file's final newline, inflating the blank count by
+        # one per file. Caught by checking the total against `wc -l`.
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line:
+                blank += 1
+            elif any(line.startswith(p) for p in comment_prefixes):
+                comment += 1
+            else:
+                code += 1
+    return code, comment, blank
+
+
+RUST_COMMENTS = ("//",)
+SHELL_COMMENTS = ("#",)
+
+rust_src = tracked(lambda p: p.suffix == ".rs" and under(p, "crates", "*", "src"))
+rust_tests = tracked(lambda p: p.suffix == ".rs" and under(p, "crates", "*", "tests"))
+fuzz = tracked(lambda p: p.suffix == ".rs" and under(p, "fuzz"))
+scripts = tracked(lambda p: p.suffix in (".sh", ".py") and p.parts[0] == "ci")
+docs = tracked(lambda p: p.suffix == ".md" and p.parts[0] == "docs")
+
+rows = []
+for label, paths, prefixes in (
+    ("Rust — crate sources", rust_src, RUST_COMMENTS),
+    ("Rust — tests", rust_tests, RUST_COMMENTS),
+    ("Rust — fuzz targets", fuzz, RUST_COMMENTS),
+    ("CI scripts", scripts, SHELL_COMMENTS),
+):
+    code, comment, blank = measure(paths, prefixes)
+    rows.append((label, len(paths), code, comment, blank))
+
+doc_lines = sum(
+    len(p.read_text(encoding="utf-8", errors="replace").splitlines()) for p in docs
+)
+
+total_code = sum(r[2] for r in rows)
+total_comment = sum(r[3] for r in rows)
+
+commit = subprocess.run(
+    ["git", "rev-parse", "--short", "HEAD"],
+    capture_output=True,
+    text=True,
+    check=True,
+).stdout.strip()
+
+lines = [
+    BEGIN,
+    "",
+    "| | Files | Code | Comment | Blank |",
+    "|---|---:|---:|---:|---:|",
+]
+for label, files, code, comment, blank in rows:
+    lines.append(f"| {label} | {files} | {code:,} | {comment:,} | {blank:,} |")
+lines += [
+    f"| **Total** | **{sum(r[1] for r in rows):,}** | "
+    f"**{total_code:,}** | **{total_comment:,}** | "
+    f"**{sum(r[4] for r in rows):,}** |",
+    "",
+    f"Plus {doc_lines:,} lines of specification and decision records across "
+    f"{len(docs)} documents.",
+    "",
+    f"Generated by `ci/count-lines.sh`, last run against the tree at "
+    f"`{commit}`. Regenerate rather than edit — a number nobody measured is "
+    "the kind this project keeps getting wrong. `ci/count-lines.sh --check` "
+    "reports whether this is stale.",
+    "",
+    END,
+]
+section = "\n".join(lines)
+
+readme_path = root / "README.md"
+readme = readme_path.read_text(encoding="utf-8")
+
+if BEGIN not in readme or END not in readme:
+    print(f"FAIL README.md has no {BEGIN} / {END} markers", file=sys.stderr)
+    sys.exit(1)
+
+head, rest = readme.split(BEGIN, 1)
+_, tail = rest.split(END, 1)
+updated = head + section + tail
+
+if mode == "--check":
+    if updated != readme:
+        print("FAIL README.md size section is out of date; run ci/count-lines.sh",
+              file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+
+if updated != readme:
+    readme_path.write_text(updated, encoding="utf-8", newline="\n")
+    print(f"README.md size section updated at {commit}")
+else:
+    print(f"README.md size section already current at {commit}")
+PY

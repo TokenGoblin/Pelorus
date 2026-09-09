@@ -1,6 +1,12 @@
 
 # cargo-vet imports lock
 
+[[publisher.libc]]
+version = "0.2.189"
+when = "2026-07-21"
+user-id = 55123
+user-login = "rust-lang-owner"
+
 [[publisher.proc-macro2]]
 version = "1.0.107"
 when = "2026-07-19"
@@ -56,6 +62,20 @@ when = "2026-02-16"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
+
+[[publisher.windows-link]]
+version = "0.2.1"
+when = "2025-10-06"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-sys]]
+version = "0.61.2"
+when = "2025-10-06"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
 
 [[audits.bytecode-alliance.audits.cobs]]
 who = "Alex Crichton <alex@alexcrichton.com>"

@@ -262,3 +262,61 @@ passing gets its first real consumer anyway.
 
 The reason it wants deciding in Phase 2 despite nothing needing it until Phase
 4: it is a wire-format change, and Phase 3 writes against whatever shape exists.
+
+## 07:30 UTC — Phase 2 implementation is blocked on a decision. Two questions.
+
+Landed: ADRs 007/008/009, the Phase 2 gate in its failing state, and
+`px-sandbox`'s capability ladder — detection, the floor, and the refusal
+message — with eight tests, no `unsafe`, and no dependencies. 57 tests in the
+workspace.
+
+Then it stopped, for two reasons that are worth reading together.
+
+### 1. You cannot ship the refusal before the policy
+
+Phase 2's gate item 2 is "with the sandbox forced unavailable, the browser
+refuses to launch content processes and says why". Wiring that into
+`ContentProcess::spawn` today would make the browser refuse **always**, because
+no policy can be applied yet, so nothing clears the floor — and `px-browser`
+would stop working entirely, taking Phase 1's end-to-end check with it.
+
+So gate item 2 genuinely depends on gate item 1. The refusal and the policy
+land together or the product breaks. That is not a scheduling preference; it
+falls out of fail-closed.
+
+### 2. Applying a policy needs a dependency that §3 does not name
+
+`prctl` and seccomp on Linux, `CreateRestrictedToken` and
+`CreateProcessAsUserW` with a `PROC_THREAD_ATTRIBUTE_LIST` on Windows. Neither
+`libc` nor `windows-sys` is in build-spec §3's list, and the standing rule is to
+propose rather than add.
+
+The alternative is hand-declaring the externs, which adds no dependency and
+suits an audited unsafe core. On Linux that is genuinely reasonable — the ABI
+is a handful of stable structs. On Windows it means hand-writing
+`STARTUPINFOEXW`, `PROC_THREAD_ATTRIBUTE_LIST` and the token APIs, where one
+wrong field offset produces a process that **looks** sandboxed and is not.
+ADR 007's own rule says that is the error that cannot be recovered from.
+
+There is a third consideration I cannot engineer around: **this machine is
+Windows, so I cannot execute the Linux path at all.** Writing unsafe FFI for a
+security boundary, blind, unattended, and validating only through CI, is the
+highest-risk thing available tonight — and tonight's record is three silent
+no-op edits and a product binary that failed on a clean run behind a green
+gate.
+
+### What I would recommend
+
+`libc` on Linux and `windows-sys` on Windows, both under an ADR, both scoped to
+`px-sandbox` alone. They are the OS's own bindings rather than a library doing
+something for us, which is a different kind of dependency from the ones §3 was
+written to control — and getting the ABI right is precisely what they exist for.
+
+But that is a supply-chain decision, and §3's rule exists because this project
+means it. So it waits.
+
+### The loop continues on Phase 1
+
+Campaign 34320581865 is still running (~4h from 06:50). When it lands I will
+verify `-max_len` actually applied this time, record it, merge Phase 1, and
+rebase Phase 2. That work needs no decision from anyone.
