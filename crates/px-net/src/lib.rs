@@ -25,4 +25,5 @@ pub mod http1;
 pub mod partition;
 pub mod pool;
 pub mod psl;
+pub mod redirect;
 pub mod tls;
