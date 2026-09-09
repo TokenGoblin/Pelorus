@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Generate the recorded-traffic corpus the Phase 3 gate fetches against.
+"""Generate the synthetic response corpus the Phase 3 gate fetches against.
+
+NOT the compat suite. tests/compat/archives/ holds recorded traffic from real
+sites and is deliberately uncommitted — ADR 002 — because those archives name
+every host they replay, which is the disclosure opaque ids exist to avoid.
+This corpus is generated, every host in it is the loopback address, and it
+discloses nothing. Conflating the two made the Phase 3 gate require files that
+could never be committed, which is how this distinction got noticed.
 
 Two hundred archives, written deterministically from a fixed seed so the
 corpus is a *fixed target*: "200 URLs fetched correctly" has to mean the same
@@ -16,7 +23,7 @@ The shapes here are deliberately the ones crates/px-net/src/http1.rs makes
 decisions about. A corpus of two hundred plain 200s would exercise one branch
 two hundred times.
 
-    python ci/make-compat-corpus.py
+    python ci/make-fetch-corpus.py
 """
 
 import hashlib
@@ -25,7 +32,7 @@ import os
 import pathlib
 import sys
 
-OUT = pathlib.Path("tests/compat/archives")
+OUT = pathlib.Path("tests/net/corpus")
 COUNT = 200
 
 # Response shapes, cycled so every one of them appears many times and the
@@ -100,7 +107,7 @@ def archive(index: int) -> dict:
         # what a reader will expect; the schema is documented by this file.
         "log": {
             "version": "1.2",
-            "creator": {"name": "ci/make-compat-corpus.py", "version": "1"},
+            "creator": {"name": "ci/make-fetch-corpus.py", "version": "1"},
             "entries": [
                 {
                     "request": {"method": "GET", "url": f"http://localhost{path}"},
@@ -113,7 +120,7 @@ def archive(index: int) -> dict:
                             "encoding": "utf-8",
                         },
                     },
-                    "_pelorus": {
+                    "_replay": {
                         "path": path,
                         "shape": shape,
                         "framing": framing,

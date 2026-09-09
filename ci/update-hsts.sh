@@ -40,6 +40,9 @@ SOURCE="https://raw.githubusercontent.com/chromium/chromium/main/net/http/transp
 LIST="data/hsts_preload.txt"
 VERSION="data/hsts_preload.version"
 
+# The User-Agent deliberately does not name the product. The brand gate
+# confines the product name to px-brand, docs/, packaging/, README and the
+# workspace manifest, and a build script is none of those.
 if ! command -v curl >/dev/null 2>&1; then
     echo "FAIL curl is not on PATH" >&2
     exit 1
@@ -50,7 +53,7 @@ TMP_LIST="$(mktemp)"
 trap 'rm -f "$TMP_JSON" "$TMP_LIST"' EXIT
 
 info "fetching $SOURCE"
-if ! curl -fsSL -H "User-Agent: pelorus-build" "$SOURCE" -o "$TMP_JSON"; then
+if ! curl -fsSL -H "User-Agent: build-data-fetch" "$SOURCE" -o "$TMP_JSON"; then
     echo "FAIL could not fetch the list" >&2
     exit 1
 fi

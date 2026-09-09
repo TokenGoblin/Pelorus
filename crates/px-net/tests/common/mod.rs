@@ -5,7 +5,7 @@
 // specifies are untouched, and the crate's CLAUDE.md forbids waiving those.
 #![allow(dead_code)]
 
-//! A local server that replays the recorded corpus.
+//! A local server that replays the generated corpus.
 //!
 //! Shared by `fetch.rs` and `connections.rs`. It exists so the Phase 3 gate
 //! can fetch two hundred URLs without reaching the internet: a gate that
@@ -46,8 +46,8 @@ fn archives_dir() -> PathBuf {
         .join("..")
         .join("..")
         .join("tests")
-        .join("compat")
-        .join("archives")
+        .join("net")
+        .join("corpus")
 }
 
 /// Read a quoted JSON string value for `key` out of `text`, starting at

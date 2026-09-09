@@ -21,6 +21,9 @@ SOURCE="https://publicsuffix.org/list/public_suffix_list.dat"
 LIST="data/public_suffix_list.dat"
 VERSION="data/public_suffix_list.version"
 
+# The User-Agent deliberately does not name the product. The brand gate
+# confines the product name to px-brand, docs/, packaging/, README and the
+# workspace manifest, and a build script is none of those.
 if ! command -v curl >/dev/null 2>&1; then
     echo "FAIL curl is not on PATH" >&2
     exit 1
@@ -30,7 +33,7 @@ TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
 info "fetching $SOURCE"
-if ! curl -fsSL -H "User-Agent: pelorus-build" "$SOURCE" -o "$TMP"; then
+if ! curl -fsSL -H "User-Agent: build-data-fetch" "$SOURCE" -o "$TMP"; then
     echo "FAIL could not fetch the list" >&2
     exit 1
 fi

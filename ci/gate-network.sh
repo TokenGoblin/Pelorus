@@ -90,15 +90,21 @@ cargo test --workspace --locked || fail "tests failed"
 # target: "200 URLs fetched correctly" means the same thing in a year.
 # ---------------------------------------------------------------------------
 
-ARCHIVE="tests/compat/archives"
+# Deliberately NOT tests/compat/archives. That directory holds recorded traffic
+# from real sites and is gitignored on purpose — ADR 002 — because those
+# archives name every host they replay. This corpus is generated, every host in
+# it is the loopback address, and it is committed so the gate has a fixed
+# target. An earlier version of this gate pointed at the compat directory and
+# therefore required files that can never exist in CI.
+ARCHIVE="tests/net/corpus"
 if [ ! -d "$ARCHIVE" ]; then
-    fail "$ARCHIVE does not exist; the 200-URL corpus has no recorded traffic"
+    fail "$ARCHIVE does not exist; run ci/make-fetch-corpus.py"
 else
     count="$(find "$ARCHIVE" -name '*.har' 2>/dev/null | wc -l | tr -d ' ')"
     if [ "${count:-0}" -lt 200 ]; then
-        fail "the corpus holds $count recorded responses; §9 Phase 3 asks for 200"
+        fail "the corpus holds $count responses; §9 Phase 3 asks for 200"
     else
-        ok "the corpus holds $count recorded responses"
+        ok "the corpus holds $count generated responses"
     fi
 fi
 
