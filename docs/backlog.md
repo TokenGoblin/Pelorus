@@ -148,6 +148,58 @@ Format: one entry per defect.
   exists.
 - **Why deferred:** phase 2 is building the spawn path and will own this.
 
+## px-css cannot be forbid(unsafe_code) — a hard rule will have to bend
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** an ADR before phase 5, and an amendment to `/CLAUDE.md`
+- **What:** stylo's `TElement` trait declares six `unsafe fn` methods, so any
+  crate implementing it must write `unsafe fn` — which `#![forbid(unsafe_code)]`
+  rejects outright. Verified by compiling a probe against the pinned toolchain:
+  `error: implementation of an 'unsafe' method`. `/CLAUDE.md`'s first hard rule
+  and Phase 0's gate check 4 both say every crate but `px-sandbox` carries
+  `forbid(unsafe_code)`.
+- **Why deferred:** it is a rule change, and the useful version is *narrower*
+  than a waiver. The research note proposes: `unsafe fn` declarations permitted
+  in `px-css`, but zero `unsafe` blocks and zero `unsafe impl` — greppable, and
+  enforceable by `ci/gate-unsafe-headers.sh` as a distinct rule rather than an
+  exemption. Decide it before Phase 5, not during.
+
+## stylo's build script breaks the reproducible-build gate
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** an ADR before phase 5
+- **What:** stylo's `build.rs` shells out to Python 3 and Mako. Invariant 7 says
+  same source plus same toolchain gives the same binary hash; a build that
+  depends on an external interpreter and a template library does not, and Phase
+  0's reproducibility gate has held since the workspace was empty.
+- **Why deferred:** the options — pin and vendor the generator, commit its
+  output, or accept a documented exception to invariant 7 — are a decision, and
+  invariant 7 is load-bearing enough that it should not be amended by whoever
+  happens to hit this first.
+
+## Phase 4's gate omits the mutation-side snapshot path stylo needs
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** phase 4
+- **What:** stylo's invalidation needs prior-state snapshots recorded on the
+  mutation path (`ServoElementSnapshot`-shaped, keyed by an opaque node id).
+  That is a `px-dom` feature, it is absent from Phase 4's gate, and retrofitting
+  it means touching every attribute setter twice.
+- **Why deferred:** phase 4 owns it; recorded now so the gate can be written
+  with it rather than amended after.
+
+## Style fixtures must run with debug assertions on
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md`
+- **Belongs to:** phase 5
+- **What:** stylo's `ElementDataWrapper` is an `UnsafeCell` whose aliasing check
+  is `#[cfg(debug_assertions)]` only. In a release build, aliasing is silent
+  undefined behaviour rather than a panic — and `parallel.rs`'s module doc
+  claiming "we'll generally panic if something goes wrong" is stale relative to
+  `data.rs` at the same commit.
+- **Why deferred:** phase 5 owns the fixtures; the constraint needs to be in
+  their CI job when it is written.
+
 ## Miri is not run on px-ipc
 
 - **Found in:** phase 1, `.github/workflows/gate.yml`

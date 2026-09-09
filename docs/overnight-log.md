@@ -182,3 +182,55 @@ asserts `env_clear()` actually emptied the environment — currently the only
 enforcement of invariant 1.
 
 Campaign still running at 3h. Longer than the 4h shards implied; watching it.
+
+## 05:40 UTC — stylo research landed; two committed rules will have to bend
+
+`docs/research/stylo-requirements.md`, 869 lines, fetched from real source
+(`servo/stylo` at a named commit) rather than recalled. §9 calls Phase 5 the
+highest-risk phase and §11's only mitigation is that discovery happens early.
+This moves the discovery earlier still — before Phase 4 writes the DOM that
+Phase 5 would have redesigned.
+
+**Two findings contradict rules this project has already committed to.**
+
+`px-css` cannot carry `#![forbid(unsafe_code)]`. `TElement` declares six
+`unsafe fn` methods, and implementing an unsafe method is exactly what `forbid`
+rejects — verified by compiling a probe against the pinned toolchain, not
+inferred. `/CLAUDE.md`'s first hard rule and Phase 0's gate check 4 both assert
+the opposite. The proposed replacement is *narrower* than a waiver: `unsafe fn`
+declarations allowed, zero `unsafe` blocks, zero `unsafe impl`, enforced as its
+own rule rather than as an exemption.
+
+stylo's `build.rs` shells out to Python 3 and Mako, which breaks invariant 7
+from Phase 5 onward. The reproducibility gate has held since the workspace was
+empty; it will not survive this without a decision.
+
+**The generational-handle collision resolves, and better than expected.**
+§4.1's mandatory `Option`-returning accessors genuinely cannot implement
+`TNode` — dozens of its methods are infallible. But §4.1 governs px-dom's arena
+API, not every type, and stylo's own `where Self: 'a` bounds are it asking for a
+lifetime-parameterised handle. A borrowed view resolved once through a fallible
+generation check preserves §4.1's actual safety property, adds no infallible
+index API, and **statically enforces the no-mutation-during-traversal invariant
+that stylo assumes and Servo enforces only by comment**. It makes `Send`/`Sync`
+true rather than asserted, which is stronger than the reference implementation.
+
+Two things Phase 4 must decide that nobody had listed: a chunked arena rather
+than a flat `Vec`, because stable slot addresses are what make that view cheap;
+and biasing the `NodeId` packing, because `OpaqueElement` is `NonNull` and index
+0 / generation 0 packs to zero.
+
+And a warning worth repeating: **do not model node flags on Servo.** It gets
+`set_dirty_descendants` wrong today, with a live FIXME admitting a non-atomic
+`Cell` read-modify-write from parallel style threads.
+
+The largest de-risking lever is free: `traverse_dom` takes
+`pool: Option<&rayon::ThreadPool>`, and `None` runs fully sequential. Phase 5
+can ship stylo with no parallelism at all, which defers most of the unchecked
+thread-safety contract.
+
+Four backlog entries filed. The note's own top recommendation — a one-day spike
+implementing a stub `TElement` over a toy chunked arena before the tree builder
+is written — belongs in Phase 4's decomposition.
+
+Campaign still running at 3h05m.
