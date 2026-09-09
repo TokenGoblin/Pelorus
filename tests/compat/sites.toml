@@ -1,0 +1,81 @@
+# The compat suite — forty sites you actually use (build-spec §8).
+#
+# This is the real progress meter for the project. Spec pass rates are not:
+# test262 measures the language, WPT measures conformance, and neither tells
+# you whether a site you depend on works. Forty sites that do is the number
+# that decides Phase 23.
+#
+# STATUS: EMPTY. The list is a Phase 0 deliverable and cannot be written by
+# anyone but the person who will daily-drive the browser. ci/check_compat_sites.py
+# fails until there are forty entries, each with at least one assertion. An
+# entry with no assertion is worse than a missing one: it counts towards forty
+# and tests nothing.
+#
+# Runs against RECORDED traffic, never the live web (§8). Live CI would be
+# flaky, slow, likely to get the IP blocked, arguably against several sites'
+# terms, and it would leak this list. Archives are captured once, committed,
+# and replayed. A separate weekly manual job runs live to detect drift.
+#
+# THIS FILE MUST NOT NAME THE SITES. The repository is public
+# (docs/adr/002-public-repository.md), and which forty sites you use every day
+# is personal information about you, not a technical detail. Git history makes
+# it permanent: deleting the file later does not unpublish it.
+#
+# Opaque ids alone are not enough, and it is worth being clear why. The `url`
+# field names the site directly, and the recorded traffic archives §8 asks you
+# to commit contain every hostname they replay. Renaming the entries while
+# committing the archives hides nothing.
+#
+# So, in this repository:
+#   - `id` is opaque: "site-01", "site-02", ...
+#   - `url` is NOT stored here; it lives in the private mapping
+#   - `why` may describe the shape of the site, never identify it
+#   - archives are NOT committed here
+#
+# The mapping from id to url, and the archives themselves, live outside this
+# repository. The public CI job checks the shape of this file — forty entries,
+# each with assertions — and the replay itself runs where the archives are.
+#
+# The cost, stated plainly: the project's real progress meter is not publicly
+# verifiable. Someone reading this repository has to take "thirty-eight of forty
+# pass" on trust. That is the price of not publishing your browsing habits, and
+# it is the right trade, but it is a real one.
+#
+# Schema
+# ------
+#
+# [[site]]
+# id       = "short-slug"        required, unique, used as the archive name
+# url      = "..."               NOT stored here; see above
+# why      = "..."               optional, why this site is on the list; the
+#                                answer decides whether it stays on the list
+# archive  = "archives/slug.har" optional, defaults to archives/<id>.har
+# login    = true                optional, part of the Phase 13 five-login gate
+# assert   = [...]               required, at least one
+#
+# An assertion is a table. The forms are defined by the runner, which does not
+# exist until the compat harness is built; these are the shapes the phases
+# already need:
+#
+#   { kind = "status",   equals = 200 }
+#   { kind = "text",     selector = "h1", contains = "..." }
+#   { kind = "present",  selector = "#main-content" }
+#   { kind = "absent",   selector = ".error-page" }
+#   { kind = "pixel",    baseline = "baselines/<id>.png", tolerance = 0 }
+#   { kind = "no-console-error" }
+#
+# Example of a complete entry, deliberately commented out so the count check
+# does not pass on a placeholder:
+#
+# [[site]]
+# id  = "site-00"
+# why = "Smallest possible end-to-end path: DNS, TLS, HTML, layout, paint."
+# assert = [
+#     { kind = "status", equals = 200 },
+#     { kind = "text", selector = "h1", contains = "Example Domain" },
+#     { kind = "no-console-error" },
+# ]
+#
+# Choosing the forty: pick what you would actually be angry to lose, not what
+# exercises interesting engine features. A site that renders wrong and one that
+# renders slowly are both failures; a site you never open is neither.

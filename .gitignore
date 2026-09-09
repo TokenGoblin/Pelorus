@@ -16,3 +16,11 @@
 Thumbs.db
 .vscode/
 .idea/
+target/auditable/
+
+# Compat suite: recorded traffic archives and the id -> url mapping are NOT
+# committed to this public repository. They contain every hostname they replay,
+# which is the disclosure opaque ids exist to avoid. See
+# docs/adr/002-public-repository.md.
+/tests/compat/archives/
+/tests/compat/mapping*.toml

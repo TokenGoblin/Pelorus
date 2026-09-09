@@ -1,0 +1,20 @@
+Evidence for the Phase 0 gate: the brand-leak gate rejects a deliberate
+violation (build-spec §2.2, §9 Phase 0).
+
+Reproduce: add a constant containing the product name to any crate outside
+px-brand, stage it, and run tests/brand/gate-brand-leak.sh.
+
+The product name itself is redacted below as <PRODUCT_NAME>. This file sits
+under tests/brand/, which is NOT on the allowlist, so an unredacted
+transcript of the gate catching a leak would itself be a leak the gate
+catches. Widening the allowlist to accommodate the evidence would have been
+the wrong repair.
+
+--- gate output, exit 1 ---
+  read PRODUCT_NAME from crates/px-brand/src/lib.rs (7 chars); scanning tracked files
+FAIL product name appears in crates/px-layout/src/lib.rs
+       9:pub const WINDOW_TITLE_SUFFIX: &str = " - <PRODUCT_NAME>";
+  scanned 66 tracked files
+  note: 1 untracked file(s) were NOT scanned; stage them first
+
+brand-leak: FAIL (1)
