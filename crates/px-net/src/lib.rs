@@ -20,6 +20,7 @@
 //! response-splitting bug.
 
 pub mod cookie;
+pub mod dns;
 pub mod fetch;
 pub mod hsts;
 pub mod http1;
@@ -27,4 +28,5 @@ pub mod partition;
 pub mod pool;
 pub mod psl;
 pub mod redirect;
+pub mod resolver;
 pub mod tls;

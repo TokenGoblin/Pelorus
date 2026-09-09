@@ -1,0 +1,18 @@
+# DoH providers offered in settings (ADR 014).
+#
+# Data, not code: a provider that turns out to be untrustworthy can be dropped
+# through the Phase 20 channel without a release. No provider here is a
+# default — ADR 014 preselects the system resolver, because a hardcoded
+# default provider transfers the tracking rather than eliminating it.
+#
+# INCLUSION IS NOT ENDORSEMENT. The policy column is what the operator
+# publishes. This project has not audited any of it and is not well placed to:
+# a retention claim is a claim, and the honest thing is to say whose claim it
+# is rather than to imply it was checked.
+#
+# name<TAB>host/path<TAB>jurisdiction<TAB>published retention policy
+
+Quad9	dns.quad9.net/dns-query	Switzerland	Says it stores no IP addresses and no query logs
+Cloudflare	cloudflare-dns.com/dns-query	United States	Says it keeps query data 24 hours, no IP logging
+Mullvad	dns.mullvad.net/dns-query	Sweden	Says it keeps no logs
+Google	dns.google/dns-query	United States	Says it keeps full logs 24-48 hours, then anonymised
