@@ -658,6 +658,67 @@ mod tests {
         );
     }
 
+    /// Handles must not accumulate across spawns.
+    ///
+    /// The broker spawns a content process per site and replaces one on every
+    /// crash, so a handle leaked per spawn is a denial of service reachable by
+    /// any page that can make a renderer die. This path creates seven handles
+    /// per launch — a token, a restricted token, a job, four pipe ends — plus
+    /// a process and a thread, and every one is released on a path with
+    /// several early returns. Counting them is cheaper than reasoning about
+    /// them.
+    #[test]
+    fn sandbox_policy_repeated_spawns_do_not_leak_handles() {
+        use windows_sys::Win32::System::Threading::GetProcessHandleCount;
+
+        fn handle_count() -> u32 {
+            let mut count: u32 = 0;
+            // SAFETY: GetCurrentProcess is a pseudo-handle that is always
+            // valid for this process; `count` is live, aligned, and written by
+            // the call.
+            unsafe {
+                GetProcessHandleCount(GetCurrentProcess(), &mut count);
+            }
+            count
+        }
+
+        fn spawn_and_reap() -> bool {
+            match spawn(std::path::Path::new(r"C:\Windows\System32\cmd.exe")) {
+                Ok(mut spawned) => {
+                    let _ = spawned.child.kill();
+                    let _ = spawned.child.wait();
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+
+        // Warm up first: one-off allocations made on the first spawn are not
+        // growth, and counting them would make the threshold meaningless.
+        for _ in 0..5 {
+            if !spawn_and_reap() {
+                return;
+            }
+        }
+
+        let before = handle_count();
+        for _ in 0..40 {
+            if !spawn_and_reap() {
+                return;
+            }
+        }
+        let after = handle_count();
+
+        // A small allowance rather than an exact match: the runtime may open
+        // handles of its own between the two readings. A leak of one per spawn
+        // would be forty.
+        assert!(
+            after <= before + 8,
+            "handles grew from {before} to {after} across 40 spawns;              the spawn path leaks roughly {} per launch",
+            (after - before) / 40
+        );
+    }
+
     /// The handle list must be exhaustive, not additive. If the child were
     /// created with a null attribute list it would inherit every inheritable
     /// handle in this process; this asserts the list is actually built and

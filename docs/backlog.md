@@ -284,3 +284,37 @@ Format: one entry per defect.
   probably be settled in the same breath as that one. Recorded rather than
   quietly dropped, because the invariant is written down as though it already
   holds.
+
+## A content process exiting with code 259 reads as still running on Windows
+
+- **Found in:** phase 2, `crates/px-sandbox/src/windows.rs`
+- **Belongs to:** unassigned
+- **What:** `GetExitCodeProcess` reports `STILL_ACTIVE` (259) for a running
+  process, so `Child::try_wait` cannot distinguish that from a process that
+  genuinely exited with code 259. `is_alive` would report a dead content
+  process as live, and the supervisor would keep serving a channel whose peer
+  is gone until the deadline reaps it.
+- **Why deferred:** the ambiguity is in the Win32 API rather than in this code,
+  and the fix is to wait on the process handle — `WaitForSingleObject` with a
+  zero timeout — and use `GetExitCodeProcess` only to retrieve the code once
+  the handle is known signalled. That is a small change, but it belongs with
+  the Phase 17 work that revisits process teardown rather than being slipped in
+  after the gate passed. The exposure today is bounded: `px-content` exits 0 or
+  is killed, `next_request`'s deadline catches a silent peer regardless, and
+  nothing chooses 259.
+
+## The aarch64 seccomp syscall numbers have never been executed
+
+- **Found in:** phase 2, `crates/px-sandbox/src/linux.rs`
+- **Belongs to:** the phase that adds an aarch64 CI runner
+- **What:** `DENIED_SYSCALLS` carries a second table for `aarch64`, and CI runs
+  `x86_64` only. The x86_64 table is exercised on every Linux gate run; the
+  aarch64 one is compiled at most. A wrong number there denies a syscall a
+  renderer needs — a crash — or, worse, fails to deny one of the escape
+  primitives while the code still reads as denying it.
+- **Why deferred:** it needs an aarch64 runner, which is infrastructure rather
+  than code. The structural tests (`sandbox_policy_*` in `linux.rs`) check the
+  filter's *shape* on whichever architecture they run on, so a malformed
+  program is caught; what they cannot check is whether 117 is really `ptrace`
+  on this ABI. Recorded so the table is treated as unverified rather than as
+  tested-by-association with the x86_64 one.

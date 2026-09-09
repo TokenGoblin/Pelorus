@@ -138,6 +138,16 @@ const DENIED_SYSCALLS: &[u32] = &[
     282, // userfaultfd
 ];
 
+/// A BPF jump offset is a `u8`, so the deny instruction has to stay within 255
+/// of every comparison that targets it. This is a compile-time floor under
+/// that: adding a 250th denied syscall stops the build rather than producing a
+/// filter whose jumps land somewhere else and whose code still reads as though
+/// it denies them.
+const _: () = assert!(
+    DENIED_SYSCALLS.len() < 250,
+    "too many denied syscalls for a u8 BPF jump offset; the filter needs a      different shape (jump to a shared trailer, or an allow-list) rather than      a longer chain of comparisons"
+);
+
 /// One BPF instruction, matching `struct sock_filter`.
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -371,7 +381,12 @@ fn build_filter() -> Vec<SockFilter> {
         // written as a constant so that editing DENIED_SYSCALLS cannot
         // silently produce a filter that jumps into the wrong instruction.
         let remaining = denied - index - 1;
-        let to_deny = u8::try_from(remaining + 1).unwrap_or(u8::MAX);
+        // Saturating here would be a silently wrong filter: the jump would
+        // land on some other instruction and the syscall would be allowed
+        // while the code still read as denying it. The const assertion above
+        // makes that unreachable; this keeps the arithmetic honest if it is
+        // ever removed.
+        let to_deny = u8::try_from(remaining + 1).unwrap_or(0);
         program.push(jump(BPF_JMP | BPF_JEQ | BPF_K, *syscall, to_deny, 0));
     }
 
