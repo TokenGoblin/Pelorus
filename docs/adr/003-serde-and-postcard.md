@@ -46,8 +46,42 @@ would be an ADR arguing against the spec, not a dependency ADR.
 | **What they do** | serde: the serialisation trait vocabulary. serde_derive: proc macro generating impls. postcard: a compact, no-std-friendly binary format with COBS framing available. |
 | **Why not write it** | A binary codec is writable in a week. Keeping it correct against every enum variant, every schema change, and an adversary who controls the bytes is not a week. postcard is small, has an explicit wire-format specification, and is designed for embedded targets where mis-parsing is expensive. |
 | **Maintainer count** | serde: two principal maintainers, very high ecosystem exposure. postcard: primarily one maintainer, low but real bus factor. |
-| **Audit status** | To be confirmed by the first `cargo vet` run with real dependencies. serde and its proc-macro closure are expected to be covered by the imported Mozilla and Google audit sets; postcard may need an exemption or our own audit. Whatever the run says is recorded in `supply-chain/`. |
-| **Unsafe-line count** | Recorded in `ci/unsafe-baseline.json` in the commit that adds them. The baseline moves from `{}` to a real number in this phase; that is the gate starting to work, not breaking. |
+| **Audit status** | See "What the first run actually decided" below. Not what was assumed. |
+| **Unsafe-line count** | 135, recorded in `ci/unsafe-baseline.json`. `syn` is 108 of it. |
+
+## What the first run actually decided
+
+§5 says to import "Mozilla's and Google's audit sets". Those two, alone, did not
+cover this closure: `cargo vet` reported **13 unvetted dependencies** and an
+estimated audit backlog of 107,581 lines. That is the number §5's reasoning
+predicts — auditing a browser tree unaided is a project of its own — arriving on
+the very first dependency.
+
+Two things closed the gap, and both go beyond what §5 names, so both are
+recorded here rather than left in a config diff:
+
+**Three more audit sets imported:** `bytecode-alliance`, `isrg`, and
+`embark-studios`. This took 13 unvetted down to 8. The choices are not arbitrary:
+Bytecode Alliance audits are Wasmtime's, and ISRG's are from the organisation
+that funds Rustls — which this project depends on from Phase 3. Widening the
+import list widens who we are trusting to have read the code, and that is the
+actual cost.
+
+**Eight crates trusted by publisher.** The remaining 8 are all published by
+David Tolnay, whom Mozilla already trusts for exactly this. `cargo vet trust`
+records a per-crate entry in `supply-chain/audits.toml` against his crates.io
+user id, with a start date and an **expiry of 2027-09-09**.
+
+Per crate, deliberately, rather than `cargo vet trust --all dtolnay`: the blanket
+form would auto-trust every crate he publishes in future, including ones this
+project has never evaluated. Eight named entries that expire is a bounded
+statement; "everything by this person, forever" is not.
+
+**What that means honestly:** eight of our thirteen dependencies are not audited
+by anyone in our chain. They are trusted because a specific person published
+them and Mozilla vouches for that person. That is a reasonable position and it is
+not the same as an audit, and the expiry date exists so it has to be re-taken
+rather than inherited.
 
 ## Consequences
 

@@ -1,0 +1,13 @@
+# ADR 006: cargo-fuzz needs -Z sanitizer and libFuzzer, both nightly-only.
+#
+# This override is scoped to fuzz/ by rustup's directory rules. Nothing outside
+# this directory sees it, ci/gate-fuzz-smoke.sh asserts the repository root
+# still resolves to the stable pin, and nothing built here ever ships — so
+# invariant 7's "same source + same toolchain" is unaffected by construction.
+#
+# Pinned to an exact date, not "nightly": an unpinned nightly drifts weekly and
+# would make this the one part of the project nobody can reproduce.
+[toolchain]
+channel = "nightly-2026-09-01"
+components = ["rust-src", "llvm-tools"]
+profile = "minimal"

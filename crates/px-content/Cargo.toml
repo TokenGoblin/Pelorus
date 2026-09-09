@@ -10,8 +10,14 @@ name = "px-content"
 path = "src/main.rs"
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+px-ipc = { path = "../px-ipc", version = "0.0.0" }
+
+[dev-dependencies]
+# The crash-and-restart gate needs both a real broker and a real content
+# process binary. CARGO_BIN_EXE_px-content is only set for this package's own
+# tests, so the end-to-end test lives here and pulls the broker in, rather than
+# living in px-broker and hunting for the binary on disk.
+px-broker = { path = "../px-broker", version = "0.0.0" }
 
 # build-spec §4.3: this crate handles hostile input.
 [lints]

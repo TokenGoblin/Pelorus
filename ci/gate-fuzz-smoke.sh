@@ -27,8 +27,11 @@ fi
 # ADR 006: the nightly is fenced to fuzz/ by a directory-scoped
 # rust-toolchain.toml. Assert the fence rather than trusting it — the whole
 # point of pinning stable is that nothing outside this directory drifts.
-root_tc="$(rustup show active-toolchain 2>/dev/null | cut -d' ' -f1)"
-fuzz_tc="$(cd fuzz && rustup show active-toolchain 2>/dev/null | cut -d' ' -f1)"
+# `rustup show active-toolchain` prints installation progress and warnings on
+# the first call for a toolchain that is not yet downloaded, so take the last
+# line rather than the first.
+root_tc="$(rustup show active-toolchain 2>/dev/null | tail -1 | cut -d' ' -f1)"
+fuzz_tc="$(cd fuzz && rustup show active-toolchain 2>/dev/null | tail -1 | cut -d' ' -f1)"
 info "toolchain at repository root: $root_tc"
 info "toolchain inside fuzz/:      $fuzz_tc"
 case "$root_tc" in

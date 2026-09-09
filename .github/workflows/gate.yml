@@ -175,6 +175,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # cargo-fuzz is Linux and macOS only in practice: libFuzzer is not
+      # supported on the MSVC target. That is why this job has no matrix, and
+      # why the deserializers are also exercised by ordinary tests, which do
+      # run on both platforms.
+      #
+      # No explicit toolchain install: rustup provisions the nightly named in
+      # fuzz/rust-toolchain.toml, with its components, on first use inside that
+      # directory. Naming it again here would be a second place to update.
       - name: Install cargo-fuzz
         run: cargo install --locked cargo-fuzz
       - name: Smoke
