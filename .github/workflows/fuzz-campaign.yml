@@ -51,13 +51,21 @@ jobs:
         # Weighted towards the hostile direction and the properties that
         # matter. frame_response is the direction whose own documentation says
         # it matters less, and it used to get half the budget.
+        #
+        # Phase 3 adds the HTTP framing targets, which §9 requires fuzzed for
+        # 24h. They get three shards between them because they are the newest
+        # parsers here and the only ones reachable by any server the user
+        # connects to — the IPC targets face a content process the broker
+        # already spawned, which is a smaller population of attackers.
         include:
           - { target: frame_request, shard: 1 }
-          - { target: frame_request, shard: 2 }
           - { target: channel_stream, shard: 1 }
           - { target: channel_stream, shard: 2 }
           - { target: broker_sequence, shard: 1 }
           - { target: frame_response, shard: 1 }
+          - { target: http_response, shard: 1 }
+          - { target: http_response, shard: 2 }
+          - { target: http_chunked, shard: 1 }
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-fuzz
