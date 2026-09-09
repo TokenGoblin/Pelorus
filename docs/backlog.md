@@ -365,3 +365,23 @@ Format: one entry per defect.
   standing authorisation because it is a design with several defensible shapes
   and consequences reaching Phase 21. Deciding this would be deciding that,
   quietly, from underneath.
+
+## The fuzz campaign uses one -max_len for targets with different boundaries
+
+- **Found in:** phase 3, `ci/gate-fuzz-smoke.sh` and the campaign workflow
+- **Belongs to:** unassigned
+- **What:** `-max_len` is 1,100,000 for every target. That number was chosen in
+  Phase 1 to straddle `px-ipc`'s `MAX_MESSAGE_BYTES` of 1,048,576, and for the
+  IPC targets it is exactly right. The HTTP targets have different limits —
+  `MAX_BODY_BYTES` at 32 MiB and `MAX_CHUNK_BYTES` at 8 MiB — and the campaign
+  never approached either, so those boundaries are unfuzzed while the gate item
+  reads as passed.
+- **Why deferred:** raising the global `-max_len` to 32 MiB would make every
+  target spend its budget generating enormous inputs instead of exploring
+  structure, which would make the *IPC* coverage worse to improve the HTTP
+  coverage. The fix is a per-target `-max_len`, which means the campaign matrix
+  and the smoke script both learn that targets differ — a small change to two
+  files and a slightly less uniform gate. Recorded rather than done because the
+  Phase 3 gate report already states plainly what was and was not covered, and
+  changing the fuzzing harness while recording a campaign result would mean the
+  recorded numbers came from a configuration that no longer exists.

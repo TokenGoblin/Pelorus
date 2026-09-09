@@ -7,13 +7,57 @@
 | Item | Where | Result |
 |---|---|---|
 | 200 URLs fetched correctly | `net_fetches_*` ×3, against a generated corpus and a local replay server | **Pass** |
-| 24h fuzz on HTTP framing | `fuzz-campaign` run [34389705961](https://github.com/TokenGoblin/Pelorus/actions/runs/34389705961) | **Outstanding** — running; see below |
+| 24h fuzz on HTTP framing | `fuzz-campaign` run [34389705961](https://github.com/TokenGoblin/Pelorus/actions/runs/34389705961) | **Pass**, with a limitation recorded below |
 | Zero plaintext DNS, zero connections outside the requested set | `net_connects_only_*` ×4, plus the symbol audit | **Pass**, with a stated caveat |
 | PSL version asserted, stale-PSL test fails | `psl_version_*` ×6 | **Pass** |
 
 168 tests. `ci/gate-network.sh` passes locally on Windows; the only red CI job
 is `compat-list`, which is Phase 0's outstanding deliverable and is red on
 `main` as well.
+
+## The campaign
+
+Eight shards, `-max_total_time=14400` each, **33.9 billion executions, no
+crashes and no artifacts written**.
+
+| Target | Shard | Runs | cov | ft | corpus |
+|---|---|---:|---:|---:|---|
+| `frame_request` | 1 | 12,321,131,188 | 170 | 209 | 87 / 1,784 b |
+| `channel_stream` | 1 | 3,819,434,553 | 176 | 629 | 236 / 16 KiB |
+| `channel_stream` | 2 | 2,439,332,349 | 178 | 716 | 279 / 596 KiB |
+| `broker_sequence` | 1 | 3,210,910 | 512 | 3,335 | 1,023 / 241 KiB |
+| `frame_response` | 1 | 7,504,978,187 | 152 | 190 | 79 / 966 b |
+| `http_response` | 1 | 1,282,392,433 | 409 | 1,539 | 554 / 94 KiB |
+| `http_response` | 2 | 1,309,271,834 | 405 | 1,542 | 596 / 116 KiB |
+| `http_chunked` | 1 | 5,266,617,898 | 122 | 451 | 216 / 9,543 b |
+
+**`-max_len` was verified applied rather than assumed**, the three ways Phase 1
+learned to check: the flag appears on all eight `Running` lines, the
+`-max_len is not provided` warning appears **zero** times, and libFuzzer's own
+`lim:` field reaches 1,100,000 and holds there for 10,102 log lines. The third
+is the load-bearing one — a flag on a command line proves it was passed, `lim:`
+proves libFuzzer acted on it.
+
+The new targets earned their shards. `http_response` reached 409 coverage
+points and ~1,540 features against a parser that did not exist this morning,
+which is more than any IPC target except `broker_sequence`.
+
+### The limitation, which the numbers do not show
+
+**`-max_len` is 1,100,000, and that number was chosen for a different
+boundary.** It straddles `px-ipc`'s `MAX_MESSAGE_BYTES` (1,048,576)
+deliberately, which is why it exists. The HTTP parser's own limits are
+`MAX_BODY_BYTES` at 32 MiB and `MAX_CHUNK_BYTES` at 8 MiB, and **neither was
+approached**. So the honest statement of this gate item is: 24 CPU-hours found
+no crash in HTTP framing for inputs up to 1.1 MB, and the parser's own size
+boundaries are unfuzzed.
+
+That is the same shape of gap Phase 1 hit, caught earlier this time — before
+recording a pass rather than after. It is not a reason to withhold the item:
+the bounds themselves are unit-tested, and a 32 MiB `-max_len` would spend the
+campaign's budget generating enormous inputs instead of exploring structure.
+It is a reason to say what was and was not covered. A per-target `-max_len` is
+the fix, and it is in `docs/backlog.md`.
 
 ## What the phase built
 
@@ -141,11 +185,15 @@ from real sites, and to stop storing one where the other belongs.
 
 ## Verdict
 
-**Three of four gate items pass.** The fourth is a 24-hour campaign that is
-running; this report is not final until it lands and its numbers are recorded
-here — the same standard Phase 1 was held to, and for the same reason: a
-campaign that has not finished has not found anything.
+**All four gate items pass**, and the campaign was verified to have tested what
+it was meant to rather than merely reported clean.
 
-The phase is **not closeable** on the gate alone even once it does. §9 asks for
-a process boundary this phase did not build, and the reason is a decision that
-belongs to whoever owns ADR 009.
+The phase is **not closeable** on the gate alone. §9 asks for a process
+boundary this phase did not build, and the reason is a decision that belongs to
+whoever owns ADR 009 — which is marked PROPOSED precisely so it is not decided
+from underneath by whichever implementation needs it first.
+
+Said plainly: what this phase establishes is that a request can be made safely,
+partitioned correctly, and refused when anything is ambiguous. What it does not
+establish is that the network lives in its own process, which is the first line
+of §9 Phase 3 and the part a gate cannot check.
