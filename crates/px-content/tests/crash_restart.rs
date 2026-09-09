@@ -195,12 +195,18 @@ fn size_limit_holds_across_a_real_pipe() {
         serve_once(&mut broker, &mut content, PATIENT).expect("opening exchange");
     }
 
+    // A response the broker cannot frame must be the caller's error, not a
+    // worker thread's private problem. The previous version of this test
+    // discarded the result with `let _ =` and asserted only that the child was
+    // alive — so it passed while the write direction was silently destroyed.
     let oversized = Response::Echo {
         payload: vec![0u8; px_ipc::MAX_MESSAGE_BYTES + 1],
     };
-    // The broker refuses to queue a reply it cannot frame. Queuing is
-    // non-blocking, so this returns rather than filling a pipe.
-    let _ = content.reply(oversized);
+    assert_eq!(content.reply(&oversized), Err(ServeError::Oversized));
 
+    // And the channel still works afterwards. This is the assertion that
+    // actually catches the bug: the writer thread must not have died.
     assert!(content.is_alive());
+    assert_eq!(content.reply(&Response::Pong), Ok(()));
+    assert_eq!(content.reply(&Response::Pong), Ok(()));
 }

@@ -316,12 +316,28 @@ pub fn decode_frame<T: Message>(bytes: &[u8]) -> Result<T, IpcError> {
     channel.recv()
 }
 
-/// Encode one complete frame, prefix included. For fuzz seeds and tests.
+/// Encode one complete frame, prefix included.
+///
+/// Used by anything that must know a message is sendable *before* committing
+/// to send it. A queue that accepts a message the writer will later refuse
+/// turns a caller's error into a silent loss.
 pub fn encode_frame<T: Message>(message: &T) -> Result<Vec<u8>, IpcError> {
     let mut buffer = Vec::new();
     let mut channel = Channel::new(std::io::empty(), &mut buffer);
     channel.send(message)?;
     Ok(buffer)
+}
+
+/// Write an already-encoded frame.
+///
+/// The counterpart to [`encode_frame`], for a writer that validated the
+/// message earlier and elsewhere. Takes bytes rather than a message so that
+/// encoding — and therefore the size decision — happens once, at the point
+/// where a caller can still be told about it.
+pub fn write_frame<W: Write>(writer: &mut W, frame: &[u8]) -> Result<(), IpcError> {
+    writer.write_all(frame)?;
+    writer.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]

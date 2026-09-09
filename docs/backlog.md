@@ -86,3 +86,52 @@ Format: one entry per defect.
   unused allowance.
 - **Why deferred:** correcting it against reality requires having the
   dependencies. Prune it when phase 3 lands the first ones.
+
+## IPC has no request/response correlation id
+
+- **Found in:** phase 1, `crates/px-ipc/src/message.rs`
+- **Belongs to:** phase 2, with the socket transport
+- **What:** `Request` and `Response` carry no id, so if a reply is ever lost or
+  reordered, response N answers request N-k and **neither side can detect it**.
+  `serve_once` closes the channel on any reply failure, which makes the state
+  unreachable today rather than merely unlikely — but the protocol has no way
+  to notice if a future caller is less strict.
+- **Why deferred:** it is a wire-format change, and the transport is being
+  replaced in phase 2 anyway (ADR 005). Doing both at once is one migration
+  instead of two.
+
+## Miri is not run on px-ipc
+
+- **Found in:** phase 1, `.github/workflows/gate.yml`
+- **Belongs to:** phase 2
+- **What:** build-spec §4.5 names Miri on `px-dom`, `px-ipc` and `px-store`
+  unit tests. `px-ipc` now exists and has 15 of them; there is no Miri job.
+- **Why deferred:** Miri needs a nightly toolchain, and ADR 006 fences nightly
+  to `fuzz/` with a CI assertion that nothing else resolves to it. Adding a
+  second nightly consumer means amending that ADR, which is a decision rather
+  than a chore. `px-ipc` has no `unsafe` and no FFI, so what Miri would add
+  today is UB detection in `std` calls — real but not urgent.
+
+## check_not_serializable cannot see an aliased derive macro
+
+- **Found in:** phase 1, `ci/check_not_serializable.py`
+- **Belongs to:** unassigned
+- **What:** `use serde::Serialize as Ser; #[derive(Ser)]` passes the textual
+  check.
+- **Why deferred:** the structural check beside it — `px-broker` has no `serde`
+  dependency, so it cannot name the trait under any alias — is what actually
+  holds the property. Defeating the textual check requires a deliberate hand
+  *and* adding the dependency the other check rejects. Recorded so nobody
+  mistakes the textual check for the guarantee.
+
+## Orphaned pipes leak a worker thread per restart
+
+- **Found in:** phase 1, `crates/px-broker/src/lib.rs`
+- **Belongs to:** phase 17
+- **What:** if a content process orphans its stdout to a grandchild and exits,
+  killing the child does not close the pipe, so the reader thread stays blocked
+  forever. Measured at exactly one leaked thread per restart. `MAX_RESTARTS`
+  now bounds it at 8 per process.
+- **Why deferred:** the real fix is process-tree teardown — Windows job objects
+  and Linux cgroups — which is phase 17's work. The cap turns an unbounded leak
+  an attacker drives into a bounded one.

@@ -4,19 +4,38 @@ Used for `ChannelId`, which is the broker's answer to "who sent this". If it
 could be serialised it could travel inside a message, and then it would be a
 claim rather than an observation (invariant 9).
 
-Why this is a parser and not a grep. The check began as:
+## This is the weaker of two checks, on purpose
+
+`ci/gate-ipc.sh` also asserts that `px-broker` has no `serde` dependency at
+all. That is the check that actually holds the property: without a dependency,
+`#[derive(Serialize)]` cannot name the trait under any spelling or alias, so
+the guarantee is structural rather than a matter of inspection. This file is
+defence in depth, and it is the only thing that catches a hand-written `impl`.
+
+## Why it is deliberately crude
+
+Two smarter versions failed. First:
 
     grep -B3 'struct ChannelId' file | grep -q 'Serialize'
 
-which reports success when the first grep matches nothing at all — so renaming
-or moving the type turned it into a check that passed having inspected nothing.
-The repair required `derive(` and `Serialize` on the same line, which a
-multi-line derive defeats — and a multi-line derive is exactly what rustfmt
-produces once the list is long, in a project that runs `cargo fmt --check`.
+reports success when the first grep matches nothing at all, so renaming or
+moving the type turned it into a check that passed having inspected nothing.
+Requiring `derive(` and `Serialize` on the same line then missed a multi-line
+derive — which is what rustfmt emits once the list is long. A backwards walk
+balancing brackets missed this, because brackets inside a string literal count
+as delimiters and drove the walk to stop early:
 
-Both failures share a shape: a check that cannot fail looks identical to a
-check that passes. So this reads the whole attribute block, however it is
-formatted, and exits non-zero if it cannot find the type at all.
+    #[derive(Serialize)]
+    #[doc = concat!(
+        "((("
+    )]
+    pub struct ChannelId(u64);
+
+So this version does no parsing. It looks for a derive mentioning the trait
+anywhere in the window above the declaration, and over-approximates: an
+unrelated serde-derived type within `WINDOW` lines would fail the gate. That is
+fail-closed, it cannot arise in a crate with no serde dependency, and it has no
+clever failure mode for formatting to defeat.
 
 Usage: check_not_serializable.py <TypeName> <file> [file...]
 Exit 0 if the type is found and is not serialisable, 1 otherwise.
@@ -27,38 +46,9 @@ import sys
 
 TRAITS = ("Serialize", "Deserialize")
 
-
-def attribute_block_before(lines, index):
-    """Collect the contiguous attribute block immediately above `index`.
-
-    Walks backwards over `#[...]` attributes and their continuation lines,
-    which is what makes a derive spread over ten lines as visible as one on a
-    single line.
-    """
-    block = []
-    depth = 0
-    i = index - 1
-    while i >= 0:
-        line = lines[i].strip()
-        if not line:
-            i -= 1
-            continue
-        if line.startswith("///") or line.startswith("//"):
-            i -= 1
-            continue
-        depth += line.count(")") + line.count("]")
-        depth -= line.count("(") + line.count("[")
-        block.append(line)
-        if line.startswith("#["):
-            depth = 0
-            i -= 1
-            continue
-        if depth <= 0 and not line.startswith("#"):
-            # Not part of an attribute block.
-            block.pop()
-            break
-        i -= 1
-    return "\n".join(reversed(block))
+# Generous. A derive block, however formatted, plus doc comments, is well under
+# this — and being too generous only makes the check stricter.
+WINDOW = 30
 
 
 def main():
@@ -68,12 +58,15 @@ def main():
 
     type_name = sys.argv[1]
     paths = sys.argv[2:]
+
     declaration = re.compile(
         r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s+" + re.escape(type_name) + r"\b"
     )
+    trait_alt = "|".join(TRAITS)
     manual_impl = re.compile(
-        r"impl\b[^;{]*\b(" + "|".join(TRAITS) + r")\b[^;{]*\bfor\s+" + re.escape(type_name) + r"\b"
+        r"impl\b[^;{]*\b(" + trait_alt + r")\b[^;{]*\bfor\s+" + re.escape(type_name) + r"\b"
     )
+    derived = re.compile(r"\b(" + trait_alt + r")\b")
 
     found = False
     bad = False
@@ -92,13 +85,27 @@ def main():
             if not declaration.match(line):
                 continue
             found = True
-            block = attribute_block_before(lines, i)
-            for trait in TRAITS:
-                if re.search(r"\b" + trait + r"\b", block):
+
+            start = max(0, i - WINDOW)
+            window = lines[start:i]
+            # Only look when the window mentions a derive at all, so a bare
+            # `use serde::Serialize` import elsewhere in the file does not fail
+            # every type declared after it.
+            if not any("derive" in w for w in window):
+                continue
+            for offset, w in enumerate(window):
+                # Comments are skipped, and not as a convenience: the type's
+                # own doc comment explains that it must never be `Serialize`,
+                # so a scan that reads comments fails on the very sentence
+                # documenting the property it is checking.
+                if w.strip().startswith("//"):
+                    continue
+                hit = derived.search(w)
+                if hit:
                     print(
-                        f"FAIL {path}:{i + 1} {type_name} derives {trait}\n"
-                        f"      attribute block was:\n"
-                        + "\n".join("        " + b for b in block.splitlines()),
+                        f"FAIL {path}:{start + offset + 1} a derive above "
+                        f"{type_name} (declared at line {i + 1}) mentions "
+                        f"{hit.group(1)}:\n        {w.strip()}",
                         file=sys.stderr,
                     )
                     bad = True

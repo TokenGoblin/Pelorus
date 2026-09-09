@@ -35,7 +35,7 @@
 //! [`ContentProcess`], and every broker-side wait has a deadline. See
 //! [`ContentProcess::next_request`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -50,7 +50,29 @@ use px_ipc::{Channel, FrameHost, FrameId, IpcError, Request, Response};
 /// Bounded on purpose. An unbounded queue in front of a peer that never reads
 /// is a memory leak whose size the attacker chooses; a full queue is evidence
 /// the peer has stopped cooperating, which is actionable.
-const QUEUE_DEPTH: usize = 32;
+const QUEUE_DEPTH: usize = 4;
+
+/// Ceiling on what one hostile peer can make the broker hold.
+///
+/// The arithmetic is the point: `QUEUE_DEPTH` messages in each direction, each
+/// up to `MAX_MESSAGE_BYTES`. At the original depth of 32 that was 66 MiB per
+/// content process — a thousand times the 64 KiB the codec caps so carefully
+/// one layer down, and §4.4's heap caps are per *content process*, so nothing
+/// bounds the broker's own heap but this constant.
+const _QUEUE_BYTES_CEILING: usize = QUEUE_DEPTH * px_ipc::MAX_MESSAGE_BYTES * 2;
+
+/// How many times one content process may be replaced before the broker gives
+/// up on it.
+///
+/// Each restart can leak a worker thread: if the child orphaned its stdout to
+/// a grandchild, killing it does not close the pipe and the reader stays
+/// blocked forever. Measured at exactly one thread per restart. Without a cap
+/// the leak is bounded by how many times a hostile process chooses to die,
+/// which is not a bound.
+const MAX_RESTARTS: u32 = 8;
+
+/// Denials retained for inspection.
+const AUDIT_CAPACITY: usize = 256;
 
 /// Which connection a message arrived on.
 ///
@@ -250,6 +272,14 @@ pub struct Broker {
     next_channel: u64,
     capabilities: HashMap<ChannelId, ChannelCaps>,
     frames: FrameTree,
+    /// Denials, oldest dropped first.
+    ///
+    /// §7.3 makes the broker the writer of the audit log, and it has to be the
+    /// broker rather than the caller: `serve_once` returns the `Decision`, and
+    /// when the reply fails it returns an error instead — so every denial on a
+    /// non-draining channel used to vanish, which is exactly when you most
+    /// want the record.
+    audit: VecDeque<(ChannelId, DenyReason)>,
     /// Makes `dispatch` panic, so that the `catch_unwind` in
     /// [`Broker::dispatch_guarded`] can be tested against a real unwind rather
     /// than a simulated one.
@@ -289,6 +319,39 @@ impl Broker {
     pub fn close_channel(&mut self, channel: ChannelId) {
         self.capabilities.remove(&channel);
         self.frames.release_all(channel);
+
+        // Purge everyone else's references to the frames that just died.
+        // Leaving them is not a capability confusion — generations make a
+        // stale handle unresolvable — but nothing ever removed them, so a
+        // long-lived channel's set grew without bound.
+        let live: HashSet<FrameId> = self
+            .capabilities
+            .values()
+            .flat_map(|caps| caps.hosts.iter().copied())
+            .collect();
+        for caps in self.capabilities.values_mut() {
+            caps.visible.retain(|frame| live.contains(frame));
+        }
+    }
+
+    /// Whether a channel is open. Callers on the IPC path need this because
+    /// [`Broker::dispatch_guarded`] can revoke a channel underneath them.
+    pub fn is_open(&self, channel: ChannelId) -> bool {
+        self.capabilities.contains_key(&channel)
+    }
+
+    /// Denials recorded so far, oldest first.
+    pub fn audit_log(&self) -> impl Iterator<Item = (ChannelId, DenyReason)> + '_ {
+        self.audit.iter().copied()
+    }
+
+    fn record(&mut self, channel: ChannelId, decision: &Decision) {
+        if let Some(reason) = decision.audit {
+            if self.audit.len() >= AUDIT_CAPACITY {
+                self.audit.pop_front();
+            }
+            self.audit.push_back((channel, reason));
+        }
     }
 
     /// Create a frame owned by a channel and grant that channel access to it.
@@ -321,12 +384,19 @@ impl Broker {
     /// with no channel id and no pid. Routing stays the broker's job, and an
     /// identifier a process never had is one it cannot be tricked into
     /// repeating.
+    /// Idempotent: `true` means the viewer can see the frame afterwards, not
+    /// that this call was the one that made it so. `HashSet::insert` returns
+    /// `false` for a duplicate, which made granting an owner sight of its own
+    /// frame — already visible from `create_frame` — report failure.
     pub fn grant_visibility(&mut self, viewer: ChannelId, frame: FrameId) -> bool {
         if self.frames.owner(frame).is_none() {
             return false;
         }
         match self.capabilities.get_mut(&viewer) {
-            Some(caps) => caps.visible.insert(frame),
+            Some(caps) => {
+                caps.visible.insert(frame);
+                true
+            }
             None => false,
         }
     }
@@ -381,13 +451,15 @@ impl Broker {
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.dispatch(channel, request)
         }));
-        match caught {
+        let decision = match caught {
             Ok(decision) => decision,
             Err(_) => {
                 self.close_channel(channel);
                 Decision::deny(DenyReason::Internal)
             }
-        }
+        };
+        self.record(channel, &decision);
+        decision
     }
 
     /// Handle one request from one channel.
@@ -456,6 +528,15 @@ pub enum ServeError {
     Protocol,
     /// The peer has stopped draining its responses.
     NotDraining,
+    /// The broker cannot frame the response it was about to send. A bug on
+    /// this side, surfaced to the caller rather than dropped into a worker
+    /// thread that then dies quietly.
+    Oversized,
+    /// The channel was revoked while the request was being handled — a caught
+    /// panic in dispatch. The peer is still running and must be reaped.
+    Revoked,
+    /// This process has been replaced too many times.
+    Exhausted,
 }
 
 /// A content process, and the threads that talk to it.
@@ -474,7 +555,17 @@ pub struct ContentProcess {
     executable: PathBuf,
     /// `None` once the workers have been abandoned; see [`Self::abandon`].
     inbound: Option<Receiver<Result<Request, IpcError>>>,
-    outbound: Option<SyncSender<Response>>,
+    /// Carries complete, already-validated frames rather than messages.
+    ///
+    /// Encoding in [`Self::reply`] instead of in the writer thread is what
+    /// makes an unsendable response the caller's error. Queuing a `Response`
+    /// and encoding later meant the writer discovered the problem alone, and
+    /// its only vocabulary for "something went wrong" was to exit — after
+    /// which the broker read every later reply as the peer having closed, on a
+    /// channel whose peer was alive and cooperating.
+    outbound: Option<SyncSender<Vec<u8>>>,
+    /// Restarts so far, against [`MAX_RESTARTS`].
+    restarts: u32,
 }
 
 impl ContentProcess {
@@ -519,12 +610,15 @@ impl ContentProcess {
         });
 
         // Writer: owns the write half. Bounded queue, so a peer that stops
-        // reading cannot make the broker buffer without limit.
-        let (outbound, response_rx) = sync_channel::<Response>(QUEUE_DEPTH);
+        // reading cannot make the broker buffer without limit. Frames arrive
+        // already encoded and already size-checked, so the only failure left
+        // here is the transport itself — which really does mean the channel is
+        // finished.
+        let (outbound, frame_rx) = sync_channel::<Vec<u8>>(QUEUE_DEPTH);
         std::thread::spawn(move || {
-            let mut channel = Channel::new(std::io::empty(), BufWriter::new(stdin));
-            while let Ok(response) = response_rx.recv() {
-                if channel.send(&response).is_err() {
+            let mut writer = BufWriter::new(stdin);
+            while let Ok(frame) = frame_rx.recv() {
+                if px_ipc::write_frame(&mut writer, &frame).is_err() {
                     return;
                 }
             }
@@ -536,6 +630,7 @@ impl ContentProcess {
             executable: executable.to_path_buf(),
             inbound: Some(inbound),
             outbound: Some(outbound),
+            restarts: 0,
         })
     }
 
@@ -569,15 +664,23 @@ impl ContentProcess {
     ///
     /// A full queue means the peer has stopped draining, which is a decision
     /// the peer made and the broker should act on rather than absorb.
-    pub fn reply(&mut self, response: Response) -> Result<(), ServeError> {
+    /// Encoded here, deliberately, so that a response the broker cannot frame
+    /// is the caller's error rather than a worker thread's private problem.
+    pub fn reply(&mut self, response: &Response) -> Result<(), ServeError> {
+        let frame = px_ipc::encode_frame(response).map_err(|_| ServeError::Oversized)?;
         let Some(outbound) = self.outbound.as_ref() else {
             return Err(ServeError::Closed);
         };
-        match outbound.try_send(response) {
+        match outbound.try_send(frame) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => Err(ServeError::NotDraining),
             Err(TrySendError::Disconnected(_)) => Err(ServeError::Closed),
         }
+    }
+
+    /// How many times this process has been replaced.
+    pub fn restarts(&self) -> u32 {
+        self.restarts
     }
 
     /// Whether the child process is still running.
@@ -626,8 +729,16 @@ impl ContentProcess {
     /// error — a half-restarted object that looks alive to everything except
     /// the broker.
     pub fn restart(&mut self, broker: &mut Broker) -> std::io::Result<()> {
+        if self.restarts >= MAX_RESTARTS {
+            return Err(std::io::Error::other(
+                "content process restarted too many times; refusing to continue",
+            ));
+        }
+
         let executable = self.executable.clone();
-        let replacement = Self::spawn(broker, &executable)?;
+        let attempts = self.restarts.saturating_add(1);
+        let mut replacement = Self::spawn(broker, &executable)?;
+        replacement.restarts = attempts;
 
         let previous = self.id;
         let _ = self.kill();
@@ -664,7 +775,23 @@ pub fn serve_once(
     let channel = process.channel_id();
     let request = process.next_request(timeout)?;
     let decision = broker.dispatch_guarded(channel, request);
-    process.reply(decision.response.clone())?;
+
+    // dispatch_guarded revokes the channel when it catches a panic, and until
+    // now said so to nobody: the caller got a Denied, counted a served
+    // request, and looped — the broker answering Denied forever to a process
+    // it believed it had cut off, with nothing reaping it.
+    if !broker.is_open(channel) {
+        return Err(ServeError::Revoked);
+    }
+
+    // Fail closed on a reply that cannot be delivered. The request was already
+    // dispatched, so continuing would answer request N with response N-k and
+    // neither side could detect it — Request and Response carry no
+    // correlation id. Closing the channel is what makes that unreachable.
+    if let Err(error) = process.reply(&decision.response) {
+        broker.close_channel(channel);
+        return Err(error);
+    }
     Ok(decision)
 }
 
@@ -1059,6 +1186,93 @@ mod tests {
             }
         );
         assert_eq!(broker.channel_count(), 1, "a clean dispatch closes nothing");
+    }
+
+    /// §7.3 makes the broker the audit writer, and it has to be: `serve_once`
+    /// returns the `Decision`, and when the reply fails it returns an error
+    /// instead — so a denial on a non-draining channel used to vanish, which
+    /// is exactly when the record matters most.
+    #[test]
+    fn denials_are_recorded_by_the_broker_not_the_caller() {
+        let mut broker = Broker::new();
+        let victim = broker.open_channel().expect("channel");
+        let attacker = broker.open_channel().expect("channel");
+        let frame = broker.create_frame(victim).expect("frame");
+
+        let _ = broker.dispatch_guarded(attacker, Request::FrameHost { frame });
+        let _ = broker.dispatch_guarded(attacker, Request::Ping);
+
+        let log: Vec<_> = broker.audit_log().collect();
+        assert_eq!(log, vec![(attacker, DenyReason::NotYourFrame)]);
+    }
+
+    #[test]
+    fn the_audit_log_is_bounded() {
+        let mut broker = Broker::new();
+        let channel = broker.open_channel().expect("channel");
+        // Every one of these is denied, so an unbounded log would grow to
+        // match — a hostile peer choosing the broker's memory usage.
+        for _ in 0..(AUDIT_CAPACITY * 2) {
+            let _ = broker.dispatch_guarded(
+                channel,
+                Request::FrameHost {
+                    frame: FrameId::new(7, 7),
+                },
+            );
+        }
+        assert_eq!(broker.audit_log().count(), AUDIT_CAPACITY);
+    }
+
+    /// Granting an owner sight of its own frame is a no-op that succeeded, and
+    /// `HashSet::insert` reported it as failure.
+    #[test]
+    fn grant_visibility_is_idempotent() {
+        let mut broker = Broker::new();
+        let host = broker.open_channel().expect("channel");
+        let viewer = broker.open_channel().expect("channel");
+        let frame = broker.create_frame(host).expect("frame");
+
+        assert!(broker.grant_visibility(viewer, frame));
+        assert!(
+            broker.grant_visibility(viewer, frame),
+            "a repeat grant still leaves it visible"
+        );
+        assert!(
+            broker.grant_visibility(host, frame),
+            "the owner can already see it"
+        );
+
+        assert!(
+            !broker.grant_visibility(viewer, FrameId::new(9, 9)),
+            "no such frame"
+        );
+        let stranger = ChannelId(u64::MAX);
+        assert!(!broker.grant_visibility(stranger, frame), "not a channel");
+    }
+
+    /// Nothing ever removed stale entries, so a long-lived channel's set grew
+    /// without bound. Not a capability confusion — generations prevent that —
+    /// but unbounded state a peer's lifecycle drives.
+    #[test]
+    fn closing_a_channel_purges_other_channels_views_of_its_frames() {
+        let mut broker = Broker::new();
+        let host = broker.open_channel().expect("channel");
+        let viewer = broker.open_channel().expect("channel");
+        let frame = broker.create_frame(host).expect("frame");
+        assert!(broker.grant_visibility(viewer, frame));
+        assert!(broker.can_see(viewer, frame));
+
+        broker.close_channel(host);
+
+        assert!(!broker.can_see(viewer, frame));
+        assert_eq!(
+            broker
+                .capabilities
+                .get(&viewer)
+                .map(|caps| caps.visible.len()),
+            Some(0),
+            "the stale reference must be gone, not merely unresolvable"
+        );
     }
 
     #[test]
