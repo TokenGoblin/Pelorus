@@ -265,3 +265,22 @@ Format: one entry per defect.
   defect nothing can trigger is exactly the scope creep the backlog exists to
   absorb. Recorded so the wrapper is written with the capability sets in mind
   rather than discovered leaking later.
+
+## No ASAN or TSAN build of px-sandbox in CI
+
+- **Found in:** phase 2, `crates/px-sandbox/`
+- **Belongs to:** unassigned, but soon
+- **What:** `crates/px-sandbox/CLAUDE.md` states as a local invariant that ASAN
+  and TSAN builds of this crate run in CI, and §4.5 asks for them. Neither
+  exists: `.github/workflows/gate.yml` has no sanitizer job and nothing in
+  `ci/` mentions one. Phase 2 gave this crate the project's entire `unsafe`
+  surface — two operating systems' process-creation paths, hand-managed handle
+  lifetimes, and variable-length OS structs read into aligned buffers — so it
+  is now the crate where sanitizers would pay for themselves fastest.
+- **Why deferred:** sanitizers need `-Z sanitizer` and therefore nightly, and
+  ADR 006 fences nightly to `fuzz/` with a CI assertion that nothing else
+  resolves to it. Wiring them means amending that ADR, which is a decision
+  rather than a chore — the same shape as the Miri entry above, and it should
+  probably be settled in the same breath as that one. Recorded rather than
+  quietly dropped, because the invariant is written down as though it already
+  holds.
