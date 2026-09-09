@@ -334,3 +334,34 @@ Format: one entry per defect.
   wants doing deliberately rather than in the middle of a phase that needed a
   TLS stack. Recorded now because the number is already misleading, and the
   ADR that made it so says as much.
+
+## px-net is a library, not a process, and making it one needs ADR 009 first
+
+- **Found in:** phase 3, `crates/px-net/`
+- **Belongs to:** the phase that settles ADR 009, or Phase 4 — whichever comes
+  first
+- **What:** §9 Phase 3 asks for "`px-net` as its own process". It is a library.
+  Everything else the phase names is built — rustls, HTTP/1.1, partitioned
+  pools, the PSL — but the process boundary is not, and the gate does not
+  check for it, so a passing gate does not mean the phase is complete.
+- **Why deferred, specifically:** the broker→px-net vocabulary has to name a
+  destination and a partition for each fetch, and `ci/gate-ipc.sh` forbids the
+  field names `origin`, `partition`, `partition_key`, `channel` and friends
+  anywhere under `crates/px-ipc/src/`. That rule is right for the
+  content→broker direction it was written for — a content process must never
+  describe its own authority — and the broker→px-net direction is a different
+  relationship, because the broker *is* the authority and px-net is downstream
+  of it.
+
+  Renaming the fields to slip past the regex would be gaming a check this
+  project put there deliberately, so the honest options are: a reasoned
+  amendment to the gate that scopes the ban by direction; or a design where
+  px-net learns the partition from *which channel* the request arrived on,
+  which is invariant 9 in its strongest form but costs a channel per
+  partition.
+
+  Both are protocol-shape decisions, and ADR 009 — the IPC protocol shape — is
+  marked PROPOSED with an explicit note that it was **not** taken on the
+  standing authorisation because it is a design with several defensible shapes
+  and consequences reaching Phase 21. Deciding this would be deciding that,
+  quietly, from underneath.
