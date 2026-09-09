@@ -14,7 +14,7 @@ after this is written against a boundary that already exists.
 | Killing the content process is recovered from cleanly | `crash_restart_*` ×5, real processes, both OSes | **Pass** |
 | Message size limits enforced, tested with a hostile length prefix | `size_limit_*` ×5 | **Pass** |
 
-32 tests, six of which cross a real process boundary. All CI jobs green on
+41 tests, seven of which cross a real process boundary. All CI jobs green on
 Ubuntu and Windows except `compat-list`, which is Phase 0's outstanding
 deliverable.
 
@@ -44,32 +44,33 @@ exist. Both were verified to fire on a synthetic violation, not merely to pass.
 
 ## What is outstanding
 
-**The 24-hour campaign.** ADR 006 splits fuzzing into a 60-second smoke on every
-push and a scheduled campaign, with the gate satisfied by one recorded campaign
-run. The smoke job passes in CI. The full campaign is
-[34300051078](https://github.com/TokenGoblin/Pelorus/actions/runs/34300051078)
-— six shards, four hours each, 24 hours of fuzzing.
+**The 24-hour campaign.** ADR 006 splits fuzzing into a 60-second smoke on
+every push and a scheduled campaign, with the gate satisfied by one recorded
+campaign run. The smoke job passes in CI. The campaign is
+[34303798308](https://github.com/TokenGoblin/Pelorus/actions/runs/34303798308)
+— six shards, four hours each, against the rewritten codec.
 
-The first attempt at it,
+Two earlier attempts are kept here rather than quietly superseded, because both
+say something about the gate. The first,
 [34298965894](https://github.com/TokenGoblin/Pelorus/actions/runs/34298965894),
-failed in twelve seconds on all six shards and is worth keeping in this report
-rather than quietly superseding. A code review found the cause: the
-`FUZZ_TARGET` membership test used `case " $targets " in *" $t "*`, and
-`cargo fuzz list` is newline-separated, so no target name is ever surrounded by
-spaces and none could ever match. Every shard exited immediately with "not a
-known target".
+failed in **twelve seconds** on all six shards: the `FUZZ_TARGET` membership
+test used a space-delimited `case` match, and `cargo fuzz list` is
+newline-separated, so no target name is ever surrounded by spaces and none
+could ever match. The gate item this phase most depends on could not have gone
+green — and the run was dispatched and not checked, because a job that fails in
+twelve seconds looks exactly like a job that has just started. The second was
+cancelled deliberately: it was fuzzing a codec the adversarial review was about
+to change.
 
-Two things about that are worth stating plainly. The gate item this phase most
-depends on could never have gone green, and the run was dispatched and not
-checked — a job that fails in twelve seconds looks exactly like a job that has
-just started.
+Until a campaign completes against the current code, **this phase's gate is not
+met.**
 
-Until the campaign completes, **this phase's gate is not met.**
-
-**The adversarial review.** §10 requires `px-ipc` to get "a dedicated session
-whose only job is attacking the previous session's output". That cannot be done
-by the session that wrote the code — the value is entirely in the fresh context.
-It needs a new session pointed at this branch. Not done.
+**The adversarial review.** Done, and it is the reason most of this report
+exists. §10 asks for "a dedicated session whose only job is attacking the
+previous session's output"; it found the wedges, the amplification, the oracle,
+and the fact that `dispatch` had never run on the IPC path. A second adversarial
+pass against the rewritten code is warranted before this phase closes — the
+supervisor and the direction inversion are new code that no adversary has seen.
 
 ## What the phase found
 
@@ -100,44 +101,87 @@ The second was subtler: suppressing the deliberate panic's output with
 `take_hook`/`set_hook` makes libtest fail the test, because the harness tracks
 panics through its own hook. The suppression is gone and the noise is accepted.
 
-## What the code review found
+## What the two reviews found
 
-Ten findings, all real. The critical one is above. The rest fall into two
-groups, and the second group is the uncomfortable one.
+Phase 1 was reviewed twice: an ordinary code review, and the adversarial
+session §10 requires for `px-ipc`. Twenty-four findings between them, all real.
+The second review found things the first could not, which is the argument for
+§10 in one sentence.
 
-**Three fail-closed gaps in the broker**, each of which made a stated guarantee
-mean less than it said:
+### The adversarial session, in order of what it cost
 
-- `dispatch` never checked the channel was open. `close_channel` revoked frames,
-  but `Ping` still answered and `Echo` still echoed — a caller holding the id of
-  a killed, restarted or panicking process was still being served by a broker
-  that believed it had cut that process off. The existing test asserted
-  `channel_count` and `holds_frame` and passed straight over it.
-- `create_frame` mutated the tree before validating the channel, leaving an
-  unreclaimable slot on every failure. A crash loop leaked one per iteration.
-- `restart` closed the old channel before spawning, so a failed respawn left a
-  half-restarted object holding a `ChannelId` the broker had forgotten.
+**The broker could be hung forever from an empty input.** There was no timeout
+anywhere in the IPC layer. Three wedges, each confirmed against real spawned
+children: a child that never reads its stdin blocks the broker's `write_all` on
+a full pipe; one that writes half a frame blocks its `read_exact`; and one that
+spawns a grandchild holding the same stdout, then exits, blocks the read
+forever **while `try_wait` reports the child dead**. None is a panic, so
+`catch_unwind` does nothing about any of them.
 
-Plus `FrameTree::create` minting the same `FrameId` for two slots on truncation,
-and `DenyReason` reporting an internal fault as a frame problem in a field
-documented as being for the audit log.
+Why the gate could not see it is worth stating exactly: every crash-restart
+test *killed* the child, and killing closes the pipes. A content process that
+stalls instead of dying was untested — and stalling is strictly cheaper for an
+attacker than crashing.
 
-**Three defects in the gate checks themselves**, which is the part worth
-noticing. The checks were the weakest code in the phase:
+**`dispatch` was dead code.** Every call site was inside `#[cfg(test)]`. There
+was no broker read loop at all, so the channel-keyed capability table,
+invariant 9's machinery and §4.3's `catch_unwind` had never seen a byte from a
+hostile process. The cause was a direction error: the broker was the client and
+the content process the server, which leaves the capability table nothing to
+key on. Inverted, and `serve_once` is now the path a real process drives.
 
-- `px-ipc` was put under §4.3's panic lints and left out of the waiver scan, so
-  an `allow(clippy::unwrap_used)` in the crate that decodes hostile bytes would
-  have passed CI silently. `clippy.toml`'s comment asserted the opposite.
-- The `ChannelId` check was `grep -B3 X | grep -q Y`, which reports success when
-  `X` matches nothing at all. Renaming or moving the type would have turned it
-  into a check that passed having inspected nothing — the exact silent-absence
-  failure the `SUITES` loop three lines above it was written to prevent. The
-  first fix for it then matched the word "Serialize" in the type's own doc
-  comment explaining why it must never be serialisable.
+**Four bytes bought a megabyte.** `resize(length)` before `read_exact` meant a
+peer that declared 1 MiB and sent nothing cost a committed, zeroed megabyte —
+262,144x amplification, entirely inside the size limit. §4.4's letter was
+satisfied while its spirit was not.
+
+**A `cat` defeated the only end-to-end proof.** `Request` and `Response` were
+indistinguishable on the wire, so a content process that reflected the broker's
+own bytes verbatim, decoding nothing, satisfied `px-browser`'s assertion that
+the boundary worked.
+
+**`DenyReason` was a cross-site oracle.** `NoSuchFrame` and `NotYourFrame` were
+distinct *on the wire*, so a hostile channel could sweep the handle space and
+read off — exactly, with no false positives — which slots hold live frames
+belonging to other sites, and how fast they churn as tabs open and close. In a
+browser whose thesis is site isolation.
+
+### Seven defects in the gate checks themselves
+
+Across both reviews. This is the part worth reading twice, because the checks
+were consistently the weakest code in the phase:
+
+- The identity-field regex was close to **inverted**: it anchored the name
+  after leading whitespace, so `pub sender: ChannelId` did not match — and a
+  field must be `pub` to be readable from another crate. It caught exactly the
+  declarations that cannot be used and missed every one that can.
+- `BROKER_SRC` was assigned and never used. A check that was meant to exist did
+  not.
+- The `ChannelId` check required `derive(` and `Serialize` on the same line,
+  which a multi-line derive defeats — and multi-line is what rustfmt emits, in
+  a project that runs `cargo fmt --check`.
+- Deleting `crates/px-content/tests/crash_restart.rs` entirely — the only tests
+  in the phase that cross a process boundary — left both gate items green,
+  matching similarly-named in-memory tests elsewhere.
+- `px-ipc` was put under §4.3's panic lints and left out of the waiver scan.
 - `ci/gate-fuzz-smoke.sh` aborted under `set -e` before reaching its own
   diagnostics.
+- Two loops over `git ls-files` passed having inspected zero files when their
+  pathspec matched nothing, and the header check looked at exactly two paths
+  per crate — never at an explicit `[[bin]]` target, which `px-broker` has.
 
-The pattern across all three: **a check that cannot fail is indistinguishable
+**And the fuzzing could not have found any of the above.** No `-max_len` was
+set, so libFuzzer capped inputs at 4096 bytes and the entire large-payload path
+— the only code in `recv` that allocates, and the `MAX_MESSAGE_BYTES` boundary
+the gate specifically names — was unreachable. Both targets called
+`decode_frame`, which reads one frame and discards the rest, so framing desync
+could not be expressed at all. Half the budget went to the direction whose own
+documentation says it matters less. Two targets were added: `channel_stream`
+(multi-frame, asserting every non-EOF error poisons the channel) and
+`broker_sequence` (invariant 9 as a fuzzable property — no channel is ever told
+it owns a frame it was not issued).
+
+The pattern across all of it: **a check that cannot fail is indistinguishable
 from a check that passes.** Every gate check in this phase now has a recorded
 negative control — the thing it detects was introduced deliberately and the
 check was watched to fire.
