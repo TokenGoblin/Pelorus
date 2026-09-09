@@ -38,6 +38,7 @@ use std::fmt;
 
 #[cfg(target_os = "linux")]
 mod linux;
+pub mod roots;
 #[cfg(target_os = "windows")]
 mod windows;
 

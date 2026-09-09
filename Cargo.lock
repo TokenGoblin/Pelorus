@@ -160,6 +160,7 @@ version = "0.0.0"
 name = "px-net"
 version = "0.0.0"
 dependencies = [
+ "px-sandbox",
  "rustls",
  "rustls-pki-types",
  "webpki-roots",

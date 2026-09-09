@@ -43,7 +43,7 @@ semantics would mean a root the platform administrator deliberately *removed*
 is silently restored by us, which turns a deliberate distrust decision into a
 no-op. Whoever administers the machine outranks whatever we shipped.
 
-**Reading the platform store is unsafe OS work, so it lives in `px-sandbox`**
+**Implemented in `crates/px-sandbox/src/roots.rs`.** Reading the platform store is unsafe OS work, so it lives in `px-sandbox`
 (ADR 008): `CertOpenSystemStoreW` and `CertEnumCertificatesInStore` on Windows
 behind a safe wrapper, `px-net` receiving DER blobs it never had to call an OS
 API for. On Linux the same wrapper reads `/etc/ssl/certs`, which needs no FFI

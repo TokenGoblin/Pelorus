@@ -23,6 +23,16 @@ rustls-pki-types = "1"
 # ADR 012's bundled floor: Mozilla's root store, used only when the platform
 # store cannot be read. Not the source of trust.
 webpki-roots = "1"
+# ADR 008: reading the platform trust store is unsafe FFI on Windows, so it
+# lives in the audited unsafe core and this crate receives DER blobs. px-net
+# stays forbid(unsafe_code) and never names an OS type.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+
+[dev-dependencies]
+# The anchor tests check px-net against px-sandbox directly, to catch a
+# silent fallback that both sides would otherwise agree about.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+webpki-roots = "1"
 
 [features]
 # §14.4: a test-only trust anchor for the local server the Phase 3 gate

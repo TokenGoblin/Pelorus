@@ -15,10 +15,13 @@
 //! # Where the anchors come from
 //!
 //! ADR 012: the platform store is the source of trust and the bundled store is
-//! the floor. Reading the Windows store is unsafe FFI, so it belongs in
-//! `px-sandbox` — and until that wrapper exists this module uses the bundled
-//! store and **says so**, rather than quietly shipping the floor as though it
-//! were the decision.
+//! the floor. Reading the Windows store is unsafe FFI, so it lives in
+//! `px-sandbox` (ADR 008) and this crate receives DER blobs — `px-net` stays
+//! `forbid(unsafe_code)` and never names an OS type.
+//!
+//! The two stores are never merged. [`AnchorSource`] says which was used, and
+//! a caller that ignores it cannot tell a machine trusting its enterprise
+//! roots from one that quietly fell back.
 
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -42,14 +45,44 @@ pub enum AnchorSource {
 
 /// Build the trust anchors, reporting where they came from.
 ///
-/// **Currently always [`AnchorSource::BundledFloor`].** ADR 012 decides that
-/// the platform store is the source of trust; reading it needs
-/// `CertOpenSystemStoreW` behind a `px-sandbox` wrapper that does not exist
-/// yet. Rather than pretend, this reports the floor it is actually using. The
-/// consequence is real and worth stating: an enterprise root installed by an
-/// administrator is **not** trusted yet, so a machine behind a TLS-terminating
-/// gateway cannot reach its internal sites until the wrapper lands.
+/// ADR 012: the platform store is the source of trust and the bundled store is
+/// the floor. The two are **never merged** — a union would silently restore a
+/// root an administrator removed, turning a deliberate distrust decision into
+/// a no-op, and whoever administers the machine outranks whatever we shipped.
+///
+/// The source is returned rather than logged because ADR 012's verification
+/// criterion is that a fallback must never be silent. A caller that ignores it
+/// cannot tell a machine trusting its enterprise roots from one that quietly
+/// fell back to Mozilla's list.
 pub fn root_store() -> (RootCertStore, AnchorSource) {
+    match px_sandbox::roots::platform_roots() {
+        Ok(anchors) => {
+            let mut store = RootCertStore::empty();
+            let mut added = 0usize;
+            for der in anchors {
+                // A platform store can hold certificates rustls will not
+                // accept as anchors — expired ones, ones with unparseable
+                // extensions. Skipping them individually is right; falling
+                // back wholesale because one was odd would not be.
+                if store
+                    .add(rustls::pki_types::CertificateDer::from(der))
+                    .is_ok()
+                {
+                    added = added.saturating_add(1);
+                }
+            }
+            if added > 0 {
+                return (store, AnchorSource::Platform);
+            }
+            // Every anchor was rejected. That is a broken store rather than an
+            // empty one, and it falls through to the floor below.
+            bundled_floor()
+        }
+        Err(_) => bundled_floor(),
+    }
+}
+
+fn bundled_floor() -> (RootCertStore, AnchorSource) {
     let mut store = RootCertStore::empty();
     store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     (store, AnchorSource::BundledFloor)
