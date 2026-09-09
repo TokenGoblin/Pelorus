@@ -120,7 +120,7 @@ exercised by a real renderer. It will first meet one in Phase 4.
 
 ## What is outstanding
 
-Two items from `crates/px-sandbox/CLAUDE.md` that this phase does not close.
+One item from `crates/px-sandbox/CLAUDE.md` that this phase does not close, and one it does.
 
 **ASAN and TSAN builds of this crate do not run in CI.** The local invariant
 requires them and §4.5 asks for them. They need `-Z sanitizer` and therefore
@@ -130,15 +130,30 @@ decision rather than a chore. Same shape as the Miri item already in
 `docs/backlog.md`. **This crate now contains the project's only `unsafe`, which
 makes it the crate where sanitizers matter most**, so this should not sit long.
 
-**The adversarial review §10 requires for `px-sandbox` has not happened.** The
-crate had no real code until this phase; it now has the entire unsafe surface,
-two operating systems' process-creation paths, and hand-managed handle and
-buffer lifetimes. Phase 1's experience was that the adversarial session found
-things ordinary review could not, and this is a larger and more dangerous
-surface than `px-ipc` was.
+**The adversarial review §10 requires for `px-sandbox` is done.** It found one
+real defect and produced two tests for properties that are invisible until they
+are violated.
 
-Neither is a gate item, so neither blocks the phase. Both are listed because
-the phase is not the same thing as the crate being finished.
+*Fixed.* A BPF jump offset is a `u8`, and the filter builder saturated with
+`unwrap_or(u8::MAX)` past 255 denied syscalls — a silently wrong filter, where
+the jump lands on another instruction, the syscall is allowed, and the source
+still reads as denying it. Now a compile-time assertion stops the build, and
+the fallback is 0 rather than a plausible wrong number. Verified to fire.
+
+*Tested.* The parent must keep no copy of the child's end of a pipe, or the
+pipe never reports EOF when the child dies and the reader blocks forever —
+Phase 1's wedge, which this phase could now cause by accident. And handles must
+not accumulate: the broker spawns a content process per site and replaces one
+on every crash, so a handle leaked per spawn is a denial of service any page
+that can kill a renderer can reach. Forty spawns, zero growth.
+
+*Recorded.* `GetExitCodeProcess` cannot distinguish a running process from one
+that exited with code 259, so `is_alive` can report a dead content process as
+live; and the aarch64 syscall table has never been executed, because CI is
+x86_64 only. Both are in `docs/backlog.md`.
+
+Neither is a gate item. The sanitizer gap is listed because the phase closing
+is not the same thing as the crate being finished.
 
 ## Verdict
 
