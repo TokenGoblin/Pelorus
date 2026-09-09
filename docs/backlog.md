@@ -100,6 +100,54 @@ Format: one entry per defect.
   replaced in phase 2 anyway (ADR 005). Doing both at once is one migration
   instead of two.
 
+## Spec amendments owed after audit 001
+
+- **Found in:** phase 1, `docs/spec-audit-001.md`
+- **Belongs to:** whoever next edits the spec; several block later phases
+- **What:** thirteen findings. The spec is factually wrong in §14.5 (the Linux
+  sandbox is four mechanisms, not one, and "the sysctl" has three spellings),
+  §2.1 (Cargo cannot template a `[[bin]]` name), §2.2 (allowlist), §8 (tells a
+  maintainer to commit archives ADR 002 forbids), and §3/§9 Phase 1 (handle
+  passing, never delivered and moving to px-sandbox). §11 has no supply-chain
+  row and no row for the gate checks being the least-reviewed code. §13 is
+  missing four decisions that are now open.
+- **Why deferred:** amending the spec mid-phase, unattended, is how a
+  specification stops being a shared reference. These are recorded and should
+  be applied deliberately, together, by someone who can weigh them.
+
+## Nobody owns the broker's audit log or the consent prompts
+
+- **Found in:** phase 1, audit 001 finding 7
+- **Belongs to:** unassigned — needs a phase
+- **What:** §3 and §7.3 both assign the audit log to the broker. What exists is
+  a 256-entry in-memory ring buffer that a hostile channel can flush with 256
+  denials, which is exactly what an attacker generates. Not append-only, not
+  durable, not user-readable. Phase 21's gate ("every tool call denied *and*
+  logged") inherits it. §3 also assigns consent prompts to the broker and no
+  phase builds them.
+- **Why deferred:** it is a phase-assignment question, not a defect to fix in
+  place. The ring buffer is an honest Phase 1 skeleton; what is missing is
+  anyone owning its replacement.
+
+## Where the compat replay runs
+
+- **Found in:** phase 1, audit 001 finding 6
+- **Belongs to:** before phase 23, which has no venue without it
+- **What:** ADR 002 keeps the traffic archives out of this public repository.
+  §8's replay therefore cannot run here at all, and Phase 23's gate ("compat
+  suite green on all forty sites") has nowhere to execute.
+- **Why deferred:** it depends on the site list, which is the user's to write.
+
+## No test asserts the content process's environment is empty
+
+- **Found in:** phase 1, audit 001 finding 10
+- **Belongs to:** phase 2
+- **What:** `env_clear()` appears exactly once — at the call site. Nothing
+  asserts the child sees an empty environment, and it is currently the *only*
+  enforcement of invariant 1's "no ambient authority" before the sandbox
+  exists.
+- **Why deferred:** phase 2 is building the spawn path and will own this.
+
 ## Miri is not run on px-ipc
 
 - **Found in:** phase 1, `.github/workflows/gate.yml`

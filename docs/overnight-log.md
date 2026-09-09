@@ -140,3 +140,45 @@ redesigned by Phase 5 — §9 calls that the highest-risk phase and §11's only
 mitigation is that discovery happens early.
 
 Nothing else to do until the campaign reports.
+
+## 05:35 UTC — spec audit landed, and it corrects tonight's plan
+
+`docs/spec-audit-001.md`. Thirteen findings. Appendix B asked for this after
+any structural change and six have been made; it was worth asking.
+
+**One finding changes Phase 2 before a line of it was written.** ADR 005
+deferred handle passing to Phase 2 as the thing `px-sandbox` would own. That is
+the wrong operation. Phase 2's gate is "content process launches under a policy
+on both OSes", and neither platform can do that from `std::process::Command` —
+Windows needs `CreateProcessAsUserW` with a `PROC_THREAD_ATTRIBUTE_LIST`, Linux
+needs `CommandExt::pre_exec`, which is unsafe. Verified: `px-broker` opens with
+`#![forbid(unsafe_code)]` at line 1 and calls `Command::new` at line 574.
+
+So **`ContentProcess::spawn` moves behind `px-sandbox`**, the broker keeps the
+supervisor, and in-band handle passing waits for its first real consumer —
+Phase 8 or Phase 21. ADR 008's draft is corrected. Without this the phase would
+have been implemented against a spawn path that cannot apply a policy.
+
+**The largest finding is one nobody can act on tonight.** The protocol has no
+broker→content direction: every `Response` variant is an answer, `Request` is
+content→broker only, and there is no correlation id. The spec needs
+broker-initiated messages for §7.2's `navigate`/`click`/`type`, Phase 14's
+popups, Phase 13's navigation — but the first phase that needs it is **Phase
+4**, because something has to tell the content process which document to parse.
+The spec is not wrong here; it is silent. §9 Phase 1 says "broker
+request/response shape" and never says which side initiates.
+
+That wants an ADR in Phase 2 before Phase 3 writes against the current shape.
+It is a protocol decision with real alternatives, so I am drafting it, not
+deciding it — it goes to the user alongside 007.
+
+Also folded into Phase 2: process-tree teardown moves up from Phase 17, because
+a job object is created *at* `CreateProcess` and retrofitting it means writing
+the same function twice.
+
+Four new backlog entries: spec amendments owed, nobody owns the broker's audit
+log or consent prompts, where the compat replay runs given ADR 002, and no test
+asserts `env_clear()` actually emptied the environment — currently the only
+enforcement of invariant 1.
+
+Campaign still running at 3h. Longer than the 4h shards implied; watching it.
