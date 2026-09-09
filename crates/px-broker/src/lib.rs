@@ -151,6 +151,15 @@ pub struct Broker {
     next_channel: u64,
     capabilities: HashMap<ChannelId, ChannelCaps>,
     frames: FrameTree,
+    /// Makes `dispatch` panic, so that the `catch_unwind` in
+    /// [`Broker::dispatch_guarded`] can be tested against a real unwind rather
+    /// than a simulated one.
+    ///
+    /// `cfg(test)` rather than a feature flag: §14.4's rule is that test-only
+    /// capabilities must not be able to reach a release artifact, and a field
+    /// that does not exist outside `cargo test` cannot.
+    #[cfg(test)]
+    panic_on_dispatch: bool,
 }
 
 impl Broker {
@@ -202,11 +211,50 @@ impl Broker {
         self.capabilities.len()
     }
 
+    /// Handle one request, surviving a panic in the handling of it.
+    ///
+    /// §4.3: the broker unwinds and wraps IPC dispatch in `catch_unwind`,
+    /// because it is the one process that may not die. A content process can
+    /// be restarted; a dead broker takes every tab with it.
+    ///
+    /// What happens after a caught panic is the part worth stating. Broker
+    /// state may be inconsistent — that is what a panic mid-mutation means —
+    /// so this **closes the channel** rather than answering as if nothing
+    /// occurred. Fail closed: a panic while deciding a capability question is
+    /// exactly the case where continuing to serve that channel is least
+    /// justified.
+    ///
+    /// `AssertUnwindSafe` is required because `&mut self` is not
+    /// `UnwindSafe`, and that is not a formality being waived: it is the
+    /// compiler pointing at the inconsistent-state problem. Closing the
+    /// channel is the answer to it.
+    pub fn dispatch_guarded(&mut self, channel: ChannelId, request: Request) -> Response {
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.dispatch(channel, request)
+        }));
+        match caught {
+            Ok(response) => response,
+            Err(_) => {
+                self.close_channel(channel);
+                Response::Denied {
+                    reason: DenyReason::NoSuchFrame,
+                }
+            }
+        }
+    }
+
     /// Handle one request from one channel.
     ///
     /// The channel argument comes from the transport, never from `request`.
-    /// See the crate documentation.
+    /// See the crate documentation. Callers on the IPC path should use
+    /// [`Broker::dispatch_guarded`].
     pub fn dispatch(&mut self, channel: ChannelId, request: Request) -> Response {
+        #[cfg(test)]
+        assert!(
+            !self.panic_on_dispatch,
+            "deliberate panic for the unwind test"
+        );
+
         match request {
             Request::Ping => Response::Pong,
             Request::Echo { payload } => Response::Echo { payload },
@@ -437,6 +485,55 @@ mod tests {
         broker.close_channel(first);
         let second = broker.open_channel();
         assert_ne!(first, second);
+    }
+
+    /// §4.3: a panic during dispatch must not take the broker with it, and
+    /// must not leave the panicking channel still served.
+    #[test]
+    fn a_panic_in_dispatch_is_caught_and_closes_the_channel() {
+        let mut broker = Broker::new();
+        let faulty = broker.open_channel();
+        let bystander = broker.open_channel();
+        let frame = broker.create_frame(faulty).expect("frame");
+        assert_eq!(broker.channel_count(), 2);
+
+        // The deliberate panic prints a message during this test. Suppressing
+        // it with take_hook/set_hook is tempting and wrong: libtest tracks
+        // panics through its own hook, and replacing it makes the harness fail
+        // the test even though every assertion below passes. Noise in the
+        // output is the cheaper problem.
+        broker.panic_on_dispatch = true;
+        let response = broker.dispatch_guarded(faulty, Request::FrameHost { frame });
+        broker.panic_on_dispatch = false;
+
+        // Fail closed: the answer is a denial, not an invented success.
+        assert_eq!(
+            response,
+            Response::Denied {
+                reason: DenyReason::NoSuchFrame
+            }
+        );
+
+        // The panicking channel lost everything it held.
+        assert_eq!(broker.channel_count(), 1);
+        assert!(!broker.holds_frame(faulty, frame));
+
+        // And the broker is alive, with the bystander untouched.
+        assert_eq!(broker.dispatch(bystander, Request::Ping), Response::Pong);
+    }
+
+    #[test]
+    fn dispatch_guarded_answers_normally_when_nothing_panics() {
+        let mut broker = Broker::new();
+        let channel = broker.open_channel();
+        let frame = broker.create_frame(channel).expect("frame");
+        assert_eq!(
+            broker.dispatch_guarded(channel, Request::FrameHost { frame }),
+            Response::FrameHost {
+                host: FrameHost::Local
+            }
+        );
+        assert_eq!(broker.channel_count(), 1, "a clean dispatch closes nothing");
     }
 
     #[test]
