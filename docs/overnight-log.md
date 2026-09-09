@@ -125,3 +125,18 @@ nobody wrote down is a rung nobody can tell you that you lost.
 
 Still waiting on the campaign before any of this can be committed — it is Phase
 2 work and Phase 1 has not merged.
+
+## 05:25 UTC — quiet hold
+
+Campaign ~2h50m in, ~1h10m left. Re-ran `ci/gate-all.sh` against the merge
+candidate: green except the expected `compat-list`. Phase 2 gate draft parses.
+
+Two research agents were started alongside this loop, both read-only so they
+cannot collide with it: one auditing `docs/build-spec.md` against what Phases
+0-1 actually built (Appendix B asks for exactly this after any structural
+change, and six have been made), and one researching what stylo requires of a
+DOM so that Phase 4 builds against those requirements rather than being
+redesigned by Phase 5 — §9 calls that the highest-risk phase and §11's only
+mitigation is that discovery happens early.
+
+Nothing else to do until the campaign reports.
