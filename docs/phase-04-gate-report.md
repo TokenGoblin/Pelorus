@@ -372,24 +372,36 @@ changed. Safe here only because the key is a generational `NodeId` — with
 Servo's pointer keys it would be the bug rather than the design. Now written
 down where it looks like a leak.
 
-### And one question left open
+### And one question that was open for an hour
 
-The harness also produces a range whose start compares as *following its own
-end*, with both boundary points still valid — a span running backwards rather
-than a dangling range.
+The harness also produced a range whose start compared as *following its own
+end*, with both boundary points still valid. Whether that was a defect here or
+inherent to `(node, offset)` boundary points was not established — moving a
+container carries its boundary points with it, and no DOM rule re-checks
+ordering — so it went in as an `#[ignore]`d test with the reproducer, per
+`/CLAUDE.md`'s rule for an ambiguity.
 
-Whether that is a defect here or inherent to `(node, offset)` boundary points
-is **not established**. Moving a container carries its boundary points with it
-and no DOM rule re-checks ordering; but every inversion reachable by hand is
-corrected by the removal and insertion rules. The fuzzer's sequence is 33
-operations and spends part of it with subtrees detached, where the comparison
-has no answer at all.
+Then it was settled the way that test said to settle it: delta-reduce the
+sequence and read each step. **34 operations reduced to 16, and the answer was
+a defect** — two of them, both mine, and the range had been inverted *before*
+the mutation that appeared to invert it.
 
-Asserting it would fail the build on a property this project has not
-established. Deleting it would lose the question. So it is an `#[ignore]`d test
-carrying the reproducer, per `/CLAUDE.md`'s rule for exactly this — outside the
-gate's suite list and named to avoid its filters, because an open question
-should not be dressed as either a pass or a failure.
+`compare_boundary_points`' last step was a bare `Some(Before)`, justified by an
+earlier step having mirrored the call — sound only when `precedes` gives an
+answer. And `precedes` walked from `document()` alone, so every pair inside a
+detached subtree was incomparable and the fall-through fired constantly. A
+range built in a fragment compared as correctly ordered while being inverted,
+and only told the truth once a mutation collapsed an endpoint into an ancestor
+relationship.
+
+`precedes` now orders within whatever tree the nodes share and returns `None`
+only for genuinely different trees; `compare_boundary_points` returns `None`
+rather than guessing. Two regression tests, the minimal form and the reduced
+sequence, and the harness asserts the invariant again — the assertion that
+found it now guards it.
+
+The `#[ignore]`d test is gone, because the question is not open. That is the
+intended lifecycle: encode the ambiguity, settle it, graduate it.
 
 ## The one research item not taken
 

@@ -96,9 +96,37 @@ impl Arena {
         //
         // Nodes outside the document tree are not comparable in document
         // order, and `None` is that answer.
+        // Order within whatever tree the two share, not only the document's.
+        //
+        // Walking from `document()` alone made every pair inside a detached
+        // subtree incomparable — which then made `compare_boundary_points`
+        // fall through to a definite "before" for pairs it could not order.
+        // A range built inside a fragment compared as correctly ordered while
+        // being inverted, and only started reporting the truth once a
+        // mutation collapsed one endpoint into an ancestor relationship.
+        //
+        // Detached subtrees have a perfectly good document order of their own.
+        // What has no order is a pair in *different* trees, and that is the
+        // `None` this returns.
+        let root_of = |mut id: NodeId| {
+            let mut budget = crate::arena::MAX_DEPTH + 1;
+            while let Some(parent) = self.get(id).and_then(Node::parent) {
+                if budget == 0 {
+                    break;
+                }
+                budget -= 1;
+                id = parent;
+            }
+            id
+        };
+        let root = root_of(a);
+        if root != root_of(b) {
+            return None;
+        }
+
         let mut position_of_a = None;
         let mut position_of_b = None;
-        for (index, id) in self.descendants(self.document()).enumerate() {
+        for (index, id) in self.descendants(root).enumerate() {
             if id == a {
                 position_of_a = Some(index);
             }

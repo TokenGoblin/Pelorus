@@ -381,3 +381,113 @@ fn range_updates_apply_to_every_live_range() {
         assert_eq!(range.end.offset(), 4);
     }
 }
+
+/// Two boundary points in a **detached** subtree compare correctly.
+///
+/// This is the minimal form of a defect the mutation fuzz harness found and a
+/// delta-reduction pinned down. `precedes` walked only from `document()`, so
+/// any pair inside a detached subtree was incomparable — and
+/// `compare_boundary_points` treated "cannot compare" as "a comes first",
+/// because its last step was a bare `Some(Before)` justified by an earlier
+/// step having mirrored the call.
+///
+/// The visible consequence: a range built inside a fragment compared as
+/// correctly ordered while being inverted, and only began reporting the truth
+/// once a mutation collapsed one endpoint into an ancestor relationship — at
+/// which point the inversion looked like something that mutation had caused.
+/// It took reducing a 34-operation sequence to 16 to see that the range had
+/// been inverted all along.
+#[test]
+fn range_boundary_points_in_a_detached_subtree_compare_correctly() {
+    let mut arena = Arena::new();
+
+    // A fragment with two children, attached to nothing.
+    let fragment = match arena.create(NodeData::Fragment) {
+        Ok(id) => id,
+        Err(error) => unreachable!("{error:?}"),
+    };
+    let first = text(&mut arena, "first");
+    let second = text(&mut arena, "second");
+    link(&mut arena, fragment, first);
+    link(&mut arena, fragment, second);
+
+    assert!(
+        arena.get(fragment).and_then(px_dom::Node::parent).is_none(),
+        "the subtree must be detached for this test to mean anything"
+    );
+
+    let at = |node, offset| BoundaryPoint::new(node, offset);
+    assert_eq!(
+        arena.compare_boundaries(at(first, 0), at(second, 0)),
+        Some(Position::Before),
+        "document order holds inside a detached subtree too"
+    );
+    assert_eq!(
+        arena.compare_boundaries(at(second, 0), at(first, 0)),
+        Some(Position::After),
+        "and it is symmetric -- this is the direction that used to answer          `Before`, because the pair was incomparable and the fall-through said          so anyway"
+    );
+
+    // A pair in genuinely different trees still has no answer.
+    let other = match arena.create(NodeData::Fragment) {
+        Ok(id) => id,
+        Err(error) => unreachable!("{error:?}"),
+    };
+    assert_eq!(
+        arena.compare_boundaries(at(first, 0), at(other, 0)),
+        None,
+        "different trees have no relative order, and that is not `Before`"
+    );
+}
+
+/// A range that once became inverted, as a regression test.
+///
+/// Replays the reduced sequence that found the defect above. It lived as an
+/// `#[ignore]`d open question in `tests/open_questions.rs` while it was
+/// undecided whether the inversion was a defect here or inherent to
+/// `(node, offset)` boundary points. Reducing it answered that: a defect,
+/// fixed, so the question graduates to a test.
+#[test]
+fn range_stays_ordered_through_the_sequence_that_once_inverted_it() {
+    let mut arena = Arena::new();
+    let document = arena.document();
+
+    // <div> with a text child, then the div is detached, then a range is made
+    // across the detached subtree, then more nodes arrive. The shape that
+    // mattered: both endpoints inside a subtree with no path to the document.
+    let outer = match arena.create(NodeData::Element {
+        name: html5ever::QualName::new(
+            None,
+            html5ever::ns!(html),
+            html5ever::LocalName::from("div"),
+        ),
+        attrs: Vec::new(),
+        template_contents: None,
+        script_already_started: false,
+    }) {
+        Ok(id) => id,
+        Err(error) => unreachable!("{error:?}"),
+    };
+    link(&mut arena, document, outer);
+    let a = text(&mut arena, "aaa");
+    let b = text(&mut arena, "bbb");
+    link(&mut arena, outer, a);
+    link(&mut arena, outer, b);
+
+    arena.detach(outer).expect("detach");
+
+    let id = arena
+        .new_range(BoundaryPoint::new(a, 1), BoundaryPoint::new(b, 1))
+        .expect("a range inside a detached subtree is still a range");
+
+    for _ in 0..8 {
+        let extra = text(&mut arena, "x");
+        let _ = arena.append_child(outer, extra);
+        let range = arena.range(id).expect("still live");
+        assert_ne!(
+            arena.compare_boundaries(range.start, range.end),
+            Some(Position::After),
+            "the range inverted; its start now follows its own end"
+        );
+    }
+}

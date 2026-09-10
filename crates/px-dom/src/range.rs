@@ -232,6 +232,24 @@ pub(crate) fn compare_boundary_points(
         }
     }
 
-    // Step 4.
-    Some(Position::Before)
+    // Step 4: neither contains the other, so it comes down to the document
+    // order of the two nodes.
+    //
+    // This used to be a bare `Some(Position::Before)`, on the reasoning that
+    // step 2 would have mirrored the call if `a` followed `b`. That is only
+    // sound when `precedes` gives an answer. When it returns `None` — an
+    // incomparable pair — falling through here turns "I cannot order these"
+    // into "a comes first", and a range built inside a detached subtree then
+    // compares as correctly ordered while being inverted. It only starts
+    // telling the truth once a mutation collapses an endpoint into an
+    // ancestor relationship, at which point the inversion looks like something
+    // the mutation caused.
+    //
+    // Found by reducing a 34-operation fuzz sequence to 16 and reading what
+    // the comparison said at each step.
+    match arena.precedes(a.node, b.node) {
+        Some(true) => Some(Position::Before),
+        Some(false) => Some(Position::After),
+        None => None,
+    }
 }

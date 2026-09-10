@@ -655,7 +655,7 @@ Format: one entry per defect.
   tests execute, and `px-store` when it exists. `ci/gate-miri.sh` is written to
   take more crates without restructuring.
 
-## Open: can a live range's start come to follow its end?
+## Open: can a live range's start come to follow its end? — ANSWERED, it was a defect
 
 - **Found in:** phase 4, by the mutation fuzz harness once it was taught to
   create ranges
@@ -677,3 +677,19 @@ Format: one entry per defect.
   either a pass or a failure.
 - **How to settle it:** reduce the sequence to something readable and check
   each step against the spec's remove and insert algorithms.
+- **Settled that way, and the answer was "defect".** Delta-reducing the 34
+  operations to 16 showed the range had been inverted *before* the mutation
+  that appeared to invert it. Two bugs, both mine:
+  `compare_boundary_points`'s last step was a bare `Some(Before)`, justified by
+  an earlier step having mirrored the call — which only holds when `precedes`
+  gives an answer. And `precedes` walked from `document()` alone, so every pair
+  inside a detached subtree was incomparable, so the fall-through fired
+  constantly. A range built in a fragment compared as correctly ordered while
+  being inverted, and only told the truth once a mutation collapsed an endpoint
+  into an ancestor relationship — at which point the inversion looked like
+  something that mutation had caused.
+- **Now:** `precedes` orders within whatever tree the nodes share, `None` only
+  for genuinely different trees; `compare_boundary_points` returns `None`
+  rather than guessing. Two regression tests in `tests/ranges.rs` — the minimal
+  form and the reduced sequence — and the mutation fuzz harness asserts the
+  invariant again.

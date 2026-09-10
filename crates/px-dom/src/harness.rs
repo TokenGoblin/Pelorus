@@ -26,7 +26,7 @@
 
 use html5ever::{QualName, local_name, ns};
 
-use crate::{Arena, BoundaryPoint, NodeData, NodeId, RangeId};
+use crate::{Arena, BoundaryPoint, NodeData, NodeId, Position, RangeId};
 
 /// Pick from a list by a byte, or `None` if the list is empty.
 fn pick(ids: &[NodeId], n: u8) -> Option<NodeId> {
@@ -428,28 +428,32 @@ pub fn mutations(data: &[u8]) {
         assert_ranges_are_well_formed(&arena, &ranges);
     }
 
-    // There is deliberately **no assertion here that a range's start still
-    // precedes its end.**
+    // A range's start must never have come to follow its own end.
     //
-    // It was written, and it fires: a sequence of legal mutations produces a
-    // range whose start compares as following its own end, with both boundary
-    // points still individually valid. What is *not* established is whether
-    // that is a defect in the mutation rules or an inherent property of
-    // (node, offset) boundary points — moving a container carries its boundary
-    // points with it, and nothing in the DOM's rules re-checks ordering
-    // afterwards.
+    // This is the property that found the defect it now guards. It was briefly
+    // *not* asserted, while it was undecided whether the inversions the
+    // harness produced were a bug here or inherent to (node, offset) boundary
+    // points — moving a container carries its boundary points with it, and no
+    // DOM rule re-checks ordering afterwards.
     //
-    // Every case reachable by hand keeps the ordering. The fuzzer's does not,
-    // and the difference is a long sequence in which parts of the tree are
-    // detached, where the comparison has no answer at all.
-    //
-    // Asserting it would fail the build on a property this project has not
-    // established; dropping it silently would lose the question. So it is an
-    // #[ignore]d test carrying the reproducer, in
-    // crates/px-dom/tests/open_questions.rs — which is what /CLAUDE.md
-    // prescribes for exactly this: "If a spec is ambiguous, encode the
-    // ambiguity as an #[ignore] test with a comment and raise it. Do not
-    // guess."
+    // Reducing a 34-operation sequence to 16 settled it: a defect.
+    // `compare_boundary_points` treated "these are incomparable" as "the first
+    // one comes first", so a range inside a detached subtree read as correctly
+    // ordered while being inverted, and only told the truth once a mutation
+    // collapsed an endpoint into an ancestor relationship. Both halves are
+    // fixed and this assertion is why they stay fixed.
+    for id in &ranges {
+        let Some(range) = arena.range(*id) else {
+            continue;
+        };
+        if let Some(position) = arena.compare_boundaries(range.start, range.end) {
+            assert_ne!(
+                position,
+                Position::After,
+                "a live range's start now follows its end; some mutation moved                  one boundary point past the other"
+            );
+        }
+    }
 
     // A snapshot per node written to, at most once each -- and **not** bounded
     // by the nodes still alive.
