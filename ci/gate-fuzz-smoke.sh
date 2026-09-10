@@ -76,19 +76,39 @@ if [ -z "$targets" ]; then
     verdict "fuzz-smoke"
 fi
 
+# The largest input a target should be given, per target.
+#
+# -max_len is not optional. libFuzzer's default is 4096 bytes, which puts the
+# entire large-payload path — the only code in recv that allocates, and the
+# MAX_MESSAGE_BYTES boundary this gate names — out of reach. A 24-hour campaign
+# ran without it and reported clean while never testing what it was meant to.
+#
+# And one value does not fit every target, which the Phase 3 campaign showed.
+# 1,100,000 straddles px-ipc's MAX_MESSAGE_BYTES of 1,048,576 exactly as
+# intended, and comes nowhere near px-net's MAX_BODY_BYTES of 32 MiB or
+# MAX_CHUNK_BYTES of 8 MiB — so the HTTP targets reported clean for inputs up
+# to 1.1 MB while their own size boundaries went unfuzzed.
+#
+# Each value straddles the limit its target actually has. The HTTP figure is
+# deliberately just past MAX_CHUNK_BYTES rather than past MAX_BODY_BYTES: a
+# 32 MiB ceiling would spend the whole budget generating enormous inputs
+# instead of exploring structure, and the chunk bound is the one a declared
+# length reaches directly rather than by accumulation.
+max_len_for() {
+    case "$1" in
+        http_response | http_chunked) echo 8500000 ;;
+        *) echo 1100000 ;;
+    esac
+}
+
 for target in $targets; do
-    info "fuzzing $target for ${SECONDS_PER_TARGET}s"
-    # -max_len is not optional. libFuzzer's default is 4096 bytes, which puts
-    # the entire large-payload path — the only code in recv that allocates,
-    # and the MAX_MESSAGE_BYTES boundary this gate specifically names — out
-    # of reach. A 24-hour campaign ran without it and reported clean while
-    # never testing what it was meant to test.
-    #
+    target_max_len="${FUZZ_MAX_LEN:-$(max_len_for "$target")}"
+    info "fuzzing $target for ${SECONDS_PER_TARGET}s (-max_len=$target_max_len)"
     # -rss_limit_mb bounds the fuzzer itself: an OOM in the harness is not a
     # finding about the code under test.
     if (cd fuzz && cargo fuzz run "$target" -- \
             -max_total_time="$SECONDS_PER_TARGET" \
-            -max_len="${FUZZ_MAX_LEN:-1100000}" \
+            -max_len="$target_max_len" \
             -rss_limit_mb=2048 \
             -print_final_stats=1); then
         ok "$target"

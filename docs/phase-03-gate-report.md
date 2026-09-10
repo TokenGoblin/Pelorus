@@ -56,8 +56,17 @@ That is the same shape of gap Phase 1 hit, caught earlier this time — before
 recording a pass rather than after. It is not a reason to withhold the item:
 the bounds themselves are unit-tested, and a 32 MiB `-max_len` would spend the
 campaign's budget generating enormous inputs instead of exploring structure.
-It is a reason to say what was and was not covered. A per-target `-max_len` is
-the fix, and it is in `docs/backlog.md`.
+It is a reason to say what was and was not covered.
+
+**Since fixed.** `ci/gate-fuzz-smoke.sh` now picks `-max_len` per target: the
+HTTP targets get 8,500,000, just past `MAX_CHUNK_BYTES`, and everything else
+keeps 1,100,000. Deliberately not 32 MiB — the chunk bound is the one a
+declared length reaches directly, and a 32 MiB ceiling would spend the budget
+generating enormous inputs instead of exploring structure. **The numbers in
+the table above predate that change**, and the next campaign is what will
+exercise the wider range. Saying so because a report that quietly implied the
+recorded run used the new configuration would be describing a campaign nobody
+ran.
 
 ## What the phase built
 
