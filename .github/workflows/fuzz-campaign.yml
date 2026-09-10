@@ -11,7 +11,14 @@
 # targets x shards x hours-per-shard, in parallel, each job well inside the
 # limit.
 #
-#   13 shards x 4 hours = 52 hours of fuzzing, ~4 hours of wall clock
+#   20 shards x 4 hours = 80 hours of fuzzing, ~4 hours of wall clock
+#
+#   Per target, which is what the gate items are written against:
+#     dom_mutation     6 x 4h = 24h   (§9 Phase 4)
+#     dom_parse        3 x 4h = 12h
+#     dom_stale_handle 2 x 4h =  8h
+#     http_response    2 x 4h =  8h
+#     the rest         1 x 4h =  4h each
 #
 # Shards are not redundant: libFuzzer seeds from the clock and its own corpus,
 # so three shards of one target explore different paths rather than repeating
@@ -72,14 +79,31 @@ jobs:
           # operation sequences rather than bytes, which is larger than it
           # looks. See ci/gate-fuzz-smoke.sh for why their -max_len is 4 KB
           # rather than the megabyte the parsers get.
+          #
+          # dom_mutation gets six shards because §9 Phase 4's gate item is
+          # "24h mutation fuzz clean" and six times four hours is twenty-four
+          # CPU-hours of *that target*. Two shards would give eight, and the
+          # campaign total would still read "44 hours" -- which is true of the
+          # campaign and not of the item. Counting the whole campaign against a
+          # per-target item is how a gate gets satisfied on paper; six shards
+          # costs an afternoon of runner time and removes the question.
+          #
+          # dom_stale_handle gets two: §4.1 asks for the target to exist and
+          # prove the property, not for a day of it.
           - { target: dom_stale_handle, shard: 1 }
+          - { target: dom_stale_handle, shard: 2 }
           - { target: dom_mutation, shard: 1 }
           - { target: dom_mutation, shard: 2 }
+          - { target: dom_mutation, shard: 3 }
+          - { target: dom_mutation, shard: 4 }
+          - { target: dom_mutation, shard: 5 }
+          - { target: dom_mutation, shard: 6 }
           # The parser. §4.4 asks for 100,000-level nesting in the corpus of
           # every parser, and this is the only target that sends HTML through
           # html5ever and the TreeSink -- the surface a page actually reaches.
           - { target: dom_parse, shard: 1 }
           - { target: dom_parse, shard: 2 }
+          - { target: dom_parse, shard: 3 }
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-fuzz
