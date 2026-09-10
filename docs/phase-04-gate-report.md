@@ -8,7 +8,7 @@
 |---|---|---|
 | html5lib-tests ≥99% | `crates/px-dom/tests/html5lib.rs`, 62 vendored `.dat` files, 1,952 cases | **Pass at 99.43%**, with two causes set aside — ADR 019 |
 | Stale-handle fuzz target proves every stale lookup returns `None` | `dom_stale_handle`, plus `dom_stale_*` ×5 | **Pass** |
-| 24h mutation fuzz clean | `dom_mutation` target exists and runs as a test; the campaign has not been run for this phase yet | **Incomplete** — see below |
+| 24h mutation fuzz clean | one campaign complete (11 shards, 30.7bn executions, clean) but it predates `dom_parse` and gave `dom_mutation` 8 CPU-hours, not 24; a second is in flight | **Incomplete** — see below |
 | 100,000-level nesting without stack overflow | `dom_depth_*` ×6, on a 256 KB stack | **Pass**, and it found a hang |
 
 Ranges are named in the phase but in none of the four gate items. They were
@@ -156,196 +156,57 @@ tripping is a rule people comply with by deleting the explanation.
 Every check verified in both directions: fires on an injected violation, silent
 on the clean tree.
 
-## The 24h campaign: running, not yet reported
-
-`dom_stale_handle` and `dom_mutation` exist, compile, and run as ordinary tests
-on every push — about a tenth of a second for twelve hundred operation
-sequences. What has **not** happened is the 24-hour campaign the gate item
-names.
-
-They have also never been run under libFuzzer on this machine: cargo-fuzz will
-not link here (no MSVC ASAN runtime, and `--sanitizer=none` leaves sancov
-symbols undefined). That is why the bodies live in `px_dom::harness` rather
-than in `fuzz_targets/` — Phase 1 shipped a campaign that reported clean while
-never reaching the code it was built for, and two targets committed having only
-ever compiled would be the same failure from the other direction.
-
-Verified by breaking the arena on purpose: `detach` made to skip its
-`last_child` fixup, and both harnesses failed with the assertion written for
-that exact corruption.
-
-**This item is incomplete and the phase should not be called closed on it.**
+## The campaign: one run complete, and it does not close the item
 
 Run [34434827530](https://github.com/TokenGoblin/Pelorus/actions/runs/34434827530)
-is in flight: 11 shards × 4 hours, three of them the DOM targets.
+finished: **11 shards, 4h each, 30.7 billion executions, no crashes and no
+artifacts written.**
 
-**And it does not cover `dom_parse`.** It was launched at `a599761`, which
-predates that target by several commits, so it is fuzzing the two arena targets
-and none of the parser. A campaign that reports clean while never touching the
-code it was meant to is this project's recurring failure — Phase 1's did it
-through a default `-max_len`, and this would do it through a matrix written
-before the target existed. Recorded here rather than discovered when the run
-goes green: **a second campaign is owed for `dom_parse` before Phase 4 closes**,
-and the first one's result covers less than the gate item asks. The matrix
-did not know these targets existed until this phase added them, so a campaign
-run before that would have reported clean while never touching them — the
-Phase 1 failure again, arrived at by omission rather than by a wrong flag.
+The three DOM shards:
 
-Their `-max_len` is 4 KB against the 1.1 MB the IPC targets get and the 8.5 MB
-the HTTP ones get. These harnesses assert the whole tree's invariants after
-every operation and one byte is roughly one operation, so cost grows with the
-square of the input: 1 KB is 0.4 ms, 4 KB 2.9 ms, 16 KB 20 ms, 64 KB 170 ms. At
-the default a single execution would take minutes and the campaign would
-explore almost nothing.
+| Target | Shard | Runs | cov | ft | corpus | exec/s |
+|---|---:|---:|---:|---:|---|---:|
+| `dom_stale_handle` | 1 | 5,374,062 | 466 | 3,337 | 555 / 63 KB | 373 |
+| `dom_mutation` | 1 | 8,682,691 | 403 | 2,798 | 360 / 36 KB | 602 |
+| `dom_mutation` | 2 | 17,236,660 | 403 | 2,797 | 370 / 31 KB | 1,196 |
 
-The numbers belong in this section when they exist, the way Phase 3's did.
+Execution rates in the hundreds rather than the millions the IPC targets reach,
+which is the harnesses working as designed: they assert every structural
+invariant after every operation. The predicted rate was ~350/s at 4 KB; the
+observed 373–1,196 says the estimate was sound and slightly pessimistic.
 
-## Ranges, which the gate never asked for
+**`-max_len` was verified applied rather than assumed**, by the check Phase 1
+taught: `lim: 4096` appears in libFuzzer's own final line for all three DOM
+shards, and `-max_len is not provided` appears zero times in 53,856 log lines.
+A flag on a command line proves it was passed; `lim:` proves libFuzzer acted on
+it.
 
-§9 Phase 4 names four deliverables — *"mutation-safe iteration, tree ordering,
-ranges, depth limits"* — and its gate covers three. Ranges were missing
-entirely, and nothing was red. They were found by re-reading the phase
-description after the gate had already gone green, which is precisely the
-failure a gate exists to prevent.
+### Why this does not close the gate item
 
-`ranges` is now a gate suite despite not being a §9 gate item. This gate has
-always checked more than §9 enumerates — the no-infallible-accessor and
-no-owned-children source scans are not gate items either.
+Two reasons, both recorded before the run rather than discovered after.
 
-Thirteen tests, mostly about **liveness**: what a range does when the tree
-moves underneath it. The DOM does not invalidate a range whose node was
-removed, it *moves* it, so "the handle stopped resolving" and "the range is
-meaningless" are different states and are kept apart.
+**It does not cover `dom_parse`.** The run was launched at `a599761`, several
+commits before that target existed. Every line above is the arena API; not one
+byte of HTML went through html5ever and the `TreeSink`.
 
-Both mutation rules verified load-bearing by disabling each and watching the
-tests written for it fail — 2 for insertion, 4 for removal.
+**`dom_mutation` got eight CPU-hours, not twenty-four.** Two shards at four
+hours. The campaign total is 44 hours and the gate item is "24h mutation fuzz
+clean" — both numbers are true and only one of them is about the item.
+Counting a campaign total against a per-target item is how a gate gets
+satisfied on paper. Phase 3's report has the same shape: "24h fuzz on HTTP
+framing", recorded as a pass on three shards and twelve CPU-hours.
 
-### And the quadratic I put in
+Rather than argue which reading is right, the matrix now gives `dom_mutation`
+six shards — 24 CPU-hours of that target — plus three for `dom_parse` and two
+for `dom_stale_handle`. Nineteen shards, 76 CPU-hours, still about four hours
+of wall clock.
 
-The parse suite went from 3 seconds to 145. `append_child` was calling
-`child_ids(parent).count()` to hand the insertion rule an index — a walk of
-the whole child list on every append. 100,000 shallow paragraphs took **145
-seconds**, against 2 for a million-deep nesting bomb.
+Run [34453317232](https://github.com/TokenGoblin/Pelorus/actions/runs/34453317232)
+is in flight against that matrix. **Its numbers, not the ones above, are what
+close this item.** The table above is worth keeping because it is real
+coverage of the arena targets — it is simply less than the gate asks.
 
-The fix was not a faster count. An append lands at the end, the DOM's rule
-moves only offsets *greater* than the insertion index, and the largest valid
-offset in a parent is exactly that index — so an append cannot move a boundary
-point, and the notification was never needed. Back to 3 seconds, with a
-wall-clock ceiling on that test so the next one fails rather than merely
-crawls.
-
-## Stylo's snapshots, built now because Phase 5 cannot afford to
-
-`docs/research/stylo-requirements.md` item 6, written during Phase 1: stylo's
-invalidation needs prior-state records captured *at mutation time*, and it is a
-mutation-path feature — every attribute setter has to record one. The note ends
-*"Retrofitting it in Phase 5 means touching every mutation site twice. Add it
-to the Phase 4 scope and gate."*
-
-It was not in the gate, and it was not built. `px-dom` has three attribute
-mutation sites today; it will have dozens once there is a scripting surface.
-
-Built in this crate's own types, not stylo's: stylo is a Phase 5 dependency
-needing an ADR, and a Phase 4 crate depending on the thing Phase 5 exists to
-*try* is backwards — §9 calls Phase 5 the phase most likely to force a `px-dom`
-redesign.
-
-The rule that makes a snapshot useful is that it holds the element as of the
-**last restyle**, not the last mutation: the first write since a flush
-captures, every write after only updates the change flags. Getting it backwards
-records a change from the second-most-recent value to the most recent — a
-change that never happened — and it is invisible, because the flags are right
-and the values are plausible.
-
-### A test that could not see what it claimed
-
-The guard here is a **source check**, not a test, and the reason is worth
-keeping. A sink that reaches into `NodeData::Element { attrs }` and pushes
-directly builds exactly the right tree and passes the entire conformance
-corpus. It is wrong only in that nothing recorded what the attribute used to
-be — which nothing observes until Phase 5 turns recording on, months later,
-with no way to connect symptom to cause.
-
-The first attempt at testing it failed instructively: the test called the arena
-method directly, so rewriting the sink to bypass the arena entirely left it
-green. That test has been renamed to say what it actually covers, and
-`ci/gate-dom.sh` now checks the source.
-
-Twelve tests besides. One of them exists because `snapshot()` returns the first
-match, so a bug that pushes a fresh record per write is invisible through that
-accessor — the first entry still holds the oldest values and still looks right.
-It shows up only in the count.
-
-## The arena is chunked, which was the other Phase 4 decision
-
-ADR 020. `docs/research/stylo-requirements.md` §3.3 calls this *"the actual
-Phase 4 decision"*, and it had been made by default: the arena was a flat
-`Vec<Slot>`, the layout that note rejects.
-
-A `Vec` reallocates on growth and moves every slot. That is sound — the borrow
-checker will not let anything grow the arena while a `&Node` is out — but the
-soundness costs something: the borrow of the *whole tree* becomes the unit of
-safety, which forbids ever handing out a node reference that outlives a
-mutation window. Phase 5's `StyleNode<'dom>` is meant to hold `&'dom Slot`
-directly.
-
-Slots now live in chunks of 1024 boxed slices. Growing pushes a `Box` onto a
-`Vec`, moving pointers rather than slots.
-
-Measured, release, a 470,000-node document, median of five, three runs each:
-
-| | flat | chunked | |
-|---|---:|---:|---:|
-| parse | 109 ms | 107 ms | −2% |
-| document-order walk | 14.4 ms | 18.0 ms | **+25%** |
-| 1.9M handle resolutions | 8.9 ms | 10.0 ms | **+12%** |
-
-Parse is unchanged — a flat `Vec` growing to 470,000 slots reallocates
-repeatedly, and not doing that roughly pays for the extra indirection. The
-traversal cost is real and accepted on the research note's reasoning rather
-than on a profile, because there is no style or layout traversal to profile
-yet. The numbers above are the baseline for when there is.
-
-`dom_mutation_slot_addresses_are_stable_across_growth` asserts the property and
-was verified in both directions — it passes chunked and fails flat. It compares
-addresses as integers rather than holding references across the growth, because
-holding them is exactly what the borrow checker refuses, and that refusal is
-why the flat layout looks fine right up until Phase 5 needs it not to be.
-
-## Node identity, packed the way stylo will key on it
-
-`stylo-requirements.md` §3.5, and it calls this a Phase 4 decision because it
-constrains how `NodeId` is laid out.
-
-Stylo keys its snapshot map and its traversal-root comparison on `OpaqueNode`,
-which in Servo is a **pointer**. Pointer-derived identity is stale-unsafe
-across free and reuse: a removed element's snapshot can be matched to a
-different element later allocated at the same address. Packing the generational
-handle instead makes that structurally impossible — a reused slot has a
-different generation, so it packs to a different key, so a stale snapshot
-simply misses. §4.1's guarantee extending into stylo's own data structures.
-
-The trap the note names: `OpaqueElement` is `NonNull<()>` reached through
-`NonNull::new_unchecked`, so **a zero value is undefined behaviour with no
-diagnostic**, and a node at index 0 with generation 0 packs to zero. It cannot
-happen here because `generation` is `NonZeroU32` — the same niche that makes
-`Option<NodeId>` free under ADR 018 is what makes this safe. *"One line in
-Phase 4, an afternoon of debugging in Phase 5."*
-
-Five tests, verified against two wrong packings: identity that ignores the
-generation (pointer-style) fails the reuse and injectivity tests by name, and a
-shift of 16 instead of 32 fails the round trip.
-
-A compile-time assertion refuses a target whose `usize` is narrower than 64
-bits, rather than silently truncating every node identity to its generation.
-
-**Atoms** (item 4) are half-verified: `px-dom` reaches `web_atoms 0.2.6`
-through html5ever, and `html5ever::LocalName` *is* `web_atoms::LocalName`, so
-names are already in the interner stylo's `SelectorImpl` names. The other half
-— which version stylo pins — cannot be checked until stylo is a dependency, and
-is in the backlog against Phase 5.
-
-## Dependencies added
+## Dependencies added## Dependencies added
 
 ADR 017. `html5ever` 0.39: **+21 crates, +967 unsafe tokens**.
 

@@ -606,7 +606,7 @@ Format: one entry per defect.
   `StyleNode`, ADR 021 was wrong in its central claim and should say so rather
   than the difficulty being absorbed as ordinary Phase 5 friction.
 
-## The Phase 4 campaign predates dom_parse and does not cover it
+## The Phase 4 campaign predates dom_parse and does not cover it — SUPERSEDED
 
 - **Found in:** phase 4
 - **Belongs to:** phase 4, before it closes
@@ -622,6 +622,12 @@ Format: one entry per defect.
   before calling Phase 4 done, and put both results in the gate report. The
   first run's numbers are still worth having — they cover the arena targets —
   but they do not satisfy the gate item on their own.
+- **Done, and it turned up a second shortfall.** The first run completed clean
+  (11 shards, 30.7bn executions). Reading its numbers showed `dom_mutation` had
+  received eight CPU-hours against a gate item that says twenty-four — the
+  campaign total was 44 hours, which is true of the campaign and not of the
+  item. The matrix now gives that target six shards. Run 34453317232 is the one
+  whose numbers close this.
 
 ## Miri still does not run on px-ipc or px-store
 
