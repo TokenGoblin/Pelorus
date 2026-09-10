@@ -247,15 +247,24 @@ from real sites, and to stop storing one where the other belongs.
 
 ## Verdict
 
-**All four gate items pass**, and the campaign was verified to have tested what
-it was meant to rather than merely reported clean.
+**All four gate items pass** on both operating systems, and the campaign was
+verified to have tested what it was meant to rather than merely reported clean.
+By the working agreement's own definition — "a phase is done when its gate
+passes in CI on both Windows and Linux" — the phase closes.
 
-The phase is **not closeable** on the gate alone. §9 asks for a process
-boundary this phase did not build, and the reason is a decision that belongs to
-whoever owns ADR 009 — which is marked PROPOSED precisely so it is not decided
-from underneath by whichever implementation needs it first.
+**It closes carrying one §9 deliverable it did not build**, and that is a
+weaker close than Phases 1 and 2 had. Those carried outstanding *obligations*;
+this carries a named line of the phase description. `px-net` is a library, not
+a process.
 
-Said plainly: what this phase establishes is that a request can be made safely,
-partitioned correctly, and refused when anything is ambiguous. What it does not
-establish is that the network lives in its own process, which is the first line
-of §9 Phase 3 and the part a gate cannot check.
+The distinction matters and the merge does not pretend otherwise. What this
+phase establishes is that a request can be made safely, partitioned correctly,
+and refused when anything is ambiguous. What it does not establish is that the
+network lives in its own process. That is blocked on the shape of the
+broker→px-net vocabulary, which is ADR 009, which is marked PROPOSED precisely
+so it is not decided from underneath by whichever implementation happens to
+need it first. It moves to `docs/backlog.md` against the phase that settles
+ADR 009 — the one place it will be looked for again.
+
+Phase 4 does not depend on it. The DOM is `html5ever` into a generational
+arena; it needs no network process.
