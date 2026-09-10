@@ -908,6 +908,128 @@ impl Arena {
     }
 
     // -----------------------------------------------------------------------
+    // Structural validation
+    // -----------------------------------------------------------------------
+
+    /// Check that the tree is a tree.
+    ///
+    /// `docs/research/stylo-requirements.md` item 7: *"Each node has at most
+    /// one parent; a node appears exactly once in its parent child list; the
+    /// child links form a tree. Stylo parallel correctness rests entirely on
+    /// this and checks none of it."*
+    ///
+    /// That last clause is the reason this exists as a crate method rather
+    /// than only inside the fuzz harness. Stylo will walk this tree from
+    /// several threads on the strength of assumptions it never verifies, so
+    /// the verification has to live somewhere it can be called from — a
+    /// `debug_assert!(arena.validate().is_ok())` at the start of a traversal
+    /// costs nothing in a release build and turns a class of silent
+    /// parallel-correctness failure into a loud one.
+    ///
+    /// Returns the first violation rather than panicking, so the caller
+    /// decides. Everything here is O(nodes); it is not for hot paths.
+    ///
+    /// # How to check this method still works
+    ///
+    /// Not by a test, because the public API cannot build a corrupt tree —
+    /// which is the property the rest of this file exists to provide, so it is
+    /// not a gap to be closed. A `validate` that returned `Ok(())`
+    /// unconditionally would pass every test in this crate.
+    ///
+    /// The way to check it is to break the arena on purpose and watch it fail.
+    /// Deleting the `first_child` fixup from `detach` produces:
+    ///
+    /// ```text
+    /// the tree stopped being a tree at NodeId { index: 1, generation: 1 }:
+    /// no last_child, but the walk found children
+    /// ```
+    ///
+    /// via the mutation fuzz harness, which calls this after every operation.
+    /// That is the standing procedure for this method, and the reason it is
+    /// written down here is that "the validator is fine, all the tests pass"
+    /// is exactly what a broken validator says.
+    pub fn validate(&self) -> Result<(), (NodeId, &'static str)> {
+        for (index, slot) in self.slots.iter().enumerate() {
+            if slot.node.is_none() {
+                continue;
+            }
+            let Ok(index) = u32::try_from(index) else {
+                continue;
+            };
+            let id = NodeId::new(index, slot.generation);
+            let Some(node) = self.get(id) else {
+                continue;
+            };
+
+            // The child list is a well-formed doubly-linked list, every member
+            // names this node as its parent, and no member appears twice.
+            let children: Vec<NodeId> = self.child_ids(id).collect();
+
+            match node.first_child() {
+                Some(first) => {
+                    if children.first().copied() != Some(first) {
+                        return Err((id, "first_child disagrees with the forward walk"));
+                    }
+                    if self.get(first).and_then(Node::prev_sibling).is_some() {
+                        return Err((id, "the first child has a previous sibling"));
+                    }
+                }
+                None => {
+                    if !children.is_empty() {
+                        return Err((id, "no first_child, but the walk found children"));
+                    }
+                }
+            }
+
+            match node.last_child() {
+                Some(last) => {
+                    if children.last().copied() != Some(last) {
+                        return Err((id, "last_child is not where the forward walk ends"));
+                    }
+                    if self.get(last).and_then(Node::next_sibling).is_some() {
+                        return Err((id, "the last child has a next sibling"));
+                    }
+                }
+                None => {
+                    if !children.is_empty() {
+                        return Err((id, "no last_child, but the walk found children"));
+                    }
+                }
+            }
+
+            let mut previous: Option<NodeId> = None;
+            for child in &children {
+                let Some(child_node) = self.get(*child) else {
+                    return Err((id, "a listed child does not resolve"));
+                };
+                if child_node.parent() != Some(id) {
+                    return Err((*child, "a child does not name the parent that lists it"));
+                }
+                if child_node.prev_sibling() != previous {
+                    return Err((*child, "the backward link disagrees with the forward walk"));
+                }
+                previous = Some(*child);
+            }
+            for (i, child) in children.iter().enumerate() {
+                if children.get(i + 1..).unwrap_or_default().contains(child) {
+                    return Err((*child, "a node appears twice in one child list"));
+                }
+            }
+
+            // Acyclic, and inside the depth limit. `depth` is bounded
+            // internally, so an error here is a cycle or an over-deep node —
+            // both of which would make a parallel traversal either hang or
+            // visit a node twice.
+            match self.depth(id) {
+                Ok(depth) if depth <= MAX_DEPTH => {}
+                Ok(_) => return Err((id, "a node sits past the depth limit")),
+                Err(_) => return Err((id, "walking up from this node did not reach a root")),
+            }
+        }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Internals
     // -----------------------------------------------------------------------
 

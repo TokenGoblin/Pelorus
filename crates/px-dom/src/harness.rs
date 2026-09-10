@@ -24,7 +24,6 @@
 //! Gated behind `testing` and therefore absent from any release build, along
 //! with [`Arena::force_generation_to_last`], which is the point of the gate.
 
-use crate::arena::MAX_DEPTH;
 use crate::{Arena, NodeData, NodeId};
 
 /// Pick from a list by a byte, or `None` if the list is empty.
@@ -223,87 +222,19 @@ pub fn stale_handles(data: &[u8]) {
 
 /// Check every structural invariant over the arena.
 ///
-/// "No crash" is a much weaker property than the one that matters. The arena
-/// is safe Rust and will not crash; it will happily hold a cycle, or a child
-/// whose parent does not list it, or a sibling chain that skips a node. Each
-/// of those is silent, and each turns a later traversal into a hang, a
-/// truncation, or a node that renders twice.
-fn assert_is_a_tree(arena: &Arena, known: &[NodeId]) {
-    for id in known {
-        let Some(node) = arena.get(*id) else {
-            continue;
-        };
-
-        // Acyclic, and within the depth limit. `depth` is bounded internally,
-        // so an error means either a cycle or an over-deep node.
-        match arena.depth(*id) {
-            Ok(depth) => assert!(
-                depth <= MAX_DEPTH,
-                "a node sits at depth {depth}, past the limit of {MAX_DEPTH}"
-            ),
-            Err(error) => unreachable!("walking up from a live node failed: {error:?}"),
-        }
-
-        let children: Vec<NodeId> = arena.child_ids(*id).collect();
-
-        match node.first_child() {
-            Some(first) => {
-                assert_eq!(
-                    children.first().copied(),
-                    Some(first),
-                    "first_child disagrees with the forward walk"
-                );
-                let previous = arena.get(first).and_then(|n| n.prev_sibling());
-                assert_eq!(previous, None, "the first child has a previous sibling");
-            }
-            None => assert!(
-                children.is_empty(),
-                "no first_child, but the forward walk found children"
-            ),
-        }
-
-        match node.last_child() {
-            Some(last) => {
-                assert_eq!(
-                    children.last().copied(),
-                    Some(last),
-                    "last_child is not where the forward walk ends -- a stale \
-                     last_child makes every later append go to the wrong \
-                     place, silently"
-                );
-                let next = arena.get(last).and_then(|n| n.next_sibling());
-                assert_eq!(next, None, "the last child has a next sibling");
-            }
-            None => assert!(
-                children.is_empty(),
-                "no last_child, but the forward walk found children"
-            ),
-        }
-
-        let mut previous: Option<NodeId> = None;
-        for child in &children {
-            let Some(child_node) = arena.get(*child) else {
-                unreachable!("a listed child did not resolve");
-            };
-            assert_eq!(
-                child_node.parent(),
-                Some(*id),
-                "a child does not name the parent that lists it"
-            );
-            assert_eq!(
-                child_node.prev_sibling(),
-                previous,
-                "the backward link disagrees with the forward walk"
-            );
-            previous = Some(*child);
-        }
-
-        for (i, child) in children.iter().enumerate() {
-            assert!(
-                !children.get(i + 1..).unwrap_or_default().contains(child),
-                "a node appears twice in one child list"
-            );
-        }
+/// Delegates to [`Arena::validate`] rather than carrying its own copy. It used
+/// to have one, and two implementations of "is this a tree" is one more than
+/// the question can support: the fuzz target would have kept passing while the
+/// method Phase 5 actually calls drifted away from it.
+///
+/// "No crash" is a much weaker property than this one. The arena is safe Rust
+/// and will not crash; it will happily hold a cycle, or a child whose parent
+/// does not list it, or a sibling chain that skips a node. Each of those is
+/// silent, and each turns a later traversal into a hang, a truncation, or a
+/// node that renders twice.
+fn assert_is_a_tree(arena: &Arena, _known: &[NodeId]) {
+    if let Err((id, why)) = arena.validate() {
+        unreachable!("the tree stopped being a tree at {id:?}: {why}");
     }
 }
 

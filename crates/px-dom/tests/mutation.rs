@@ -278,3 +278,48 @@ fn dom_mutation_churn_retires_nothing() {
     );
     assert_eq!(arena.len(), 1, "only the document survives");
 }
+
+/// A parsed document validates, and so does one that has been mutated.
+///
+/// This does not prove `Arena::validate` can *detect* anything — the public
+/// API cannot build a corrupt tree, which is the whole point of it. What it
+/// proves is that the validator agrees with the arena about what a well-formed
+/// tree is, which is the half that rots: a validator whose idea of the
+/// invariants drifts from the code's starts rejecting healthy trees, and the
+/// tempting fix is to loosen the validator.
+///
+/// The detection half is checked by breaking the arena on purpose; see
+/// `Arena::validate`'s documentation for the procedure and what it produced.
+#[test]
+fn dom_mutation_validate_accepts_real_trees() {
+    let dom = px_dom::parse(
+        r#"<!DOCTYPE html><html><head><title>t</title></head>
+           <body><p>a<b>b</b></p><table><tr><td>d</td></tr></table>
+           <ul><li>1<li>2</ul><template><span>x</span></template></body></html>"#,
+    );
+    assert_eq!(dom.arena.validate(), Ok(()), "a parsed document");
+
+    let mut arena = Arena::new();
+    let doc = arena.document();
+    let mut nodes = Vec::new();
+    for i in 0..64 {
+        let child = node(&mut arena, &format!("c{i}"));
+        let parent = if i % 3 == 0 {
+            doc
+        } else {
+            nodes.last().copied().unwrap_or(doc)
+        };
+        arena.append_child(parent, child).expect("append");
+        nodes.push(child);
+    }
+    assert_eq!(arena.validate(), Ok(()), "after building");
+
+    for id in nodes.iter().step_by(5) {
+        let _ = arena.remove_subtree(*id);
+        assert_eq!(arena.validate(), Ok(()), "after removing {id:?}");
+    }
+    for id in nodes.iter().rev().take(8) {
+        let _ = arena.append_child(doc, *id);
+        assert_eq!(arena.validate(), Ok(()), "after moving {id:?}");
+    }
+}
