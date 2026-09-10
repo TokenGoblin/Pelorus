@@ -194,6 +194,14 @@ pub(crate) fn compare_boundary_points(
     // mirrored question and invert. Written this way rather than duplicated
     // because the two directions are genuinely the same algorithm, and the
     // duplicated version is where an asymmetry creeps in.
+    //
+    // This is the one recursive call in the crate, and it recurses **exactly
+    // once**: it is reached only when `b.node` precedes `a.node`, and inside
+    // the mirrored call that same test asks whether `a.node` precedes
+    // `b.node`, which cannot also be true. So it is not a walk over tree depth
+    // and does not belong on an explicit stack — but it is worth saying so
+    // here, because "recursion in a DOM" is the exact shape the Phase 4 gate
+    // exists to keep out, and a reader is right to stop at it.
     if arena.precedes(b.node, a.node) == Some(true) {
         return match compare_boundary_points(arena, b, a)? {
             Position::Before => Some(Position::After),

@@ -12,8 +12,25 @@
 //! mutability, so the arena lives in a `RefCell`. This does not weaken the
 //! generation check — a stale handle is still stale inside a `borrow_mut` —
 //! but it does mean a re-entrant borrow is a runtime panic rather than a
-//! compile error. Every method here takes exactly one borrow and holds it for
-//! a straight line of code, and none calls another method on `self`.
+//! compile error — a whole class of failure the borrow checker used to catch
+//! for us, moved to run time.
+//!
+//! The rule that keeps it safe is **no borrow is held across a call to another
+//! method on `self`**, which is weaker than "nothing calls anything" and is
+//! what the code actually does. [`append_based_on_parent_node`] delegates to
+//! [`append`] and [`append_before_sibling`]; it is sound because the borrow it
+//! takes lives in a `let` binding that ends before the delegation, so the
+//! `Ref` is dropped at the semicolon.
+//!
+//! That distinction is the thing to preserve when editing here. Widening a
+//! `let has_parent = self.arena.borrow()...;` into a `let arena =
+//! self.arena.borrow();` block around the same delegation compiles, passes
+//! every test that does not reach that branch, and panics on a page with
+//! foster-parented table content.
+//!
+//! [`append_based_on_parent_node`]: Sink::append_based_on_parent_node
+//! [`append`]: Sink::append
+//! [`append_before_sibling`]: Sink::append_before_sibling
 //!
 //! **The constructors cannot fail.** `create_element` returns a `Handle`, not
 //! an `Option<Handle>`, so there is nowhere to report an exhausted arena. The
