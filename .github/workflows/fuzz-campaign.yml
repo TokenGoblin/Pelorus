@@ -11,7 +11,7 @@
 # targets x shards x hours-per-shard, in parallel, each job well inside the
 # limit.
 #
-#   6 shards x 4 hours = 24 hours of fuzzing, ~4 hours of wall clock
+#   11 shards x 4 hours = 44 hours of fuzzing, ~4 hours of wall clock
 #
 # Shards are not redundant: libFuzzer seeds from the clock and its own corpus,
 # so three shards of one target explore different paths rather than repeating
@@ -66,6 +66,15 @@ jobs:
           - { target: http_response, shard: 1 }
           - { target: http_response, shard: 2 }
           - { target: http_chunked, shard: 1 }
+          # Phase 4. §9 requires 24h of mutation fuzzing and a stale-handle
+          # target. Two shards for dom_mutation because it is the one checking
+          # a structural property rather than a decoder, and its input space is
+          # operation sequences rather than bytes, which is larger than it
+          # looks. See ci/gate-fuzz-smoke.sh for why their -max_len is 4 KB
+          # rather than the megabyte the parsers get.
+          - { target: dom_stale_handle, shard: 1 }
+          - { target: dom_mutation, shard: 1 }
+          - { target: dom_mutation, shard: 2 }
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-fuzz

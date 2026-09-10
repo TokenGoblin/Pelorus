@@ -94,9 +94,22 @@ fi
 # 32 MiB ceiling would spend the whole budget generating enormous inputs
 # instead of exploring structure, and the chunk bound is the one a declared
 # length reaches directly rather than by accumulation.
+#
+# The DOM targets go the other way, and for a different reason. Their harnesses
+# assert the whole tree's invariants after *every* operation, and one byte is
+# roughly one operation, so cost grows with the square of the input. Measured,
+# release: 1 KB is 0.4 ms, 4 KB is 2.9 ms, 16 KB is 20 ms, 64 KB is 170 ms. At
+# the 1,100,000 default a single execution would take minutes and the campaign
+# would explore almost nothing.
+#
+# 4 KB is about two thousand operations — enough to build real trees, churn
+# slots, and reach the forced generation-exhaustion path — at roughly 350
+# executions per second. The check-everything-every-step design is what makes
+# these targets precise, and this is what it costs.
 max_len_for() {
     case "$1" in
         http_response | http_chunked) echo 8500000 ;;
+        dom_stale_handle | dom_mutation) echo 4096 ;;
         *) echo 1100000 ;;
     esac
 }
