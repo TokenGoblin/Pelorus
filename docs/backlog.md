@@ -452,3 +452,21 @@ Format: one entry per defect.
   different reason (`ring`'s C and assembly, which the audit cannot see at
   all). Two ADRs in a row needing a footnote on the same metric is the signal
   that this is worth fixing.
+
+## px-dom's CLAUDE.md claimed Miri ran, and it never has
+
+- **Found in:** phase 4, `crates/px-dom/CLAUDE.md`
+- **Belongs to:** phase 4, once the html5ever integration lands
+- **What:** the file has said "Miri runs this crate's unit tests in CI" since
+  Phase 0. No Miri job exists. The line has been corrected in place rather
+  than deleted, under a "Not true yet" heading, because a false assurance that
+  is quietly removed leaves nobody knowing it was ever claimed.
+- **Why it is worth making true:** px-dom is `#![forbid(unsafe_code)]`, so
+  Miri finds nothing in this crate's own code and would be theatre today. It
+  stops being theatre the moment the `TreeSink` integration means these tests
+  drive `tendril`, `smallvec` and `string_cache` — about 800 unsafe tokens of
+  dependency (ADR 017) that no other check in this project exercises at
+  runtime. `ci/unsafe-audit.sh` counts them; nothing runs them.
+- **What it costs meanwhile:** the dependency unsafe that html5ever brought in
+  is accounted for and unexercised. That is the gap ADR 017 accepted and this
+  is where it gets closed.

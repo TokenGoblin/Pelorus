@@ -91,6 +91,42 @@ cargo test --workspace --locked || fail "tests failed"
 # can say that no private one appeared.
 # ---------------------------------------------------------------------------
 
+# Scan the code, not the prose.
+#
+# `grep -rn` over a crate matches its comments too, and here that breaks the
+# gate in both directions at once.
+#
+# Forward: the ban has to be stateable. This script's own header names
+# `Vec<Node>` as the thing it forbids, and px-dom's module docs explain at
+# length why a node must not own its children — and without this filter every
+# one of those sentences is a violation. A rule that cannot be written down
+# without tripping is a rule people comply with by deleting the explanation.
+#
+# Backward, and worse: the non-vacuity guard below passes when it finds an
+# `Option<&Node>` anywhere in the crate. A doc comment mentioning the shape
+# would satisfy it. That would leave the guard reporting "the phase has
+# started" on the strength of a sentence about starting the phase, which is
+# exactly the failure the guard was added to prevent.
+#
+# Only whole-line comments are dropped. `let v: Vec<Node> = x; // note` still
+# trips, and should.
+# `-e` is not decoration: OPTION_ACCESSOR below starts with `->`, and without
+# it grep reads the pattern as a bundle of options and never scans anything.
+scan_code() {
+    grep -rnE -e "$1" crates/px-dom/src 2>/dev/null \
+        | grep -vE '^[^:]*:[0-9]+:[[:space:]]*//'
+}
+
+# Anchored on `->` rather than matching `Option<...Node>` anywhere.
+#
+# Without the arrow this matched the arena's own `node: Option<Node>` slot
+# field, so the guard reported "px-dom has an Option-returning accessor" on the
+# strength of a struct member. It would have gone green on a crate with storage
+# and no accessors at all — which is precisely the half-started state the guard
+# exists to catch. Found by deleting the real accessors and watching it pass.
+OPTION_ACCESSOR='->[[:space:]]*Option<[[:space:]]*&?[[:space:]]*(mut[[:space:]]+)?Node\b'
+BARE_ACCESSOR='^\s*(pub(\([^)]*\))?\s+)?fn\s+\w+\s*\([^)]*\)\s*->\s*&?\s*(mut\s+)?Node\b'
+
 # This check must not be able to pass by finding nothing. px-dom starts as a
 # stub, and "no bad accessor exists" is trivially true of a crate with no
 # accessors at all — a green line meaning the phase has not started. So it
@@ -98,17 +134,14 @@ cargo test --workspace --locked || fail "tests failed"
 # same way ci/gate-ipc.sh refuses to pass on an empty scan.
 info "no infallible node accessor"
 if [ -d crates/px-dom/src ]; then
-    if ! grep -rqE 'Option<[[:space:]]*&?[[:space:]]*(mut[[:space:]]+)?Node\b' \
-            crates/px-dom/src 2>/dev/null; then
+    if [ -z "$(scan_code "$OPTION_ACCESSOR")" ]; then
         fail "px-dom declares no Option-returning node accessor; this check"
         fail "  cannot pass by finding nothing"
     # A function returning &Node or &mut Node rather than Option<&Node> is the
     # shape being banned. Deliberately matches private ones too.
-    elif grep -rnE '^\s*(pub(\([^)]*\))?\s+)?fn\s+\w+\s*\([^)]*\)\s*->\s*&?\s*(mut\s+)?Node\b' \
-            crates/px-dom/src >/dev/null 2>&1; then
+    elif [ -n "$(scan_code "$BARE_ACCESSOR")" ]; then
         fail "px-dom has an accessor returning Node rather than Option<Node>"
-        grep -rnE '^\s*(pub(\([^)]*\))?\s+)?fn\s+\w+\s*\([^)]*\)\s*->\s*&?\s*(mut\s+)?Node\b' \
-            crates/px-dom/src | head -5 | sed 's/^/       /' >&2
+        scan_code "$BARE_ACCESSOR" | head -5 | sed 's/^/       /' >&2
     else
         ok "every node accessor returns Option"
     fi
@@ -127,14 +160,14 @@ fi
 # ---------------------------------------------------------------------------
 
 # Same rule: a crate with no Node type trivially has no node owning another.
+OWNED_CHILD='Box<\s*Node\b|Vec<\s*Node\b|Rc<\s*Node\b|Arc<\s*Node\b'
+
 info "no owned child nodes inside a node"
-if ! grep -rqE '(struct|enum)[[:space:]]+Node\b' crates/px-dom/src 2>/dev/null; then
+if [ -z "$(scan_code '(struct|enum)[[:space:]]+Node\b')" ]; then
     fail "px-dom declares no Node type; this check cannot pass by finding nothing"
-elif grep -rnE 'Box<\s*Node\b|Vec<\s*Node\b|Rc<\s*Node\b|Arc<\s*Node\b' \
-        crates/px-dom/src >/dev/null 2>&1; then
+elif [ -n "$(scan_code "$OWNED_CHILD")" ]; then
     fail "a node owns child nodes directly; dropping the tree will recurse"
-    grep -rnE 'Box<\s*Node\b|Vec<\s*Node\b|Rc<\s*Node\b|Arc<\s*Node\b' \
-        crates/px-dom/src | head -5 | sed 's/^/       /' >&2
+    scan_code "$OWNED_CHILD" | head -5 | sed 's/^/       /' >&2
 else
     ok "nodes are held in the arena, not inside each other"
 fi
