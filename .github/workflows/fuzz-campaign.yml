@@ -11,7 +11,7 @@
 # targets x shards x hours-per-shard, in parallel, each job well inside the
 # limit.
 #
-#   11 shards x 4 hours = 44 hours of fuzzing, ~4 hours of wall clock
+#   13 shards x 4 hours = 52 hours of fuzzing, ~4 hours of wall clock
 #
 # Shards are not redundant: libFuzzer seeds from the clock and its own corpus,
 # so three shards of one target explore different paths rather than repeating
@@ -75,6 +75,11 @@ jobs:
           - { target: dom_stale_handle, shard: 1 }
           - { target: dom_mutation, shard: 1 }
           - { target: dom_mutation, shard: 2 }
+          # The parser. §4.4 asks for 100,000-level nesting in the corpus of
+          # every parser, and this is the only target that sends HTML through
+          # html5ever and the TreeSink -- the surface a page actually reaches.
+          - { target: dom_parse, shard: 1 }
+          - { target: dom_parse, shard: 2 }
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-fuzz

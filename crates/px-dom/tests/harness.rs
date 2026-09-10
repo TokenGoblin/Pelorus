@@ -121,3 +121,41 @@ fn dom_stale_handle_harness_actually_retires_slots() {
         );
     }
 }
+
+#[test]
+fn dom_parse_harness_holds_over_many_sequences() {
+    for seed in 0..400u64 {
+        let len = 4 + (seed as usize % 600);
+        px_dom::harness::parse_html(&pseudorandom(seed, len));
+    }
+}
+
+/// The committed corpus parses cleanly, including the 100,000-level nesting
+/// §4.4 names.
+///
+/// A corpus seed that crashes the harness is a bug the campaign would find in
+/// its first second; running them here means finding it before the campaign
+/// starts, and it also asserts the seeds are still readable — a corpus file
+/// that got mangled by a line-ending conversion tests nothing and says
+/// nothing.
+#[test]
+fn dom_parse_harness_handles_the_committed_corpus() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/dom_parse");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        panic!("the dom_parse corpus is missing at {}", dir.display());
+    };
+
+    let mut seen = 0usize;
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        px_dom::harness::parse_html(&bytes);
+        seen += 1;
+    }
+    assert!(
+        seen >= 12,
+        "only {seen} corpus seeds found; the campaign starts from these, so a \
+         corpus that quietly shrank is a campaign that explores less"
+    );
+}

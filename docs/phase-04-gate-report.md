@@ -352,6 +352,54 @@ The figure that reaches a user is **789, of which a mutex is 539**.
 trust entry: trusting its publisher would assert we vouch for a maintainer
 whose code we never build.
 
+## The parser had no fuzz target, and validate() was quadratic
+
+Found by auditing §4.1, §4.4 and §14.3 line by line against the code rather
+than against the gate — after the gate was already green.
+
+§4.4: *"Fuzz corpus includes 100,000-level nesting for each parser."*
+`dom_stale_handle` and `dom_mutation` drive the arena's API with operation
+bytes. **Neither sent a byte of HTML through html5ever and the `TreeSink`** —
+which is the surface an attacker actually reaches, because a page is bytes
+rather than a sequence of `append_child` calls. Foster parenting, the adoption
+agency algorithm's reparenting, template contents, text-run merging, attribute
+merging on a duplicate `<html>`, and the feed bound were all unfuzzed.
+
+`dom_parse` closes it, with twelve committed seeds including the two the spec
+names by size: 100,000 `<div>`s opened, and 100,000 opened and closed.
+
+### The quadratic underneath it
+
+Measuring the new harness turned up something worse than a missing target. A
+1 MB shallow document cost **two seconds**, and the cost was in
+`Arena::validate` — which `dom_mutation` calls after *every operation*.
+
+Two separate problems, both mine:
+
+- `validate` called `depth(id)` for every node, walking *up* to the root each
+  time: O(nodes × depth). Replaced with one downward pass carrying depth, which
+  is O(nodes) and is a strictly better cycle check — a cycle is now "a live
+  node no root can reach", rather than "a walk that went too far", which was
+  indistinguishable from a legitimately over-deep node.
+- The duplicate-child scan was `for each child, search the rest of the list` —
+  **O(children²)**, and this document gives `<body>` 131,072 children. It was
+  also redundant: the downward pass marks nodes as it visits them, so a node
+  appearing twice in one child list is caught the second time it is pushed.
+
+| | before | after |
+|---|---:|---:|
+| 1 MB shallow document | 2002 ms | **104 ms** |
+| 64 KB shallow | 15.9 ms | **6.3 ms** |
+| 1.1 MB nesting bomb | 75 ms | 75 ms |
+
+The nesting bomb was never the slow case — it is abandoned after eight
+refusals. The slow case was an ordinary large page, in the check that runs
+most often.
+
+Both detection paths re-verified after the rewrite: deleting `detach`'s
+`first_child` fixup still fails the harness, and removing the cycle check from
+`check_insertable` is still caught.
+
 ## The one research item not taken
 
 `stylo-requirements.md` §4 item 2 — the borrowed `StyleView` / `StyleNode`

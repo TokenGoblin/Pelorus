@@ -110,6 +110,17 @@ max_len_for() {
     case "$1" in
         http_response | http_chunked) echo 8500000 ;;
         dom_stale_handle | dom_mutation) echo 4096 ;;
+        # The parser goes the other way again: its input is HTML, and the
+        # committed corpus holds a 1.1 MB seed -- 100,000 levels of nesting
+        # opened and closed, which §4.4 asks for by name. A smaller -max_len
+        # would truncate it and quietly drop the coverage the seed exists for.
+        #
+        # Affordable because `parse` abandons a nesting bomb after eight
+        # refusals: measured on release, the 1.1 MB nesting seed costs 75 ms
+        # and a 1 MB shallow document 104 ms, against 6 ms at 64 KB. Large
+        # inputs are the cheap ones here, which is the opposite of the two
+        # arena targets above.
+        dom_parse) echo 1200000 ;;
         *) echo 1100000 ;;
     esac
 }

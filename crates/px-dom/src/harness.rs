@@ -323,3 +323,66 @@ pub fn mutations(data: &[u8]) {
          resolve; a slot was freed without its handle going stale, or twice"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Target 3 — the parser
+// ---------------------------------------------------------------------------
+
+/// §4.4: *"Fuzz corpus includes 100,000-level nesting for each parser."*
+///
+/// The other two targets drive the arena's API with operation bytes. Neither
+/// sends a byte of HTML through html5ever and the `TreeSink`, which is the
+/// most hostile-input-facing surface in this crate and the one an attacker
+/// actually reaches — a page is bytes, not a sequence of `append_child` calls.
+///
+/// Everything the sink does is in scope here and in scope nowhere else: foster
+/// parenting, the adoption agency algorithm's reparenting, template contents,
+/// text-run merging, attribute merging on a duplicate `<html>`, the feed bound
+/// that stops a nesting bomb, and every interaction between them.
+///
+/// The properties checked are the ones a wrong answer would not announce:
+///
+/// - the result is a **tree** — `Arena::validate`, the same check the mutation
+///   target uses, so a parse that builds a cycle or a broken sibling chain
+///   fails here rather than at style time;
+/// - nothing exceeds `MAX_DEPTH`, however deep the input went;
+/// - a document that lost content **says so**, because a silently truncated
+///   page is indistinguishable from a short one.
+pub fn parse_html(data: &[u8]) {
+    // Lossy rather than refusing non-UTF-8: a browser does not get to decline
+    // bytes, and the tokenizer's behaviour on replacement characters is part
+    // of what is being tested.
+    let html = String::from_utf8_lossy(data);
+    let dom = crate::parse(&html);
+
+    if let Err((id, why)) = dom.arena.validate() {
+        unreachable!("parsing produced something that is not a tree at {id:?}: {why}");
+    }
+
+    // The depth limit is checked by `validate` above, in one downward pass.
+    // Re-walking it here would double the cost of the most expensive thing
+    // this harness does, for a second opinion on the same walk.
+    let document = dom.arena.document();
+
+    // Accounting: everything reachable is alive, and the walk does not visit
+    // anything twice. More reachable than alive means a cycle or a shared
+    // child, which `validate` should already have caught -- this is the
+    // independent second opinion, because both being wrong the same way is the
+    // failure mode a single check has.
+    let reachable = dom.arena.descendants(document).count();
+    assert!(
+        reachable <= dom.arena.len(),
+        "more nodes reachable ({reachable}) than alive ({})",
+        dom.arena.len()
+    );
+
+    // A parse that abandoned must have been refused something first. The
+    // converse is not asserted: refusals below the threshold do not abandon.
+    if dom.abandoned {
+        assert!(
+            dom.truncated > 0,
+            "the parse was abandoned without the tree having refused anything, \
+             so the bound fired for a reason that is not the one it exists for"
+        );
+    }
+}

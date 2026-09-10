@@ -273,7 +273,7 @@ fi
 # 24h mutation fuzz, and the stale-handle target §4.1 names explicitly.
 # ---------------------------------------------------------------------------
 
-for target in dom_stale_handle dom_mutation; do
+for target in dom_stale_handle dom_mutation dom_parse; do
     if [ ! -f "fuzz/fuzz_targets/$target.rs" ]; then
         fail "fuzz target $target does not exist; §9 Phase 4 requires it"
     else

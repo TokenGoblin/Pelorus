@@ -1096,22 +1096,83 @@ impl Arena {
                 }
                 previous = Some(*child);
             }
-            for (i, child) in children.iter().enumerate() {
-                if children.get(i + 1..).unwrap_or_default().contains(child) {
-                    return Err((*child, "a node appears twice in one child list"));
-                }
-            }
+            // No duplicate-detection scan here, deliberately.
+            //
+            // The obvious one -- for each child, search the rest of the list --
+            // is O(children^2), and a child list can be enormous: 131,072
+            // paragraphs under one `<body>` made this two seconds, in a method
+            // `dom_mutation` calls after *every* operation.
+            //
+            // It is also redundant. The downward pass below marks each node as
+            // it is visited, so a node appearing twice in one child list is
+            // pushed twice and caught the second time, in O(1) rather than
+            // O(children). Same property, from the walk that was happening
+            // anyway.
+        }
 
-            // Acyclic, and inside the depth limit. `depth` is bounded
-            // internally, so an error here is a cycle or an over-deep node —
-            // both of which would make a parallel traversal either hang or
-            // visit a node twice.
-            match self.depth(id) {
-                Ok(depth) if depth <= MAX_DEPTH => {}
-                Ok(_) => return Err((id, "a node sits past the depth limit")),
-                Err(_) => return Err((id, "walking up from this node did not reach a root")),
+        // Acyclic, and inside the depth limit — in one downward pass rather
+        // than a `depth()` walk per node.
+        //
+        // The obvious version calls `depth(id)` for every node, which walks
+        // *up* to the root each time and makes this O(nodes x depth). That
+        // matters: `dom_mutation` calls this after every single operation, and
+        // it made a 1 MB shallow document cost two seconds in the parse
+        // harness. Walking down from each root instead carries the depth along
+        // and visits every node once.
+        //
+        // It is also a strictly better cycle check. The upward version relied
+        // on `depth`'s internal bound to stop, so a cycle showed up as "this
+        // walk went too far" — indistinguishable from a legitimately over-deep
+        // node. Here a cycle is a node no root can reach, which is exactly what
+        // a cycle is.
+        let mut visited = vec![false; self.slots.len()];
+        let mut stack: Vec<(NodeId, usize)> = Vec::new();
+
+        for (index, slot) in self.slots.iter().enumerate() {
+            if slot.node.is_none() {
+                continue;
+            }
+            let Ok(index32) = u32::try_from(index) else {
+                continue;
+            };
+            let id = NodeId::new(index32, slot.generation);
+            if self.get(id).and_then(Node::parent).is_none() {
+                stack.push((id, 0));
             }
         }
+
+        while let Some((id, depth)) = stack.pop() {
+            if depth > MAX_DEPTH {
+                return Err((id, "a node sits past the depth limit"));
+            }
+            let index = id.index() as usize;
+            match visited.get_mut(index) {
+                Some(seen) if *seen => {
+                    return Err((id, "a node is reachable from more than one parent"));
+                }
+                Some(seen) => *seen = true,
+                None => continue,
+            }
+            for child in self.child_ids(id) {
+                stack.push((child, depth + 1));
+            }
+        }
+
+        for (index, slot) in self.slots.iter().enumerate() {
+            if slot.node.is_none() {
+                continue;
+            }
+            if visited.get(index).copied() == Some(false) {
+                let Ok(index32) = u32::try_from(index) else {
+                    continue;
+                };
+                return Err((
+                    NodeId::new(index32, slot.generation),
+                    "a live node is reachable from no root, so it is in a cycle",
+                ));
+            }
+        }
+
         Ok(())
     }
 
