@@ -409,6 +409,63 @@ Both detection paths re-verified after the rewrite: deleting `detach`'s
 `first_child` fixup still fails the harness, and removing the cycle check from
 `check_insertable` is still caught.
 
+## Miri, which §4.5 asked for and this crate had never run
+
+build-spec §4.5: *"Miri on `px-dom`, `px-ipc`, `px-store` unit tests."* It had
+never run, and `px-dom`'s CLAUDE.md claimed since Phase 0 that it did.
+
+Deferred twice for reasons that were right at the time and stopped being right
+during this phase. Phase 0: *"each covers a crate that is currently an empty
+skeleton."* Phase 2, about px-ipc: *"`px-ipc` has no `unsafe` and no FFI, so
+what Miri would add today is UB detection in `std` calls."*
+
+`px-dom` is now the case neither of those describes. It is
+`forbid(unsafe_code)`, so Miri finds nothing in its own code — but ADR 017
+brought in a closure whose unsafe its tests **execute**: `parking_lot` 539
+tokens, `tendril` 129, `smallvec` 75, `string_cache` 19. The unsafe audit
+counts them; nothing ran them.
+
+ADR 022, on the nightly ADR 006 pins, by the mechanism ADR 011 established for
+the sanitizers — the root toolchain file untouched, so `gate-fuzz-smoke.sh`'s
+assertion that nothing outside `fuzz/` resolves to nightly keeps holding.
+
+### It found something on the first run
+
+`tendril` does **integer-to-pointer casts** — it packs a tag bit into a pointer
+and casts back — so Miri reports that it *"might miss pointer bugs in this
+program."* Legitimate technique, specific consequence: **Miri's provenance
+tracking is weakened for the crate that holds every string in the DOM.** A
+green Miri run over `px-dom` says less about `tendril` than about anything else
+in the closure.
+
+`-Zmiri-strict-provenance` would make that an error and `tendril` would fail on
+the first parse, which is not a defect in `tendril`. So the flag is not set,
+and the limitation is written into the ADR and the crate's CLAUDE.md rather
+than left for "Miri is green" to paper over.
+
+### What it does not cover
+
+| suite | Miri time | run |
+|---|---:|---|
+| `parse` (minus three) | 8.0 s | yes |
+| `ranges` | 7.2 s | yes |
+| `handles` | 6.9 s | yes |
+| `snapshots` | 6.4 s | yes |
+| `order` | 3.4 s | yes |
+| `opaque` | 182 s | no |
+| `depth`, `layout`, `harness`, `html5lib`, `mutation` | minutes to hours | no |
+
+Miri interprets at roughly a thousandfold slowdown, so the deep-nesting,
+generation-exhaustion and conformance paths are out of reach — and those are
+where this crate's own logic is most intricate. What is covered is the
+dependency unsafe, which is the part nothing else checks and the reason §4.5
+names this crate.
+
+Verified in both directions: a failing test in a covered suite turns the gate
+red, and so does a suite disappearing. The second one was worth checking — the
+first version reported a deleted file as *"miri found undefined behaviour in
+snapshots"*, which is untrue and sends somebody looking in the wrong place.
+
 ## The one research item not taken
 
 `stylo-requirements.md` §4 item 2 — the borrowed `StyleView` / `StyleNode`

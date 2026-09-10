@@ -204,6 +204,25 @@ jobs:
         shell: bash
         run: ci/gate-network.sh
 
+  # build-spec §4.5, ADR 022. Miri over px-dom, on the nightly ADR 006 pins.
+  #
+  # Linux only, deliberately: Miri is a slow interpreter and the thing it is
+  # checking here is dependency unsafe, which is not platform-specific.
+  # Doubling the cost to run it twice would buy very little.
+  miri:
+    name: miri (px-dom)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned nightly and miri
+        shell: bash
+        run: |
+          nightly="$(grep -oE 'nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}' fuzz/rust-toolchain.toml | head -1)"
+          rustup toolchain install "$nightly" --component miri --profile minimal
+      - name: Miri
+        shell: bash
+        run: ci/gate-miri.sh
+
   # Phase 4. Written failing before px-dom had an arena, and red for the length
   # of the phase — a gate added only once it passes has never been seen to
   # fail, which is the one thing a gate has to be able to do.

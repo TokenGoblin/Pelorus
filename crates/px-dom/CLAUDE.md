@@ -18,12 +18,24 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   markup and every tree walk in the engine runs over it, so it takes the
   workspace lints even though the root agreement does not list it.
 
-## Not true yet
+## Miri
 
-- **Miri does not run this crate's tests.** This file claimed it did, from
-  Phase 0, and it never has. Recorded here rather than quietly deleted
-  because the claim is worth making true: the crate is
-  `#![forbid(unsafe_code)]`, so Miri finds nothing in *our* code, but once
-  the html5ever integration lands the tests exercise `tendril`,
-  `smallvec` and `string_cache` — roughly 800 unsafe tokens of dependency
-  (ADR 017) that nothing else here checks. See docs/backlog.md.
+Miri runs over five of this crate's test suites — `parse`, `ranges`,
+`handles`, `snapshots`, `order` — on the nightly ADR 006 pins. See ADR 022 and
+`ci/gate-miri.sh`.
+
+This file claimed Miri ran from Phase 0, when it did not. What it covers is
+narrower than "Miri runs on px-dom" suggests, so:
+
+- **Not covered:** the deep-nesting, generation-exhaustion, conformance and
+  fuzz-harness suites. Miri interprets at roughly a thousandfold slowdown and
+  those build documents of 100,000 nodes and up.
+- **Weakened for `tendril`:** it packs a tag bit into a pointer and casts back,
+  so Miri warns that it "might miss pointer bugs". A green run says less about
+  `tendril` than about the rest of the closure, and `tendril` holds every
+  string in the DOM.
+
+The point of it is not this crate's own code, which is `forbid(unsafe_code)`.
+It is the ~800 unsafe tokens ADR 017 brought in — `parking_lot`, `tendril`,
+`smallvec`, `string_cache` — which the unsafe audit counts and nothing else
+runs.

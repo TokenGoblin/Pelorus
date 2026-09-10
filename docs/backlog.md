@@ -470,7 +470,7 @@ Format: one entry per defect.
   all). Two ADRs in a row needing a footnote on the same metric is the signal
   that this is worth fixing.
 
-## px-dom's CLAUDE.md claimed Miri ran, and it never has
+## px-dom's CLAUDE.md claimed Miri ran, and it never has — CLOSED
 
 - **Found in:** phase 4, `crates/px-dom/CLAUDE.md`
 - **Belongs to:** phase 4, once the html5ever integration lands
@@ -487,6 +487,13 @@ Format: one entry per defect.
 - **What it costs meanwhile:** the dependency unsafe that html5ever brought in
   is accounted for and unexercised. That is the gap ADR 017 accepted and this
   is where it gets closed.
+- **Closed in phase 4.** ADR 022 and `ci/gate-miri.sh`. Five suites, on the
+  nightly ADR 006 pins, by the mechanism ADR 011 established. It found
+  something on the first run: `tendril` does integer-to-pointer casts, so
+  Miri's provenance tracking is weakened for the crate holding every string in
+  the DOM — a green run says less about `tendril` than about the rest. The
+  deep-nesting, generation-exhaustion and conformance suites remain out of
+  reach and are named in the ADR rather than left implied.
 
 ## html5ever's tree builder is quadratic in nesting depth
 
@@ -615,3 +622,19 @@ Format: one entry per defect.
   before calling Phase 4 done, and put both results in the gate report. The
   first run's numbers are still worth having — they cover the arena targets —
   but they do not satisfy the gate item on their own.
+
+## Miri still does not run on px-ipc or px-store
+
+- **Found in:** phase 4, ADR 022
+- **Belongs to:** unassigned; px-store has no implementation yet
+- **What:** build-spec §4.5 names Miri on `px-dom`, `px-ipc` and `px-store`.
+  ADR 022 covers `px-dom` only, and supersedes the earlier "Miri is not run on
+  px-ipc" entry's stated blocker — the ADR 006 fence is no longer the obstacle,
+  because ADR 022 shows the mechanism ADR 011 established works for a third
+  consumer.
+- **What is left:** `px-ipc` has no `unsafe` and no dependency with unsafe in
+  its test paths, so Miri over it checks UB in `std` calls — real but thin, and
+  that reasoning has not changed. `px-store` is still a skeleton.
+- **What to do:** wire `px-ipc` when it gains a dependency whose unsafe its
+  tests execute, and `px-store` when it exists. `ci/gate-miri.sh` is written to
+  take more crates without restructuring.
