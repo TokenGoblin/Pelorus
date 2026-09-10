@@ -260,18 +260,27 @@ fn read_body<S: Read>(
             let end = start.saturating_add(length);
             Ok(raw.get(start..end).unwrap_or_default().to_vec())
         }
-        Framing::Chunked => loop {
-            let rest = raw.get(head_len..).unwrap_or_default();
-            match http1::decode_chunked(rest) {
-                Ok((body, _)) => return Ok(body),
-                Err(Http1Error::Truncated) => {
-                    if !fill(raw)? {
-                        return Err(FetchError::Protocol(Http1Error::Truncated));
+        Framing::Chunked => {
+            // Incremental, and that is a correctness property rather than a
+            // performance one. Re-decoding the whole buffer on every read is
+            // quadratic in the body's length — measured at roughly a
+            // quadrupling per doubling, which extrapolates to about twelve
+            // seconds of CPU at MAX_BODY_BYTES, chosen by the server. See
+            // `http1::ChunkedDecoder`.
+            let mut decoder = http1::ChunkedDecoder::new();
+            loop {
+                let rest = raw.get(head_len..).unwrap_or_default();
+                match decoder.push(rest) {
+                    Ok(true) => return Ok(decoder.into_body()),
+                    Ok(false) => {
+                        if !fill(raw)? {
+                            return Err(FetchError::Protocol(Http1Error::Truncated));
+                        }
                     }
+                    Err(error) => return Err(FetchError::Protocol(error)),
                 }
-                Err(error) => return Err(FetchError::Protocol(error)),
             }
-        },
+        }
         Framing::UntilClose => {
             while fill(raw)? {}
             Ok(raw.get(head_len..).unwrap_or_default().to_vec())

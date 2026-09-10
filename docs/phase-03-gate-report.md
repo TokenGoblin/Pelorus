@@ -157,6 +157,43 @@ stronger claim.
 machinery. Deferred to its first real consumer; the refusal fails closed and
 will be wrong for real sites until then.
 
+## The adversarial review
+
+§10 names `px-sandbox`, `px-ipc`, `px-websec` and `px-mcp` for a dedicated
+attacking session. It does not name `px-net`, because that list was written
+before `px-net` had code — and `px-net` is now the crate most exposed to
+hostile input in the project: every byte of HTTP, DNS, cookie and redirect
+handling was chosen by whoever served the page. It got the review anyway. **§10's
+list is worth amending**, and that is a spec change rather than something to do
+quietly.
+
+**One real defect, found and fixed: a chunked body cost quadratic time in its
+own length.** The read loop accumulated bytes and re-decoded the whole buffer
+after every read, rebuilding the output from scratch each time.
+
+Measured rather than reasoned about, on the real fetch path:
+
+| Body | Before | After |
+|---|---:|---:|
+| 1 MB | 10 ms | 4 ms |
+| 2 MB | 38 ms | 5 ms |
+| 4 MB | 182 ms | 12 ms |
+
+Roughly a quadrupling per doubling before, roughly linear after. Extrapolated
+to `MAX_BODY_BYTES` that was about **twelve seconds of CPU for one response**,
+chosen entirely by the server, and a page with several such subresources
+multiplies it. Nothing about sending a large body slowly looks hostile, which
+is what made it worth finding: it is a denial of service reachable by any
+origin, not a performance note.
+
+Fixed with `http1::ChunkedDecoder`, which keeps its position so each read costs
+only the bytes that are new. The regression guard is structural rather than a
+timing assertion — a timing assertion in CI is a flake waiting to happen — and
+pins the property that actually matters: fed a growing buffer one byte at a
+time, the decoder's consumed offset only ever moves forward. A second test
+asserts the incremental and one-shot decoders agree, so the fuzz target is not
+attacking a decoder the fetch path no longer uses.
+
 ## What §9 asks for and this phase did not deliver
 
 **`px-net` is a library, not a process.** §9 opens with "`px-net` as its own
