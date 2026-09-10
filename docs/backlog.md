@@ -616,7 +616,7 @@ Format: one entry per defect.
   `StyleNode`, ADR 021 was wrong in its central claim and should say so rather
   than the difficulty being absorbed as ordinary Phase 5 friction.
 
-## The Phase 4 campaign predates dom_parse and does not cover it — SUPERSEDED
+## The Phase 4 campaign predates dom_parse and does not cover it — CLOSED
 
 - **Found in:** phase 4
 - **Belongs to:** phase 4, before it closes
@@ -636,8 +636,14 @@ Format: one entry per defect.
   (11 shards, 30.7bn executions). Reading its numbers showed `dom_mutation` had
   received eight CPU-hours against a gate item that says twenty-four — the
   campaign total was 44 hours, which is true of the campaign and not of the
-  item. The matrix now gives that target six shards. Run 34453317232 is the one
-  whose numbers close this.
+  item. The matrix now gives that target six shards.
+- **Closed by run 34483936230** — 19 shards, 28.2bn executions, clean, with
+  three `dom_parse` shards and six for `dom_mutation`. Run 34453317232, named
+  here earlier, was cancelled and replaced; it never produced numbers. Both
+  results are in `docs/phase-04-gate-report.md`, and the `-max_len` check is
+  written up there because it needed interpreting this time: `-len_control`
+  ramps `lim:` up from the largest seed, so two targets end below their
+  configured ceiling without the flag having been ignored.
 
 ## Miri still does not run on px-ipc or px-store
 

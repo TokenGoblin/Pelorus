@@ -8,7 +8,7 @@
 |---|---|---|
 | html5lib-tests ≥99% | `crates/px-dom/tests/html5lib.rs`, 62 vendored `.dat` files, 1,952 cases | **Pass at 99.43%**, with two causes set aside — ADR 019 |
 | Stale-handle fuzz target proves every stale lookup returns `None` | `dom_stale_handle`, plus `dom_stale_*` ×5 | **Pass** |
-| 24h mutation fuzz clean | one campaign complete (11 shards, 30.7bn executions, clean) but it predates `dom_parse` and gave `dom_mutation` 8 CPU-hours, not 24; a second is in flight | **Incomplete** — see below |
+| 24h mutation fuzz clean | `fuzz-campaign` run [34483936230](https://github.com/TokenGoblin/Pelorus/actions/runs/34483936230) — 19 shards, `dom_mutation` given six of them for 24 CPU-hours of that target | **Pass**, clean, `-max_len` verified |
 | 100,000-level nesting without stack overflow | `dom_depth_*` ×6, on a 256 KB stack | **Pass**, and it found a hang |
 
 Ranges are named in the phase but in none of the four gate items. They were
@@ -156,55 +156,113 @@ tripping is a rule people comply with by deleting the explanation.
 Every check verified in both directions: fires on an injected violation, silent
 on the clean tree.
 
-## The campaign: one run complete, and it does not close the item
+## The campaign, which closes the last gate item
 
-Run [34434827530](https://github.com/TokenGoblin/Pelorus/actions/runs/34434827530)
-finished: **11 shards, 4h each, 30.7 billion executions, no crashes and no
-artifacts written.**
+Run [34483936230](https://github.com/TokenGoblin/Pelorus/actions/runs/34483936230):
+**19 shards, `-max_total_time=14400` each, 28.2 billion executions, no crashes
+and no artifacts written.** Four hours of wall clock, 76 CPU-hours, and
+`dom_mutation` holds six of those shards — **24 CPU-hours of the target the
+gate item names**, which is what the previous run could not say.
 
-The three DOM shards:
+| Target | Shard | Runs | cov | ft | corpus | lim | exec/s |
+|---|---:|---:|---:|---:|---|---:|---:|
+| `dom_mutation` | 1 | 1,653,401 | 870 | 6,093 | 820 / 205 KB | 4,096 | 114 |
+| `dom_mutation` | 2 | 1,983,351 | 870 | 6,113 | 830 / 217 KB | 4,096 | 137 |
+| `dom_mutation` | 3 | 2,126,293 | 865 | 6,093 | 866 / 200 KB | 4,096 | 147 |
+| `dom_mutation` | 4 | 2,093,659 | 870 | 6,113 | 857 / 238 KB | 4,096 | 145 |
+| `dom_mutation` | 5 | 1,657,658 | 870 | 6,141 | 856 / 222 KB | 4,096 | 115 |
+| `dom_mutation` | 6 | 1,603,241 | 870 | 6,113 | 867 / 205 KB | 4,096 | 111 |
+| `dom_stale_handle` | 1 | 3,765,973 | 441 | 2,936 | 405 / 45 KB | 4,096 | 261 |
+| `dom_stale_handle` | 2 | 3,902,787 | 441 | 2,936 | 423 / 44 KB | 4,096 | 271 |
+| `dom_parse` | 1 | 397,678 | 4,472 | 28,448 | 3,693 / 51 MB | 500,000 | 27 |
+| `dom_parse` | 2 | 320,293 | 4,438 | 27,509 | 3,498 / 40 MB | 500,000 | 22 |
+| `dom_parse` | 3 | 130,038 | 4,241 | 24,654 | 2,718 / 24 MB | 500,000 | 9 |
+| `frame_request` | 1 | 10,951,797,106 | 170 | 208 | 92 / 1,155 b | 1,100,000 | 760,488 |
+| `frame_response` | 1 | 6,253,695,283 | 152 | 190 | 83 / 1,038 b | 1,100,000 | 434,254 |
+| `channel_stream` | 1 | 2,439,981,073 | 178 | 655 | 242 / 1,553 KB | 1,100,000 | 169,431 |
+| `channel_stream` | 2 | 1,950,043,208 | 178 | 698 | 256 / 1,138 KB | 1,100,000 | 135,410 |
+| `broker_sequence` | 1 | 3,188,215 | 512 | 3,344 | 1,005 / 233 KB | 19,064 | 221 |
+| `http_response` | 1 | 1,163,433,348 | 411 | 1,541 | 590 / 97 KB | 8,500,000 | 80,788 |
+| `http_response` | 2 | 949,740,224 | 413 | 1,563 | 585 / 108 KB | 8,500,000 | 65,949 |
+| `http_chunked` | 1 | 4,431,836,714 | 127 | 471 | 213 / 8,483 b | 8,500,000 | 307,745 |
 
-| Target | Shard | Runs | cov | ft | corpus | exec/s |
-|---|---:|---:|---:|---:|---|---:|
-| `dom_stale_handle` | 1 | 5,374,062 | 466 | 3,337 | 555 / 63 KB | 373 |
-| `dom_mutation` | 1 | 8,682,691 | 403 | 2,798 | 360 / 36 KB | 602 |
-| `dom_mutation` | 2 | 17,236,660 | 403 | 2,797 | 370 / 31 KB | 1,196 |
+`dom_parse` is the shard to read first. It reaches **4,472 coverage points and
+28,448 features** — five times any other target here, and roughly nine times
+`dom_mutation` — because it is the only one that sends HTML through html5ever
+and the `TreeSink`, which is the surface a page actually reaches. Nine to
+twenty-seven executions per second, against a 51 MB corpus of large documents.
+The previous campaign covered none of this.
 
-Execution rates in the hundreds rather than the millions the IPC targets reach,
-which is the harnesses working as designed: they assert every structural
-invariant after every operation. The predicted rate was ~350/s at 4 KB; the
-observed 373–1,196 says the estimate was sound and slightly pessimistic.
+The six `dom_mutation` shards agree with each other to within five coverage
+points (865–870) and 48 features. Independent seeds converging on the same
+plateau is the useful reading: the target's reachable state space is being
+saturated rather than sampled, and a seventh shard would be unlikely to say
+anything new.
 
-**`-max_len` was verified applied rather than assumed**, by the check Phase 1
-taught: `lim: 4096` appears in libFuzzer's own final line for all three DOM
-shards, and `-max_len is not provided` appears zero times in 53,856 log lines.
-A flag on a command line proves it was passed; `lim:` proves libFuzzer acted on
-it.
+Execution rates in the hundreds are the harnesses working as designed — they
+assert every structural invariant after every operation. The rate is the price
+of the precision that turned three range defects into two-second reproductions.
 
-### Why this does not close the gate item
+### `-max_len` was verified applied, not assumed
 
-Two reasons, both recorded before the run rather than discovered after.
+The check Phase 1 taught, and this time it needed more than reading the final
+line.
 
-**It does not cover `dom_parse`.** The run was launched at `a599761`, several
-commits before that target existed. Every line above is the arena API; not one
-byte of HTML went through html5ever and the `TreeSink`.
+- The flag appears on all 19 `Running` command lines.
+- `-max_len is not provided` appears **zero** times in 104,368 log lines.
+- libFuzzer's own `lim:` field is present on every progress line and on all 19
+  `DONE` lines.
 
-**`dom_mutation` got eight CPU-hours, not twenty-four.** Two shards at four
-hours. The campaign total is 44 hours and the gate item is "24h mutation fuzz
-clean" — both numbers are true and only one of them is about the item.
-Counting a campaign total against a per-target item is how a gate gets
-satisfied on paper. Phase 3's report has the same shape: "24h fuzz on HTTP
-framing", recorded as a pass on three shards and twelve CPU-hours.
+**The third check needed interpreting rather than pattern-matching.** For
+`dom_parse` the final `lim:` reads 500,000 against a configured 1,200,000, and
+for `broker_sequence` 19,064 against 1,100,000 — which looks exactly like the
+flag being ignored. It is not. libFuzzer's `-len_control` ramps the mutation
+ceiling up from the largest seed rather than starting at `-max_len`:
+`dom_mutation` begins at `lim: 66`, which is its largest seed to the byte, and
+climbs. Those two targets simply never needed the whole ceiling.
 
-Rather than argue which reading is right, the matrix now gives `dom_mutation`
-six shards — 24 CPU-hours of that target — plus three for `dom_parse` and two
-for `dom_stale_handle`. Nineteen shards, 76 CPU-hours, still about four hours
-of wall clock.
+For the target the gate item is about, the ramp completes and the evidence is
+unambiguous. **All six `dom_mutation` shards reach `lim: 4096` — 43 to 70
+minutes in — and hold it to the final line**, 3,352 log lines at the ceiling:
 
-Run [34453317232](https://github.com/TokenGoblin/Pelorus/actions/runs/34453317232)
-is in flight against that matrix. **Its numbers, not the ones above, are what
-close this item.** The table above is worth keeping because it is real
-coverage of the arena targets — it is simply less than the gate asks.
+| shard | fuzzing began | ceiling reached | lines at ceiling | final |
+|---|---|---|---:|---|
+| 1 | 13:42:34 | 14:52:45 | 432 | `lim: 4096` |
+| 2 | 13:40:30 | 14:37:50 | 661 | `lim: 4096` |
+| 3 | 13:49:13 | 14:51:15 | 737 | `lim: 4096` |
+| 4 | 13:41:26 | 14:31:27 | 746 | `lim: 4096` |
+| 5 | 13:42:21 | 14:37:49 | 397 | `lim: 4096` |
+| 6 | 13:42:34 | 14:25:09 | 379 | `lim: 4096` |
+
+A flag on a command line proves it was passed; `lim:` reaching the configured
+value and staying there proves libFuzzer acted on it.
+
+**The 1.1 MB nesting seed survived loading**, which is the thing `dom_parse`'s
+larger ceiling exists to protect. Its startup line reads `seed corpus: files:
+12 min: 33b max: 1100000b` — the 100,000-level seed §4.4 asks for, loaded
+whole. Had `-max_len` been left at the 1,100,000 default the seed would have
+sat exactly at the boundary; at 1,200,000 it does not, and no truncation
+warning appears anywhere in the run.
+
+### What the previous run could not say, and this one can
+
+The run recorded in earlier drafts of this report — 11 shards, 30.7 billion
+executions, clean — was real coverage of the arena targets and is superseded
+rather than contradicted. It failed the gate item on two counts, both known
+before it finished:
+
+- **It predated `dom_parse`.** Launched at `a599761`, before that target
+  existed. Not one byte of HTML reached html5ever. Now three shards do.
+- **`dom_mutation` had eight CPU-hours, not twenty-four.** Two shards at four
+  hours, with the campaign's 44-hour total standing in for a per-target item.
+  Counting a campaign total against a per-target item is how a gate gets
+  satisfied on paper. Now the target itself has its twenty-four.
+
+Three earlier campaigns were cancelled before either of these, each because
+bugs were still being found in the code under test. That is the lesson worth
+carrying to Phase 5: **finish the code, then start the four-hour job.** A
+campaign launched against moving code measures nothing except how recently you
+edited it.
 
 ## Dependencies added
 
@@ -442,11 +500,9 @@ has to change slot layout, `NodeId`, or the packing in order to write
 
 ## Carried out of this phase
 
-**The one gate item not met**
-
-- The mutation campaign. Run 34453317232 is in flight against a matrix that
-  gives `dom_mutation` its 24 CPU-hours and covers `dom_parse`. Until its
-  numbers are here, this phase is not closed.
+**All four gate items pass.** The last one to close was the mutation
+campaign, run 34483936230, whose numbers are above. Nothing in §9 Phase 4 is
+outstanding.
 
 **Deferred by decision, with the reasoning recorded**
 
