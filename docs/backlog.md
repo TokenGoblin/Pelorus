@@ -389,3 +389,27 @@ Format: one entry per defect.
   Phase 3 gate report already states plainly what was and was not covered, and
   changing the fuzzing harness while recording a campaign result would mean the
   recorded numbers came from a configuration that no longer exists.
+
+## px-net is a library, not a process — carried out of Phase 3
+
+- **Found in:** phase 3, `crates/px-net/`
+- **Belongs to:** the phase that settles ADR 009
+- **What:** §9 Phase 3's first words are "`px-net` as its own process". Phase 3
+  merged without it. Everything else the phase names is built and gated;
+  the process boundary is not, and the gate does not check for it — so a green
+  Phase 3 does not mean a complete one, and this entry is the record of that.
+- **Why it stopped:** a broker→px-net fetch request must name a destination and
+  a partition, and `ci/gate-ipc.sh` forbids those field names anywhere under
+  `crates/px-ipc/src/`. That rule is correct for the direction it was written
+  for — a content process must never describe its own authority — and
+  broker→px-net is a different relationship, because the broker *is* the
+  authority. The ways out are a gate amendment scoping the ban by direction, or
+  a design where px-net learns the partition from which channel a request
+  arrived on. Both are protocol-shape decisions, and ADR 009 is marked PROPOSED
+  with an explicit note that it was not taken on the standing authorisation.
+  Renaming the fields to slip past the regex would be gaming a check this
+  project put there deliberately.
+- **What it costs meanwhile:** invariant 1 is not yet violated, because nothing
+  routes a content process's fetch through the broker — `px-content` does not
+  fetch at all. The debt becomes real the moment something does, which is
+  Phase 4 onward. That is the deadline this entry has.
