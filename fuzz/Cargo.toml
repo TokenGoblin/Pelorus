@@ -16,6 +16,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 px-ipc = { path = "../crates/px-ipc" }
 px-broker = { path = "../crates/px-broker" }
+px-net = { path = "../crates/px-net" }
 
 [[bin]]
 name = "frame_request"
@@ -41,6 +42,20 @@ bench = false
 [[bin]]
 name = "broker_sequence"
 path = "fuzz_targets/broker_sequence.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_response"
+path = "fuzz_targets/http_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_chunked"
+path = "fuzz_targets/http_chunked.rs"
 test = false
 doc = false
 bench = false

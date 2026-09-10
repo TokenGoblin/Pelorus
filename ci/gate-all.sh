@@ -28,6 +28,7 @@ structure:ci/gate-structure.sh
 compat-list:ci/gate-compat-list.sh
 ipc:ci/gate-ipc.sh
 sandbox:ci/gate-sandbox.sh
+network:ci/gate-network.sh
 "
 
 failed=""

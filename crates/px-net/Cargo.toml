@@ -6,8 +6,39 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# ADR 016. rustls is named in build-spec §3; the crypto backend is not, and is
+# the decision that ADR records. `ring` rather than the default `aws-lc-rs`:
+# measured at 62 crates against 70, and aws-lc-rs additionally requires cmake
+# and pkg-config at build time, which invariant 7's reproducibility does not
+# need more of.
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
+# The types rustls speaks in — certificates, keys, DNS names — as a separate
+# crate so they can cross an API boundary without dragging rustls with them.
+rustls-pki-types = "1"
+# ADR 012's bundled floor: Mozilla's root store, used only when the platform
+# store cannot be read. Not the source of trust.
+webpki-roots = "1"
+# ADR 008: reading the platform trust store is unsafe FFI on Windows, so it
+# lives in the audited unsafe core and this crate receives DER blobs. px-net
+# stays forbid(unsafe_code) and never names an OS type.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+
+[dev-dependencies]
+# The anchor tests check px-net against px-sandbox directly, to catch a
+# silent fallback that both sides would otherwise agree about.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+webpki-roots = "1"
+
+[features]
+# §14.4: a test-only trust anchor for the local server the Phase 3 gate
+# fetches from. Scanned for in release artifacts — an extra trust anchor in a
+# shipping binary would be a universal man-in-the-middle.
+testing = []
 
 # build-spec §4.3: this crate handles hostile input.
 [lints]

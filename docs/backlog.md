@@ -313,3 +313,79 @@ Format: one entry per defect.
   program is caught; what they cannot check is whether 117 is really `ptrace`
   on this ABI. Recorded so the table is treated as unverified rather than as
   tested-by-association with the x86_64 one.
+
+## The unsafe baseline does not count C or assembly
+
+- **Found in:** phase 3, `ci/unsafe-audit.sh`
+- **Belongs to:** unassigned, but it matters from now on
+- **What:** the audit counts `unsafe` tokens in Rust sources. ADR 016 brought
+  in `ring`, which is 120,164 lines of assembly and 5,413 lines of C. The
+  audit reports it as 230 tokens. That is not a rounding error, it is the
+  metric failing to see the majority of what was accepted — and it will be
+  wrong in the same direction for every future dependency with a native core,
+  which for a browser means the GPU stack, the font shaper and the image
+  decoders.
+- **Why deferred:** the fix is a decision rather than a line of code. Counting
+  C and assembly lines alongside Rust `unsafe` tokens puts two
+  non-comparable numbers in one file, and a combined total would be
+  meaningless. The honest options are a second baseline for native code, or a
+  per-crate note recording what the count omits. Both change the shape of
+  `ci/unsafe-baseline.json` and what the supply-chain gate compares, so it
+  wants doing deliberately rather than in the middle of a phase that needed a
+  TLS stack. Recorded now because the number is already misleading, and the
+  ADR that made it so says as much.
+
+## px-net is a library, not a process, and making it one needs ADR 009 first
+
+- **Found in:** phase 3, `crates/px-net/`
+- **Belongs to:** the phase that settles ADR 009, or Phase 4 — whichever comes
+  first
+- **What:** §9 Phase 3 asks for "`px-net` as its own process". It is a library.
+  Everything else the phase names is built — rustls, HTTP/1.1, partitioned
+  pools, the PSL — but the process boundary is not, and the gate does not
+  check for it, so a passing gate does not mean the phase is complete.
+- **Why deferred, specifically:** the broker→px-net vocabulary has to name a
+  destination and a partition for each fetch, and `ci/gate-ipc.sh` forbids the
+  field names `origin`, `partition`, `partition_key`, `channel` and friends
+  anywhere under `crates/px-ipc/src/`. That rule is right for the
+  content→broker direction it was written for — a content process must never
+  describe its own authority — and the broker→px-net direction is a different
+  relationship, because the broker *is* the authority and px-net is downstream
+  of it.
+
+  Renaming the fields to slip past the regex would be gaming a check this
+  project put there deliberately, so the honest options are: a reasoned
+  amendment to the gate that scopes the ban by direction; or a design where
+  px-net learns the partition from *which channel* the request arrived on,
+  which is invariant 9 in its strongest form but costs a channel per
+  partition.
+
+  Both are protocol-shape decisions, and ADR 009 — the IPC protocol shape — is
+  marked PROPOSED with an explicit note that it was **not** taken on the
+  standing authorisation because it is a design with several defensible shapes
+  and consequences reaching Phase 21. Deciding this would be deciding that,
+  quietly, from underneath.
+
+## The fuzz campaign uses one -max_len for targets with different boundaries — CLOSED
+
+- **Found in:** phase 3, `ci/gate-fuzz-smoke.sh` and the campaign workflow
+- **Closed by:** `ci/gate-fuzz-smoke.sh`'s `max_len_for`, phase 3, in the
+  commit after the one that recorded the campaign.
+- **What it was:** `-max_len` was 1,100,000 for every target. That number was chosen in
+  Phase 1 to straddle `px-ipc`'s `MAX_MESSAGE_BYTES` of 1,048,576, and for the
+  IPC targets it is exactly right. The HTTP targets have different limits —
+  `MAX_BODY_BYTES` at 32 MiB and `MAX_CHUNK_BYTES` at 8 MiB — and the campaign
+  never approached either, so those boundaries are unfuzzed while the gate item
+  reads as passed.
+- **How it closed:** a per-target value. The HTTP targets get 8,500,000,
+  just past `MAX_CHUNK_BYTES`; everything else keeps 1,100,000. Deliberately
+  not 32 MiB, for the reason below.
+- **Why it was deferred one commit:** raising the global `-max_len` to 32 MiB would make every
+  target spend its budget generating enormous inputs instead of exploring
+  structure, which would make the *IPC* coverage worse to improve the HTTP
+  coverage. The fix is a per-target `-max_len`, which means the campaign matrix
+  and the smoke script both learn that targets differ — a small change to two
+  files and a slightly less uniform gate. Recorded rather than done because the
+  Phase 3 gate report already states plainly what was and was not covered, and
+  changing the fuzzing harness while recording a campaign result would mean the
+  recorded numbers came from a configuration that no longer exists.

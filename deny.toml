@@ -1,9 +1,8 @@
 # cargo-deny policy (build-spec §5).
 #
-# UNVALIDATED as of the Phase 0 commit: cargo-deny is not installed on the
-# authoring machine, so this file has never been parsed by the tool it is
-# written for. The first CI run is what validates it. Treat a schema error
-# here as expected work, not as a surprise.
+# Validated: cargo-deny runs locally and in CI, and this file has been parsed
+# and enforced. The Phase 0 note saying otherwise is removed rather than left
+# to read as a live warning.
 
 [advisories]
 version = 2
@@ -30,6 +29,12 @@ allow = [
     "MPL-2.0",
     "Unicode-3.0",
     "Zlib",
+    # ADR 016. webpki-roots ships Mozilla's root store, and a *data* set
+    # carries a data licence rather than a code one. CDLA-Permissive-2.0 is
+    # permissive with no copyleft and no attribution burden on binaries; it is
+    # here for that one crate and its addition is a decision, not a widening
+    # of the code licence policy above.
+    "CDLA-Permissive-2.0",
 ]
 exceptions = []
 # Our own crates carry no `license` field, deliberately: the licence is open
@@ -46,7 +51,20 @@ private = { ignore = true }
 multiple-versions = "deny"
 wildcards = "deny"
 deny = []
-skip = []
+# Each skip is a duplicate somebody decided to accept, with the reason.
+skip = [
+    # ADR 016. Two windows-sys: px-sandbox uses 0.61, and ring reaches 0.52
+    # through getrandom. Not ours to unify — the pin is inside a dependency's
+    # dependency, and forcing it would mean patching or forking ring for a
+    # version bump that buys nothing.
+    #
+    # The cost is real and is the reason this list is not empty by default:
+    # two copies mean two audit surfaces and two crates to patch at a CVE.
+    # 0.52 is 3,411 unsafe tokens against 0.61's 12,530, both of them
+    # generated FFI declarations, and both publishers are the same trusted
+    # one. Revisit when getrandom or ring moves.
+    { name = "windows-sys" },
+]
 
 [sources]
 unknown-registry = "deny"
