@@ -12,7 +12,7 @@
 //! dropping a document is dropping one allocation.
 
 use html5ever::tendril::StrTendril;
-use html5ever::{Attribute, QualName};
+use html5ever::{Attribute, QualName, local_name, ns};
 
 use crate::handle::NodeId;
 
@@ -48,9 +48,18 @@ pub enum NodeData {
         /// HTML spec: they are parsed but are not children of the template
         /// element itself.
         template_contents: Option<NodeId>,
-        /// Set for a `<script>` the parser has already run, and for an
-        /// `<input>`/`<option>` whose state the parser has fixed.
-        mathml_annotation_xml_integration_point: bool,
+        /// The HTML spec's "already started" flag on a `<script>`.
+        ///
+        /// Stored rather than computed because it is genuinely state: it
+        /// records something that happened to this element, and nothing about
+        /// the element's name or attributes can reconstruct it.
+        ///
+        /// Note what is *not* stored beside it. Whether an element is a MathML
+        /// annotation-xml integration point looks like a flag and is not — it
+        /// is a function of the element's name and its `encoding` attribute,
+        /// so keeping a copy would mean keeping it correct across every
+        /// attribute mutation. See `Node::is_mathml_annotation_xml_integration_point`.
+        script_already_started: bool,
     },
     /// `<?target data?>`.
     ProcessingInstruction {
@@ -138,6 +147,55 @@ impl Node {
             NodeData::Text { contents } => Some(contents),
             _ => None,
         }
+    }
+
+    /// Whether this is a MathML `annotation-xml` element acting as an HTML
+    /// integration point.
+    ///
+    /// Computed, not stored. The HTML spec defines it as a question about the
+    /// element's name and its `encoding` attribute, and the attribute can
+    /// change after the element is created — a cached copy would be a second
+    /// source of truth that has to be invalidated on every attribute write,
+    /// which is the kind of bookkeeping that is right for months and then
+    /// silently wrong.
+    ///
+    /// The comparison is ASCII-case-insensitive because the spec says so:
+    /// <https://html.spec.whatwg.org/#html-integration-point>
+    pub fn is_mathml_annotation_xml_integration_point(&self) -> bool {
+        let NodeData::Element { name, attrs, .. } = &self.data else {
+            return false;
+        };
+        if name.ns != ns!(mathml) || name.local != local_name!("annotation-xml") {
+            return false;
+        }
+        attrs.iter().any(|attr| {
+            attr.name.local == local_name!("encoding")
+                && (attr.value.eq_ignore_ascii_case("text/html")
+                    || attr.value.eq_ignore_ascii_case("application/xhtml+xml"))
+        })
+    }
+
+    /// The HTML spec's "already started" flag, for a `<script>`.
+    pub fn script_already_started(&self) -> bool {
+        match &self.data {
+            NodeData::Element {
+                script_already_started,
+                ..
+            } => *script_already_started,
+            _ => false,
+        }
+    }
+
+    /// This node's payload, for mutation.
+    ///
+    /// `pub(crate)` rather than `pub`: the sink needs it to append to a text
+    /// run and to set a script's "already started" flag, and both of those are
+    /// tree-construction concerns. Handing it to the wider engine would make
+    /// it possible to change a node's *kind* out from under whatever holds a
+    /// handle to it, which the generation check does not and cannot catch --
+    /// the handle stays valid, the node just stops being what it was.
+    pub(crate) fn data_mut(&mut self) -> &mut NodeData {
+        &mut self.data
     }
 
     pub(crate) fn detach_links(&mut self) {

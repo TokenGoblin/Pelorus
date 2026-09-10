@@ -470,3 +470,28 @@ Format: one entry per defect.
 - **What it costs meanwhile:** the dependency unsafe that html5ever brought in
   is accounted for and unexercised. That is the gap ADR 017 accepted and this
   is where it gets closed.
+
+## html5ever's tree builder is quadratic in nesting depth
+
+- **Found in:** phase 4, measured in `crates/px-dom/src/sink.rs`
+- **Belongs to:** nobody yet; mitigated, not fixed
+- **What:** html5ever's stack of open elements grows with the input's nesting
+  however shallow the tree we actually build, and the spec's "has an element in
+  scope" tests scan it on every start tag. §4.4's depth limit bounds *our* tree
+  and does nothing about that stack. Release measurements on nested `<div>`s:
+  2,000 → 11 ms, 4,000 → 44 ms, 8,000 → 192 ms, 16,000 → 686 ms, against an
+  arena cost that doubled rather than quadrupled. A five-megabyte file of
+  nothing but `<div>` extrapolates to roughly three quarters of an hour.
+- **Mitigated by:** `px_dom::parse` feeding the parser in 8 KB chunks and
+  stopping once the tree has refused eight pieces of content, reported as
+  `Dom::abandoned`. A million-deep document now costs about 65 ms. Tests cover
+  both directions: the bomb is bounded, and neither a large shallow document
+  nor legal 400-deep nesting is abandoned.
+- **Why it is still here:** the mitigation bounds the damage, it does not make
+  the tree builder linear. Anything that drives html5ever *without* going
+  through `px_dom::parse` — a future incremental or streaming parse path, or
+  anything that calls `.one()` — gets the quadratic behaviour back with no
+  warning. The durable fix is upstream, or a bound inside the tree builder,
+  neither of which is Phase 4 work.
+- **Deadline:** revisit when Phase 13 adds streaming navigation, which is the
+  first thing likely to want its own feed loop.

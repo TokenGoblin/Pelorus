@@ -33,11 +33,13 @@ mod handle;
 pub mod harness;
 mod iter;
 mod node;
+mod sink;
 
 pub use arena::{Arena, MAX_DEPTH, TreeError};
 pub use handle::NodeId;
 pub use iter::{Ancestors, Children, Descendants};
 pub use node::{Node, NodeData};
+pub use sink::{Dom, Sink, parse};
 
 impl Arena {
     /// This node's children, in order.
