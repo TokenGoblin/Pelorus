@@ -236,7 +236,9 @@ impl Arena {
                     .first_child = Some(child);
             }
         }
-        self.get_mut(parent).ok_or(TreeError::NoSuchNode)?.last_child = Some(child);
+        self.get_mut(parent)
+            .ok_or(TreeError::NoSuchNode)?
+            .last_child = Some(child);
         Ok(())
     }
 
@@ -250,7 +252,10 @@ impl Arena {
         self.check_insertable(parent, new_node)?;
         self.detach(new_node)?;
 
-        let previous = self.get(sibling).ok_or(TreeError::NoSuchNode)?.prev_sibling();
+        let previous = self
+            .get(sibling)
+            .ok_or(TreeError::NoSuchNode)?
+            .prev_sibling();
 
         {
             let node = self.get_mut(new_node).ok_or(TreeError::NoSuchNode)?;
@@ -315,7 +320,9 @@ impl Arena {
             }
         }
 
-        self.get_mut(id).ok_or(TreeError::NoSuchNode)?.detach_links();
+        self.get_mut(id)
+            .ok_or(TreeError::NoSuchNode)?
+            .detach_links();
         Ok(())
     }
 
@@ -444,19 +451,79 @@ impl Arena {
             return Err(TreeError::WouldCycle);
         }
 
-        let mut depth = 1usize; // the child would sit one below the parent
+        // The loop visits `parent` and then each of its ancestors, so the
+        // iteration count is `depth(parent) + 1` — which is exactly the depth
+        // `child` would end up at. Counting from zero rather than one is the
+        // difference between a limit of 512 and a limit of 511, and the only
+        // way to be sure which is to say what is being counted.
+        let mut resulting_depth = 0usize;
         let mut cursor = Some(parent);
         while let Some(current) = cursor {
             if current == child {
                 return Err(TreeError::WouldCycle);
             }
-            depth += 1;
-            if depth > MAX_DEPTH {
+            resulting_depth += 1;
+            if resulting_depth > MAX_DEPTH {
                 return Err(TreeError::TooDeep);
             }
             cursor = self.get(current).ok_or(TreeError::NoSuchNode)?.parent();
         }
+
+        // `child` may be carrying a subtree, and it is the *deepest node in
+        // it* that has to fit under the limit.
+        //
+        // Checking only the child's own new depth is the easy mistake here,
+        // and it leaves the limit trivially bypassable: build a 512-deep tree
+        // detached, where every insertion was shallow and legal, then attach
+        // its root somewhere deep in one legal-looking move. A depth limit
+        // with that hole in it is decoration.
+        //
+        // The cost is paid only by moves that carry children. The parser's
+        // appends are leaves, where `subtree_height` returns 0 after looking
+        // at one node.
+        let height = self.subtree_height(child)?;
+        if resulting_depth.saturating_add(height) > MAX_DEPTH {
+            return Err(TreeError::TooDeep);
+        }
         Ok(())
+    }
+
+    /// How far the deepest descendant of `id` sits below it. A leaf is 0.
+    ///
+    /// Iterative, with the node's own relative depth carried on the work
+    /// stack, and bounded by the number of slots so a corrupted tree ends the
+    /// walk rather than the process.
+    fn subtree_height(&self, id: NodeId) -> Result<usize, TreeError> {
+        let mut height = 0usize;
+        let mut stack = vec![(id, 0usize)];
+        let mut budget = self.slots.len().saturating_add(1);
+
+        while let Some((current, relative)) = stack.pop() {
+            if budget == 0 {
+                return Err(TreeError::TooDeep);
+            }
+            budget -= 1;
+            height = height.max(relative);
+            // Nothing legal can be deeper than the limit, so a walk that gets
+            // there has found either a cycle or a tree that should never have
+            // been built. Either way the answer is no.
+            if relative > MAX_DEPTH {
+                return Err(TreeError::TooDeep);
+            }
+            let node = self.get(current).ok_or(TreeError::NoSuchNode)?;
+            let mut child = node.first_child();
+            while let Some(current_child) = child {
+                stack.push((current_child, relative.saturating_add(1)));
+                child = self
+                    .get(current_child)
+                    .ok_or(TreeError::NoSuchNode)?
+                    .next_sibling();
+                if stack.len() > self.slots.len().saturating_add(1) {
+                    return Err(TreeError::TooDeep);
+                }
+            }
+        }
+        Ok(height)
     }
 }
 

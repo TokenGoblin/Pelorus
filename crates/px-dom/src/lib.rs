@@ -52,4 +52,37 @@ impl Arena {
     pub fn ancestors(&self, id: NodeId) -> Ancestors<'_> {
         Ancestors::new(self, id)
     }
+
+    /// Whether `a` comes strictly before `b` in document order.
+    ///
+    /// `None` if either handle is stale, or if they are not in the same tree —
+    /// a question with no answer, rather than a `false` that would quietly
+    /// claim `b` comes first.
+    ///
+    /// Document order is what ranges, selection and `compareDocumentPosition`
+    /// are defined against, so this is the primitive the rest of the engine
+    /// keeps needing.
+    ///
+    /// # Cost
+    ///
+    /// A walk from the root: O(nodes), not the O(depth) that comparing
+    /// ancestor chains would give. Deliberate for now — the O(depth) version
+    /// needs each node's index among its siblings, which is either another
+    /// walk or a field kept correct across every mutation, and paying that
+    /// before anything has measured this as hot would be guessing. Recorded
+    /// here so the guess is visible when something does measure it.
+    pub fn precedes(&self, a: NodeId, b: NodeId) -> Option<bool> {
+        if !self.contains(a) || !self.contains(b) || a == b {
+            return None;
+        }
+        for id in self.descendants(self.document()) {
+            if id == a {
+                return Some(true);
+            }
+            if id == b {
+                return Some(false);
+            }
+        }
+        None
+    }
 }

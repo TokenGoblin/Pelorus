@@ -45,11 +45,19 @@ impl NodeId {
         Self { index, generation }
     }
 
-    pub(crate) fn index(self) -> u32 {
+    /// The slot this handle names.
+    ///
+    /// Readable, and deliberately not constructible: there is no public way to
+    /// build a `NodeId` from parts, so exposing the parts forges nothing. What
+    /// it buys is tests that can assert a slot was *actually reused* — without
+    /// which "the stale handle did not resolve" is a claim that passes just as
+    /// well when the allocator quietly stopped reusing slots at all.
+    pub fn index(self) -> u32 {
         self.index
     }
 
-    pub(crate) fn generation(self) -> NonZeroU32 {
+    /// Which occupant of the slot this handle means.
+    pub fn generation(self) -> NonZeroU32 {
         self.generation
     }
 }

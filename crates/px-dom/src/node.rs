@@ -11,8 +11,8 @@
 //! theirs, and the compiler wrote all of it. With the tree flat in a `Vec`,
 //! dropping a document is dropping one allocation.
 
-use html5ever::{Attribute, QualName};
 use html5ever::tendril::StrTendril;
+use html5ever::{Attribute, QualName};
 
 use crate::handle::NodeId;
 

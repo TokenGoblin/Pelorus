@@ -147,9 +147,9 @@ fn links_cost_forty_bytes_against_twenty() {
 fn the_saving_at_document_scale() {
     // Node counts spanning a small page to a heavy application.
     for (nodes, expected_saving) in [
-        (1_500u64, 30_000u64),      // a typical article
-        (25_000, 500_000),          // a heavy application view
-        (250_000, 5_000_000),       // an extreme but reachable document
+        (1_500u64, 30_000u64), // a typical article
+        (25_000, 500_000),     // a heavy application view
+        (250_000, 5_000_000),  // an extreme but reachable document
     ] {
         let wide = nodes * size_of::<WideNode>() as u64;
         let packed = nodes * size_of::<PackedNode>() as u64;
@@ -278,7 +278,11 @@ fn exhaustion_time_under_sustained_churn() {
     // trying, and what it reaches is a tab that dies for no visible reason.
     let ordinary = seconds_to_exhaust(PackedId::MAX_SLOTS, PackedId::MAX_GENERATION, 1_000);
     assert_eq!(ordinary, 5_592_405);
-    assert_eq!(ordinary / (60 * 60 * 24), 64, "64 days, and ADR 018 says so");
+    assert_eq!(
+        ordinary / (60 * 60 * 24),
+        64,
+        "64 days, and ADR 018 says so"
+    );
 
     // A page *trying* to exhaust it. A million node create/destroy cycles a
     // second is achievable from script on current hardware.
