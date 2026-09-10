@@ -19,10 +19,10 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 
 ## Status
 
-**Phase 4 — DOM, complete.** Phases 0 through 3 are merged. All four of Phase
-4's gate items pass on Windows and Linux, including the mutation fuzz campaign:
-19 shards, 28.2 billion executions, clean, with 24 CPU-hours on `dom_mutation`
-itself rather than on the campaign total.
+**Phases 0 through 4 are merged. Phase 5 — style resolution — is next.** All
+four of Phase 4's gate items pass in CI on Windows and Linux, including the
+mutation fuzz campaign: 19 shards, 28.2 billion executions, clean, with 24
+CPU-hours on `dom_mutation` itself rather than on the campaign total.
 
 What works: a sandboxed process launcher on both platforms, typed IPC with a
 capability broker, an HTTP/1.1 and TLS stack with partitioned pools, and a

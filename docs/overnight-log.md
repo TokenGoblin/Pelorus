@@ -436,3 +436,11 @@ covering all five harness branches.
 Phase 4 merges when this is green in CI on both platforms, and not on the
 strength of a local run — which is the same sentence the entry above should
 have been held to.
+
+### Merged
+
+`73b2b17`, after the gate ran green on the merge commit itself: 21 of 22 jobs,
+with `compat-list` red as it has been since Phase 0. Phase 5 is next, and §9
+calls it the highest-risk phase in the project. Two things were banked for it
+ahead of time and both are worth re-reading before any code is written —
+`docs/research/stylo-requirements.md`, and ADR 021's tripwire.
