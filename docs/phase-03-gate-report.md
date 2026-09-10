@@ -113,11 +113,27 @@ bug.
 
 ## What is weaker than it sounds
 
-**TLS is configured but not exercised end to end.** ALPN offers `http/1.1`
-only, there is no way to disable verification, and the trust anchors come from
-the platform store — but the gate's 200 URLs go over plaintext loopback, so no
-handshake happens in any test. That needs a test CA, and until it exists the
-TLS path is reviewed code rather than tested code.
+**TLS is now exercised end to end — this one is closed.** The gate's 200 URLs
+still go over plaintext loopback, but `crates/px-net/tests/tls.rs` runs a real
+handshake against a local rustls server with a committed test CA. Four tests,
+and the two that matter are the refusals: an untrusted chain and a name
+mismatch must both fail, and fail *by default* rather than by a flag. A TLS
+client that cannot be shown rejecting a bad certificate has not been shown to
+verify anything.
+
+The certificates live in `tests/net/tls/`, the private key committed beside
+them deliberately so nobody treats it as a secret, and
+`client_config_trusting` is behind `#[cfg(feature = "testing")]`.
+
+A release-artifact scan for that symbol was written, in the shape §14.4 asks
+for and `gate-sandbox.sh` uses — and then **measured and found vacuous**. It
+cannot fail: `px-browser` and `px-content` do not link `px-net` at all yet, and
+a `pub fn` nothing calls is eliminated in release even with the feature on.
+Building with `--features testing` and grepping finds nothing either way. So
+the scan was removed rather than shipped, and `ci/gate-network.sh` carries the
+reasoning where the check would have been. A check that cannot fail reads as
+assurance and provides none; the guarantee here is the `cfg`, which the
+compiler actually enforces.
 
 **The unsafe baseline no longer measures what it claims.** ADR 016 brought in
 `ring`: 120,164 lines of assembly and 5,413 of C that `ci/unsafe-audit.sh`

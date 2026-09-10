@@ -107,7 +107,21 @@ pub fn connect<S: Read + Write>(
     host: &str,
     stream: S,
 ) -> Result<StreamOwned<ClientConnection, S>, FetchError> {
-    let config = client_config()?;
+    connect_with(host, stream, client_config()?)
+}
+
+/// Open a TLS session with a caller-supplied configuration.
+///
+/// Split out so a caller can build the configuration once rather than parsing
+/// the root store per request, and so the tests can supply one trusting the
+/// local test CA without this module gaining a way to weaken verification.
+/// Note what it still cannot do: there is no argument here that disables
+/// checking, because there is no such setting anywhere in this crate.
+pub fn connect_with<S: Read + Write>(
+    host: &str,
+    stream: S,
+    config: Arc<ClientConfig>,
+) -> Result<StreamOwned<ClientConnection, S>, FetchError> {
     let server_name = ServerName::try_from(host.to_owned())
         .map_err(|_| FetchError::Tls(format!("{host} is not a valid server name")))?;
     let connection = ClientConnection::new(config, server_name)

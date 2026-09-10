@@ -161,4 +161,26 @@ for target in http_response http_chunked; do
     fi
 done
 
+# ---------------------------------------------------------------------------
+# §14.4 and the test-only trust anchor: why there is NO scan here.
+#
+# ci/gate-sandbox.sh scans release binaries for PX_TEST_FORCE_SANDBOX_UNAVAILABLE
+# and that scan is meaningful, because the override is a string literal that
+# lands in the binary when it is compiled in. The obvious equivalent here would
+# be to grep for `client_config_trusting`.
+#
+# It was written, and then measured, and it cannot fail. Two independent
+# reasons: px-browser and px-content do not link px-net at all yet, and a `pub
+# fn` nothing calls is eliminated in a release build even when its feature is
+# on. Building with --features testing and grepping finds nothing either way.
+#
+# A check that cannot fail is worse than no check: it reads as assurance and
+# provides none. So the guarantee here is the one the compiler actually gives —
+# `client_config_trusting` is `#[cfg(feature = "testing")]` and does not exist
+# in a build without the feature — and this comment is the record that the
+# scan was considered, tested, and found vacuous.
+#
+# Add the scan when px-net is linked into a shipping binary, which is when it
+# would start being able to fail. Until then it would be theatre.
+
 verdict "network"
