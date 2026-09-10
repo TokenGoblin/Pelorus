@@ -35,6 +35,7 @@ mod iter;
 mod node;
 mod range;
 mod sink;
+mod snapshot;
 
 pub use arena::{Arena, MAX_DEPTH, TreeError};
 pub use handle::NodeId;
@@ -42,6 +43,7 @@ pub use iter::{Ancestors, Children, Descendants};
 pub use node::{Node, NodeData};
 pub use range::{BoundaryPoint, Position, Range, RangeId};
 pub use sink::{Dom, ParseOptions, Sink, parse, parse_fragment, parse_with};
+pub use snapshot::ElementSnapshot;
 
 impl Arena {
     /// This node's children, in order.

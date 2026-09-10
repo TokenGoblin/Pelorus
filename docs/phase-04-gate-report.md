@@ -225,6 +225,48 @@ point, and the notification was never needed. Back to 3 seconds, with a
 wall-clock ceiling on that test so the next one fails rather than merely
 crawls.
 
+## Stylo's snapshots, built now because Phase 5 cannot afford to
+
+`docs/research/stylo-requirements.md` item 6, written during Phase 1: stylo's
+invalidation needs prior-state records captured *at mutation time*, and it is a
+mutation-path feature — every attribute setter has to record one. The note ends
+*"Retrofitting it in Phase 5 means touching every mutation site twice. Add it
+to the Phase 4 scope and gate."*
+
+It was not in the gate, and it was not built. `px-dom` has three attribute
+mutation sites today; it will have dozens once there is a scripting surface.
+
+Built in this crate's own types, not stylo's: stylo is a Phase 5 dependency
+needing an ADR, and a Phase 4 crate depending on the thing Phase 5 exists to
+*try* is backwards — §9 calls Phase 5 the phase most likely to force a `px-dom`
+redesign.
+
+The rule that makes a snapshot useful is that it holds the element as of the
+**last restyle**, not the last mutation: the first write since a flush
+captures, every write after only updates the change flags. Getting it backwards
+records a change from the second-most-recent value to the most recent — a
+change that never happened — and it is invisible, because the flags are right
+and the values are plausible.
+
+### A test that could not see what it claimed
+
+The guard here is a **source check**, not a test, and the reason is worth
+keeping. A sink that reaches into `NodeData::Element { attrs }` and pushes
+directly builds exactly the right tree and passes the entire conformance
+corpus. It is wrong only in that nothing recorded what the attribute used to
+be — which nothing observes until Phase 5 turns recording on, months later,
+with no way to connect symptom to cause.
+
+The first attempt at testing it failed instructively: the test called the arena
+method directly, so rewriting the sink to bypass the arena entirely left it
+green. That test has been renamed to say what it actually covers, and
+`ci/gate-dom.sh` now checks the source.
+
+Twelve tests besides. One of them exists because `snapshot()` returns the first
+match, so a bug that pushes a fresh record per write is invisible through that
+accessor — the first entry still holds the oldest values and still looks right.
+It shows up only in the count.
+
 ## Dependencies added
 
 ADR 017. `html5ever` 0.39: **+21 crates, +967 unsafe tokens**.

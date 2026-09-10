@@ -7,12 +7,16 @@
 
 use core::num::NonZeroU32;
 
+use html5ever::tendril::StrTendril;
+use html5ever::{Attribute, QualName};
+
 use crate::handle::NodeId;
 use crate::node::{Node, NodeData};
 use crate::range::{
     BoundaryPoint, Position, Range, RangeId, compare_boundary_points, index_of,
     is_inclusive_ancestor, node_length,
 };
+use crate::snapshot::ElementSnapshot;
 
 /// The maximum depth of the tree, per build-spec §4.4 ("start at 512").
 ///
@@ -78,6 +82,21 @@ pub struct Arena {
     /// bug as a stale `NodeId` resolving to somebody else's node.
     ranges: Vec<RangeSlot>,
     free_ranges: Vec<u32>,
+    /// Prior-state records for elements mutated since the last flush.
+    ///
+    /// A `Vec` of pairs rather than a map: the population is "elements touched
+    /// since the last restyle", which is small and is walked in full by the
+    /// consumer. A hash map would cost more to maintain than the linear scan
+    /// it saves, and stylo takes the whole set at once anyway.
+    snapshots: Vec<(NodeId, ElementSnapshot)>,
+    /// Whether to record at all. Off until something has computed style.
+    ///
+    /// During the initial parse every element is new, so there is no prior
+    /// state to describe and a snapshot of "it did not exist" invalidates
+    /// nothing. Recording through a parse would be pure cost -- one clone of
+    /// the attribute list per element -- which is why this is opt-in rather
+    /// than always-on.
+    recording_snapshots: bool,
 }
 
 struct RangeSlot {
@@ -99,6 +118,8 @@ impl Arena {
             document: NodeId::new(0, NonZeroU32::MIN),
             ranges: Vec::new(),
             free_ranges: Vec::new(),
+            snapshots: Vec::new(),
+            recording_snapshots: false,
         };
         if let Ok(id) = arena.create(NodeData::Document) {
             arena.document = id;
@@ -736,6 +757,154 @@ impl Arena {
                 range.end = BoundaryPoint::new(parent, range.end.offset() - 1);
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Attributes, and the snapshots that record what they were
+    // -----------------------------------------------------------------------
+
+    /// Start recording prior-state snapshots on attribute mutation.
+    ///
+    /// Phase 5 turns this on after the first restyle. It is off during parsing
+    /// because there is no prior state to describe: every element is new, and
+    /// a snapshot saying "it did not exist" invalidates nothing while costing
+    /// a clone of the attribute list per element.
+    pub fn record_snapshots(&mut self, on: bool) {
+        self.recording_snapshots = on;
+    }
+
+    pub fn is_recording_snapshots(&self) -> bool {
+        self.recording_snapshots
+    }
+
+    /// The snapshot for an element, if it has been mutated since the last
+    /// flush.
+    pub fn snapshot(&self, id: NodeId) -> Option<&ElementSnapshot> {
+        self.snapshots
+            .iter()
+            .find(|(node, _)| *node == id)
+            .map(|(_, snapshot)| snapshot)
+    }
+
+    /// Stylo's `has_snapshot` bit, without the bit.
+    ///
+    /// Derived from the table rather than stored on the node. Two sources of
+    /// truth for "does this element have a snapshot" is one more than the
+    /// question can support, and the bit exists in Servo because its snapshots
+    /// live in a separate map that the element cannot reach.
+    pub fn has_snapshot(&self, id: NodeId) -> bool {
+        self.snapshot(id).is_some()
+    }
+
+    /// How many elements have been mutated since the last flush.
+    pub fn snapshot_count(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    /// Take every snapshot, clearing the table.
+    ///
+    /// This is the flush: after it, the next mutation of an element captures
+    /// fresh prior state. Stylo calls the equivalent at the start of a restyle
+    /// and the `handled_snapshot` bit is what stops it processing one twice --
+    /// taking them by value makes that structural rather than a bit somebody
+    /// has to remember to set.
+    pub fn take_snapshots(&mut self) -> Vec<(NodeId, ElementSnapshot)> {
+        core::mem::take(&mut self.snapshots)
+    }
+
+    /// Set an attribute, replacing any existing value for that name.
+    pub fn set_attribute(
+        &mut self,
+        id: NodeId,
+        name: QualName,
+        value: StrTendril,
+    ) -> Result<(), TreeError> {
+        self.snapshot_attribute_change(id, &name)?;
+        let node = self.get_mut(id).ok_or(TreeError::NoSuchNode)?;
+        let NodeData::Element { attrs, .. } = node.data_mut() else {
+            return Err(TreeError::NoSuchNode);
+        };
+        match attrs.iter_mut().find(|attr| attr.name == name) {
+            Some(existing) => existing.value = value,
+            None => attrs.push(Attribute { name, value }),
+        }
+        Ok(())
+    }
+
+    /// Remove an attribute. Returns whether it was there.
+    pub fn remove_attribute(&mut self, id: NodeId, name: &QualName) -> Result<bool, TreeError> {
+        self.snapshot_attribute_change(id, name)?;
+        let node = self.get_mut(id).ok_or(TreeError::NoSuchNode)?;
+        let NodeData::Element { attrs, .. } = node.data_mut() else {
+            return Err(TreeError::NoSuchNode);
+        };
+        let before = attrs.len();
+        attrs.retain(|attr| attr.name != *name);
+        Ok(attrs.len() != before)
+    }
+
+    /// Add attributes that are not already present.
+    ///
+    /// The tree builder's operation, and it is a mutation site like any other:
+    /// it goes through the snapshot path rather than reaching into the node,
+    /// which is the whole point of doing this in Phase 4.
+    pub fn add_attributes_if_missing(
+        &mut self,
+        id: NodeId,
+        incoming: Vec<Attribute>,
+    ) -> Result<(), TreeError> {
+        let present: Vec<QualName> = self
+            .get(id)
+            .and_then(Node::attrs)
+            .map(|attrs| attrs.iter().map(|attr| attr.name.clone()).collect())
+            .unwrap_or_default();
+
+        for attr in incoming {
+            if present.contains(&attr.name) {
+                continue;
+            }
+            self.set_attribute(id, attr.name, attr.value)?;
+        }
+        Ok(())
+    }
+
+    /// Capture prior state before an attribute write, and note what changed.
+    ///
+    /// **The capture happens once per flush, the flag update happens every
+    /// time.** A snapshot describes the element as of the last restyle, so a
+    /// second write must not overwrite what the first recorded -- otherwise it
+    /// describes a change from the second-most-recent value to the most recent,
+    /// which is a change that never happened. The flags still accumulate,
+    /// because every write since the flush is part of what invalidation has to
+    /// account for.
+    fn snapshot_attribute_change(&mut self, id: NodeId, name: &QualName) -> Result<(), TreeError> {
+        if !self.recording_snapshots {
+            return Ok(());
+        }
+        // Look for an existing record first, and only read the element's
+        // attributes when there is none. That is not only to keep the borrow
+        // checker happy: capturing is the expensive half -- it clones the
+        // attribute list -- and it must happen at most once per flush anyway.
+        // Every write after the first is a flag update and nothing more.
+        match self.snapshots.iter().position(|(node, _)| *node == id) {
+            Some(index) => {
+                if let Some((_, snapshot)) = self.snapshots.get_mut(index) {
+                    snapshot.note_change(name);
+                }
+            }
+            None => {
+                let Some(attrs) = self.get(id).and_then(Node::attrs) else {
+                    // Not an element, or a stale handle. The caller is about
+                    // to fail for the same reason; nothing to record either
+                    // way.
+                    return Ok(());
+                };
+                let mut snapshot = ElementSnapshot::capture(attrs);
+                snapshot.note_change(name);
+                self.snapshots.push((id, snapshot));
+            }
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

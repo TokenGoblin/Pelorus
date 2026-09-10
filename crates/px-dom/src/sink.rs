@@ -401,21 +401,27 @@ impl TreeSink for Sink {
         }
     }
 
+    /// Through `Arena::add_attributes_if_missing`, not by reaching into the
+    /// node.
+    ///
+    /// This is a mutation site, and every mutation site has to go through the
+    /// arena so that stylo's prior-state snapshots are recorded. Writing
+    /// straight into `attrs` here would work, would be shorter, and would
+    /// silently produce a DOM whose style invalidation is wrong the moment
+    /// Phase 5 turns recording on — which is exactly the retrofit
+    /// `docs/research/stylo-requirements.md` says to avoid by doing this in
+    /// Phase 4.
+    ///
+    /// `ci/gate-dom.sh` checks the source for the shortcut, because this is a
+    /// rule that erodes quietly: the direct version is correct in every
+    /// observable way today.
     fn add_attrs_if_missing(&self, target: &NodeId, attrs: Vec<Attribute>) {
-        let mut arena = self.arena.borrow_mut();
-        let Some(node) = arena.get_mut(*target) else {
-            return;
-        };
-        let NodeData::Element {
-            attrs: existing, ..
-        } = node.data_mut()
-        else {
-            return;
-        };
-        for attr in attrs {
-            if !existing.iter().any(|held| held.name == attr.name) {
-                existing.push(attr);
-            }
+        if let Err(error) = self
+            .arena
+            .borrow_mut()
+            .add_attributes_if_missing(*target, attrs)
+        {
+            self.note_refusal(error);
         }
     }
 

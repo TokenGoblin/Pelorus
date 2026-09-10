@@ -177,7 +177,7 @@ Format: one entry per defect.
   invariant 7 is load-bearing enough that it should not be amended by whoever
   happens to hit this first.
 
-## Phase 4's gate omits the mutation-side snapshot path stylo needs
+## Phase 4's gate omits the mutation-side snapshot path stylo needs — CLOSED
 
 - **Found in:** phase 1, `docs/research/stylo-requirements.md`
 - **Belongs to:** phase 4
@@ -187,6 +187,23 @@ Format: one entry per defect.
   it means touching every attribute setter twice.
 - **Why deferred:** phase 4 owns it; recorded now so the gate can be written
   with it rather than amended after.
+- **Closed in phase 4.** `crates/px-dom/src/snapshot.rs` and the attribute
+  mutators on `Arena`. Modelled in this crate's types rather than importing
+  stylo, which is a Phase 5 dependency and would need an ADR — and a Phase 4
+  crate depending on the thing Phase 5 exists to try is backwards. `ElementState`
+  is absent for the same reason: it is stylo's, and there is no state to record
+  until something computes style.
+- **What is gated, and how:** twelve tests, plus a source check in
+  `ci/gate-dom.sh`. The source check is the load-bearing one. A sink that
+  reaches into `NodeData::Element { attrs }` and pushes directly builds exactly
+  the right tree and passes the whole conformance corpus; it is wrong only in
+  that nothing recorded what the attribute used to be. A first attempt to test
+  that failed instructively — the test called the arena method directly, so
+  rewriting the sink to bypass the arena left it green.
+- **Still owed by Phase 5:** the `has_snapshot` / `handled_snapshot` bits are
+  derived from the table rather than stored on the node, and `ElementState`
+  has no representation yet. Both are Phase 5's to reconcile with stylo's
+  actual `ElementSnapshot` trait.
 
 ## Style fixtures must run with debug assertions on
 

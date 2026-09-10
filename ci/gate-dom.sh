@@ -200,6 +200,39 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Attribute writes go through the arena, so stylo's snapshots get recorded.
+#
+# docs/research/stylo-requirements.md item 6: stylo's invalidation needs
+# prior-state records captured at mutation time, and it is a mutation-path
+# feature -- every attribute setter has to record one. The note says to add it
+# in Phase 4 because "retrofitting it in Phase 5 means touching every mutation
+# site twice."
+#
+# This is checked in the source rather than by a test, because a test cannot
+# see it. A sink that reaches into `NodeData::Element { attrs }` and pushes
+# directly produces exactly the right tree, passes the whole conformance
+# corpus, and is wrong only in that nothing recorded what the attribute used to
+# be -- which nothing observes until Phase 5 turns recording on, months later,
+# with no way to connect the symptom to the cause.
+#
+# A first attempt at testing it did not work, and the way it failed is the
+# argument for this check: the test called the arena method directly, so the
+# sink could be rewritten to bypass the arena entirely and the test still
+# passed.
+info "attribute writes go through the arena"
+ATTR_SHORTCUT='NodeData::Element[[:space:]]*\{[^}]*attrs'
+if [ -z "$(scan_code 'fn add_attributes_if_missing')" ]; then
+    fail "px-dom has no Arena::add_attributes_if_missing; this check cannot"
+    fail "  pass by finding nothing"
+elif [ -n "$(grep -rnE -e "$ATTR_SHORTCUT" crates/px-dom/src/sink.rs 2>/dev/null               | grep -vE ':[0-9]+:[[:space:]]*//')" ]; then
+    fail "px-dom's sink destructures an element's attrs directly; attribute"
+    fail "  writes must go through Arena so snapshots are recorded"
+    grep -rnE -e "$ATTR_SHORTCUT" crates/px-dom/src/sink.rs | head -3 | sed 's/^/       /' >&2
+else
+    ok "the sink writes attributes through the arena"
+fi
+
+# ---------------------------------------------------------------------------
 # html5lib-tests: the conformance corpus §9 sets at 99%.
 #
 # Vendored rather than fetched, for the reason ci/gate-network.sh gives about
