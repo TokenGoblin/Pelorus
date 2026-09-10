@@ -130,6 +130,49 @@ fn dom_parse_harness_holds_over_many_sequences() {
     }
 }
 
+/// Every committed corpus seed for a px-dom target replays clean.
+///
+/// ADR 006: *"Every crash the campaign finds gets its input committed to the
+/// corpus, which is what makes 60 seconds meaningful rather than
+/// decorative."* Committing them is half of that. Running them on every push
+/// is the other half, and it was missing for `dom_mutation` — whose six seeds
+/// are the campaign crashes from the range-constructor defect, the one the
+/// harness's own 600 pseudorandom sequences never reached.
+///
+/// So these regressions now fail in seconds rather than in a four-hour
+/// campaign, which is the difference between a corpus and a museum.
+#[test]
+fn every_committed_corpus_seed_replays_clean() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus");
+
+    let mut total = 0usize;
+    for (target, run) in [
+        ("dom_mutation", px_dom::harness::mutations as fn(&[u8])),
+        (
+            "dom_stale_handle",
+            px_dom::harness::stale_handles as fn(&[u8]),
+        ),
+        ("dom_parse", px_dom::harness::parse_html as fn(&[u8])),
+    ] {
+        let dir = root.join(target);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            panic!("the {target} corpus is missing at {}", dir.display());
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let Ok(bytes) = std::fs::read(entry.path()) else {
+                continue;
+            };
+            run(&bytes);
+            total += 1;
+        }
+    }
+
+    assert!(
+        total >= 18,
+        "only {total} corpus seeds replayed; the campaign starts from these,          so a corpus that quietly shrank is a campaign that explores less --          and six of them are crashes this harness could not find on its own"
+    );
+}
+
 /// The committed corpus parses cleanly, including the 100,000-level nesting
 /// §4.4 names.
 ///
