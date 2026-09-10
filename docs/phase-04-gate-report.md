@@ -267,6 +267,42 @@ match, so a bug that pushes a fresh record per write is invisible through that
 accessor — the first entry still holds the oldest values and still looks right.
 It shows up only in the count.
 
+## The arena is chunked, which was the other Phase 4 decision
+
+ADR 020. `docs/research/stylo-requirements.md` §3.3 calls this *"the actual
+Phase 4 decision"*, and it had been made by default: the arena was a flat
+`Vec<Slot>`, the layout that note rejects.
+
+A `Vec` reallocates on growth and moves every slot. That is sound — the borrow
+checker will not let anything grow the arena while a `&Node` is out — but the
+soundness costs something: the borrow of the *whole tree* becomes the unit of
+safety, which forbids ever handing out a node reference that outlives a
+mutation window. Phase 5's `StyleNode<'dom>` is meant to hold `&'dom Slot`
+directly.
+
+Slots now live in chunks of 1024 boxed slices. Growing pushes a `Box` onto a
+`Vec`, moving pointers rather than slots.
+
+Measured, release, a 470,000-node document, median of five, three runs each:
+
+| | flat | chunked | |
+|---|---:|---:|---:|
+| parse | 109 ms | 107 ms | −2% |
+| document-order walk | 14.4 ms | 18.0 ms | **+25%** |
+| 1.9M handle resolutions | 8.9 ms | 10.0 ms | **+12%** |
+
+Parse is unchanged — a flat `Vec` growing to 470,000 slots reallocates
+repeatedly, and not doing that roughly pays for the extra indirection. The
+traversal cost is real and accepted on the research note's reasoning rather
+than on a profile, because there is no style or layout traversal to profile
+yet. The numbers above are the baseline for when there is.
+
+`dom_mutation_slot_addresses_are_stable_across_growth` asserts the property and
+was verified in both directions — it passes chunked and fails flat. It compares
+addresses as integers rather than holding references across the growth, because
+holding them is exactly what the borrow checker refuses, and that refusal is
+why the flat layout looks fine right up until Phase 5 needs it not to be.
+
 ## Dependencies added
 
 ADR 017. `html5ever` 0.39: **+21 crates, +967 unsafe tokens**.

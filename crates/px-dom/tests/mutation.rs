@@ -323,3 +323,48 @@ fn dom_mutation_validate_accepts_real_trees() {
         assert_eq!(arena.validate(), Ok(()), "after moving {id:?}");
     }
 }
+
+/// A slot's address does not move when the arena grows.
+///
+/// This is the property `docs/research/stylo-requirements.md` §3.3 calls the
+/// Phase 4 decision, and ADR 020 records. Phase 5's `StyleNode<'dom>` is meant
+/// to hold `&'dom Slot` directly; with a flat `Vec` that is sound only because
+/// the borrow of the *whole tree* is the unit of safety, which forbids ever
+/// handing out a node reference that outlives a mutation window.
+///
+/// Comparing addresses as integers rather than holding references across the
+/// growth, because holding them is exactly what the borrow checker refuses —
+/// and that refusal is why the flat layout looks fine right up until Phase 5
+/// needs it not to be.
+#[test]
+fn dom_mutation_slot_addresses_are_stable_across_growth() {
+    let mut arena = Arena::new();
+    let doc = arena.document();
+
+    let watched: Vec<NodeId> = (0..8)
+        .map(|i| {
+            let id = node(&mut arena, &format!("w{i}"));
+            arena.append_child(doc, id).expect("append");
+            id
+        })
+        .collect();
+
+    let address =
+        |arena: &Arena, id: NodeId| arena.get(id).map(|node| std::ptr::from_ref(node) as usize);
+    let before: Vec<Option<usize>> = watched.iter().map(|id| address(&arena, *id)).collect();
+    assert!(before.iter().all(Option::is_some));
+
+    // Grow well past any plausible initial capacity, and past several chunk
+    // boundaries.
+    for i in 0..20_000 {
+        let id = node(&mut arena, &format!("f{i}"));
+        arena.append_child(doc, id).expect("append");
+    }
+
+    let after: Vec<Option<usize>> = watched.iter().map(|id| address(&arena, *id)).collect();
+    assert_eq!(
+        before, after,
+        "a slot moved when the arena grew; Phase 5 wants to hold &'dom Slot \
+         across a traversal, and a flat Vec cannot promise that"
+    );
+}

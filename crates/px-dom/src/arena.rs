@@ -64,9 +64,95 @@ struct Slot {
     node: Option<Node>,
 }
 
+/// Slots per chunk. A power of two so the index split is a shift and a mask.
+///
+/// 1024 slots is 48 KB of `Slot` at present, which is large enough that the
+/// per-chunk overhead is noise and small enough that a document of a few
+/// hundred nodes does not pay for a page it never fills.
+const CHUNK_SLOTS: usize = 1024;
+
+/// Slot storage with **stable addresses**.
+///
+/// A flat `Vec<Slot>` reallocates when it grows and moves every slot with it.
+/// That is sound in safe Rust — nothing can grow the arena while a `&Node` is
+/// outstanding — but it makes the borrow of the *whole tree* the unit of
+/// safety, and `docs/research/stylo-requirements.md` §3.3 is explicit that this
+/// is the Phase 4 decision:
+///
+/// > Retrofitting stable addresses onto a flat `Vec` design touches every
+/// > accessor, every iterator, and the Miri tests. This single choice is most
+/// > of the "px-dom redesign" the risk register is worried about, and it is
+/// > fully decidable today.
+///
+/// Chunks of boxed slices give it: growing pushes a `Box` onto a `Vec`, which
+/// moves pointers, never the slots behind them. A slot's address is fixed for
+/// the life of the arena.
+///
+/// See ADR 020 for the measurement and the alternative that was rejected.
+struct Slots {
+    chunks: Vec<Box<[Slot]>>,
+    len: usize,
+}
+
+impl Slots {
+    fn new() -> Self {
+        Self {
+            chunks: Vec::new(),
+            len: 0,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn get(&self, index: usize) -> Option<&Slot> {
+        if index >= self.len {
+            return None;
+        }
+        self.chunks
+            .get(index / CHUNK_SLOTS)?
+            .get(index % CHUNK_SLOTS)
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut Slot> {
+        if index >= self.len {
+            return None;
+        }
+        self.chunks
+            .get_mut(index / CHUNK_SLOTS)?
+            .get_mut(index % CHUNK_SLOTS)
+    }
+
+    /// Append a slot, allocating a chunk when the last one is full.
+    fn push(&mut self, slot: Slot) {
+        if self.len.is_multiple_of(CHUNK_SLOTS) {
+            let chunk: Vec<Slot> = (0..CHUNK_SLOTS)
+                .map(|_| Slot {
+                    generation: NonZeroU32::MIN,
+                    node: None,
+                })
+                .collect();
+            self.chunks.push(chunk.into_boxed_slice());
+        }
+        let index = self.len;
+        self.len += 1;
+        if let Some(existing) = self.get_mut(index) {
+            *existing = slot;
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Slot> {
+        self.chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter())
+            .take(self.len)
+    }
+}
+
 /// A DOM tree.
 pub struct Arena {
-    slots: Vec<Slot>,
+    slots: Slots,
     /// Indices of vacant slots. Retired slots are never in here.
     free: Vec<u32>,
     live: usize,
@@ -108,7 +194,7 @@ impl Arena {
     /// A new arena holding nothing but a `Document` node.
     pub fn new() -> Self {
         let mut arena = Self {
-            slots: Vec::new(),
+            slots: Slots::new(),
             free: Vec::new(),
             live: 0,
             retired: 0,
