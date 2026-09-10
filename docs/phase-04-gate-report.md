@@ -372,36 +372,48 @@ changed. Safe here only because the key is a generational `NodeId` — with
 Servo's pointer keys it would be the bug rather than the design. Now written
 down where it looks like a leak.
 
-### And one question that was open for an hour
+### A question that was open twice, and had three answers
 
-The harness also produced a range whose start compared as *following its own
-end*, with both boundary points still valid. Whether that was a defect here or
-inherent to `(node, offset)` boundary points was not established — moving a
-container carries its boundary points with it, and no DOM rule re-checks
-ordering — so it went in as an `#[ignore]`d test with the reproducer, per
-`/CLAUDE.md`'s rule for an ambiguity.
+The harness produced a range whose start compared as *following its own end*.
+Whether that was a defect here or inherent to `(node, offset)` boundary points
+was not established, so it went in as an `#[ignore]`d test with the
+reproducer, per `/CLAUDE.md`'s rule for an ambiguity.
 
-Then it was settled the way that test said to settle it: delta-reduce the
-sequence and read each step. **34 operations reduced to 16, and the answer was
-a defect** — two of them, both mine, and the range had been inverted *before*
-the mutation that appeared to invert it.
+Then it was settled the way that test said to settle it — delta-reduce and read
+each step. **34 operations to 16, and the answer was a defect.** Two of them:
 
-`compare_boundary_points`' last step was a bare `Some(Before)`, justified by an
-earlier step having mirrored the call — sound only when `precedes` gives an
-answer. And `precedes` walked from `document()` alone, so every pair inside a
-detached subtree was incomparable and the fall-through fired constantly. A
-range built in a fragment compared as correctly ordered while being inverted,
-and only told the truth once a mutation collapsed an endpoint into an ancestor
-relationship.
+- `compare_boundary_points` ended in a bare `Some(Before)`, justified by an
+  earlier step having mirrored the call — sound only when `precedes` gives an
+  answer. When it returns `None`, the fall-through turns *"I cannot order
+  these"* into *"a comes first"*.
+- `precedes` walked from `document()` alone, so every pair inside a detached
+  subtree was incomparable, and the fall-through fired constantly.
 
-`precedes` now orders within whatever tree the nodes share and returns `None`
-only for genuinely different trees; `compare_boundary_points` returns `None`
-rather than guessing. Two regression tests, the minimal form and the reduced
-sequence, and the harness asserts the invariant again — the assertion that
-found it now guards it.
+Both fixed, the assertion restored, the ignored test graduated to a regression
+test. **And that was premature.** The next campaign found the same assertion
+failing in minutes, on a 25-byte input, from all six `dom_mutation` shards.
 
-The `#[ignore]`d test is gone, because the question is not open. That is the
-intended lifecycle: encode the ambiguity, settle it, graduate it.
+The third defect was in the *constructor*, not the comparison. `new_range`
+refused a pair that compared as `After` — but two boundary points in different
+trees do not compare at all, and `None` is not `Some(After)`, so the pair was
+accepted. The range is well-formed right until the two trees are joined, at
+which point it is inverted and **nothing moved either endpoint**. Eight
+operations: create a detached comment, build a range from it to the document,
+append the comment to the document.
+
+That is why it kept reading as a mutation-rules problem for two rounds. The
+DOM never holds such a range either — `setStart` and `setEnd` collapse when
+handed a node in a different tree — so `new_range` now requires the ordering to
+be *establishable*, not merely "not backwards yet".
+
+All six crash inputs are committed to `fuzz/corpus/dom_mutation/`, which is
+what ADR 006 asks for and what makes the 60-second smoke run meaningful.
+
+**The lesson recorded rather than the conclusion.** Twice I called this
+answered on the evidence available and twice the next run disagreed. The
+harness's 600 pseudorandom sequences never reached any of the three; libFuzzer
+found the last one in minutes with coverage feedback. A property that only a
+guided fuzzer can falsify is one to stop reasoning about and start running.
 
 ## The one research item not taken
 

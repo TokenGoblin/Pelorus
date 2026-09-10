@@ -693,3 +693,11 @@ Format: one entry per defect.
   rather than guessing. Two regression tests in `tests/ranges.rs` — the minimal
   form and the reduced sequence — and the mutation fuzz harness asserts the
   invariant again.
+- **And that was premature.** The next campaign failed all six `dom_mutation`
+  shards in minutes on a 25-byte input. A **third** defect, in the constructor
+  rather than the comparison: `new_range` refused a pair comparing as `After`,
+  but a pair in different trees does not compare at all, and `None` is not
+  `Some(After)`. The range is well-formed until the trees are joined, at which
+  point it is inverted with nothing having moved either endpoint. `new_range`
+  now requires the ordering to be establishable. Six crash inputs committed to
+  `fuzz/corpus/dom_mutation/` per ADR 006.

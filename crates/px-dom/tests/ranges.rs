@@ -491,3 +491,78 @@ fn range_stays_ordered_through_the_sequence_that_once_inverted_it() {
         );
     }
 }
+
+/// A range cannot be built across two different trees.
+///
+/// The mutation fuzz campaign found this with an eight-operation input, and it
+/// is the third and last of the defects behind "a range's start can come to
+/// follow its end". The first two were in the comparison; this one is in the
+/// constructor.
+///
+/// `new_range` refused a pair that compared as `After` — but two boundary
+/// points in different trees do not compare at all, and `None` is not
+/// `Some(After)`, so the pair was accepted. The range is well-formed right up
+/// until the two trees are joined, at which point it is inverted and **nothing
+/// moved either endpoint**. That is why it kept looking like a mutation-rules
+/// problem.
+///
+/// The DOM never holds such a range either: `setStart` and `setEnd` collapse
+/// the range when handed a node in a different tree.
+#[test]
+fn range_creation_refuses_endpoints_in_different_trees() {
+    let mut arena = Arena::new();
+    let document = arena.document();
+
+    // A node that belongs to no tree.
+    let orphan = text(&mut arena, "orphan");
+    assert!(arena.get(orphan).and_then(px_dom::Node::parent).is_none());
+
+    let attached = text(&mut arena, "attached");
+    link(&mut arena, document, attached);
+
+    assert_eq!(
+        arena.compare_boundaries(
+            BoundaryPoint::new(orphan, 0),
+            BoundaryPoint::new(attached, 0)
+        ),
+        None,
+        "different trees have no relative order"
+    );
+    assert_eq!(
+        arena.new_range(
+            BoundaryPoint::new(orphan, 0),
+            BoundaryPoint::new(document, 0)
+        ),
+        Err(TreeError::WouldCycle),
+        "a range whose ordering cannot be established must be refused, not          accepted on the grounds that it is not backwards *yet*"
+    );
+
+    // The exact shape the campaign found: build the range, then join the
+    // trees. With the range refused above, there is nothing left to invert.
+    // Once joined, `orphan` is the document's second child (index 1), so a
+    // range from inside it must end at offset 2 -- after both children.
+    // Ending at offset 1 is the position *before* `orphan`, and is refused:
+    // the same check working in the ordinary direction.
+    arena
+        .append_child(document, orphan)
+        .expect("join the trees");
+    assert_eq!(
+        arena.new_range(
+            BoundaryPoint::new(orphan, 0),
+            BoundaryPoint::new(document, 1)
+        ),
+        Err(TreeError::WouldCycle),
+        "offset 1 is the position before `orphan`, so this really is backwards"
+    );
+    let id = arena
+        .new_range(
+            BoundaryPoint::new(orphan, 0),
+            BoundaryPoint::new(document, 2),
+        )
+        .expect("now they share a tree, so the pair has an order");
+    let range = arena.range(id).expect("live");
+    assert_ne!(
+        arena.compare_boundaries(range.start, range.end),
+        Some(Position::After)
+    );
+}

@@ -745,8 +745,24 @@ impl Arena {
         if !self.is_valid_boundary(start) || !self.is_valid_boundary(end) {
             return Err(TreeError::NoSuchNode);
         }
-        if compare_boundary_points(self, start, end) == Some(Position::After) {
-            return Err(TreeError::WouldCycle);
+        // The ordering must be *establishable*, not merely "not backwards".
+        //
+        // Refusing only `Some(After)` let through a pair whose comparison is
+        // `None` — two boundary points in different trees, which have no
+        // relative order at all. Such a range is well-formed right up until
+        // the two trees are joined, at which point it is inverted and nothing
+        // moved either endpoint. The mutation fuzz campaign found it in
+        // minutes with an eight-operation input: create a detached comment,
+        // build a range from it to the document, then append the comment to
+        // the document.
+        //
+        // The DOM never holds such a range either: `setStart` and `setEnd`
+        // collapse the range when given a node in a different tree. Refusing
+        // is the same guarantee, arrived at by saying no rather than by
+        // silently moving the other endpoint.
+        match compare_boundary_points(self, start, end) {
+            Some(Position::Before | Position::Equal) => {}
+            Some(Position::After) | None => return Err(TreeError::WouldCycle),
         }
 
         let range = Range { start, end };

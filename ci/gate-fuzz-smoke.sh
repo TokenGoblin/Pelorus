@@ -137,7 +137,27 @@ for target in $targets; do
             -print_final_stats=1); then
         ok "$target"
     else
-        fail "$target found a crash; the reproducer is under fuzz/artifacts/$target/"
+        # A non-zero exit is not the same as a crash, and saying so matters:
+        # libFuzzer writes a reproducer when it crashes the target and writes
+        # nothing when it could not start. Reporting the second as the first
+        # sends somebody hunting for a file that does not exist.
+        #
+        # Both happen. On a Windows machine without the MSVC ASAN runtime every
+        # target exits 0xc0000135 (STATUS_DLL_NOT_FOUND) before executing a
+        # single input, and this script reported nine crashes and nine
+        # reproducer paths, all of them empty directories.
+        found="$(find "fuzz/artifacts/$target" -type f 2>/dev/null | head -1)"
+        if [ -n "$found" ]; then
+            fail "$target found a crash; the reproducer is $found"
+        else
+            # One `fail`, then `info` for the explanation: `fail` increments
+            # the count the verdict reports, and four lines about one problem
+            # would read as four problems.
+            fail "$target did not run to completion and wrote no reproducer"
+            info "so this is a harness or toolchain failure, not a finding."
+            info "On Windows without the MSVC ASAN runtime every target exits"
+            info "0xc0000135 here; ADR 011 covers the sanitizer toolchain."
+        fi
     fi
 done
 
