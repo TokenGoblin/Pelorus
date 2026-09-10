@@ -320,3 +320,73 @@ means it. So it waits.
 Campaign 34320581865 is still running (~4h from 06:50). When it lands I will
 verify `-max_len` actually applied this time, record it, merge Phase 1, and
 rebase Phase 2. That work needs no decision from anyone.
+
+---
+
+## 2026-09-10 — Phase 4 built, one gate item outstanding
+
+Stopping point, written so a fresh session does not have to reconstruct it.
+
+### Where Phase 4 is
+
+`ci/gate-dom.sh` **passes**, and the `dom` job is green on Windows and Linux.
+21 of 22 CI jobs pass; the only red is `compat-list`, which has been red since
+Phase 0 and is not mine to fix.
+
+**One gate item is not met: the 24-hour mutation campaign.** Run
+[34483936230](https://github.com/TokenGoblin/Pelorus/actions/runs/34483936230)
+was launched at 13:38Z against 19 shards and was clean at 19/19 running two
+hours in. Its numbers, not any earlier run's, are what close the item.
+
+### The first thing to do on resuming
+
+Check that run.
+
+- **If it is clean**, put its per-shard figures into
+  `docs/phase-04-gate-report.md` the way Phase 3's report does — runs, `cov`,
+  `ft`, corpus, `exec/s` — and **verify `-max_len` actually applied** by
+  looking for `lim:` in libFuzzer's own final line and for zero occurrences of
+  `max_len is not provided`. A flag on a command line proves it was passed;
+  `lim:` proves libFuzzer acted on it. Then Phase 4 can merge to `main`.
+- **If it found crashes**, commit every reproducer to `fuzz/corpus/<target>/`
+  before fixing anything. ADR 006 requires it, and
+  `every_committed_corpus_seed_replays_clean` then runs them on every push —
+  which is what turned the last round of range defects from a four-hour
+  discovery into a two-second one.
+
+Three campaigns were cancelled before this one, each because I was still
+finding bugs in the code it was testing. The lesson, recorded in the gate
+report: finish the code, *then* start the four-hour job.
+
+### What this phase built
+
+`px-dom`: generational arena (ADR 018, 32/32 measured against 24/8), chunked
+for stable slot addresses (ADR 020, a measured 25% traversal cost taken
+deliberately), `html5ever` through a `TreeSink` (ADR 017), live ranges, DOM
+ranges' mutation rules, stylo's prior-state snapshots, a tree validator, an
+opaque node identity for stylo's `OpaqueNode`, and Miri (ADR 022).
+
+Conformance is 99.43% graded, 94.62% unadjusted, and **both numbers are
+printed by the gate** — ADR 019 records what is set aside, why, and the pinned
+counts that stop the exclusion growing.
+
+### What is blocked on a decision, not on work
+
+1. **ADR 009 / `px-net` as its own process.** Now *unowned*: the backlog said
+   "the phase that settles ADR 009, or Phase 4 — whichever comes first", and
+   Phase 4 has passed. No phase in §9 names it. Both ways forward are ADR 009
+   decisions.
+2. **The forty-site compat list.** `tests/compat/sites.toml` is empty by
+   design; the scheme for keeping the sites out of a public repository is
+   written and waiting on which sites.
+3. **Thirteen spec amendments** from `docs/spec-audit-001.md`, deferred on the
+   grounds that amending the spec unattended is how it stops being a shared
+   reference. Several block later phases.
+
+### Deliberately not done
+
+`stylo-requirements.md` item 2, the borrowed `StyleView` type, is deferred by
+ADR 021 with an explicit tripwire: if Phase 5 has to change slot layout,
+`NodeId`, or the opaque packing to write `StyleNode`, that ADR was wrong and
+its central claim — that the forcing function had already been banked — is
+what was wrong. Say so rather than absorbing it as ordinary Phase 5 friction.
