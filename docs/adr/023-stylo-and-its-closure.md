@@ -30,7 +30,11 @@ different paths and usernames"* — which has held since the workspace was empty
 From Phase 5 onward the release binary's contents depend on an interpreter that
 is in neither `Cargo.lock` nor `rust-toolchain.toml`.
 
-**Two: the closure is about 45 crates**, including `rayon` and `rayon-core`,
+**Two: the closure is about 45 crates** — *measured afterwards: `stylo` has
+**50** direct dependencies, and `Cargo.lock` goes from **84 packages to 192**, so
+the real transitive cost is **+108 crates**, not 45. The 45 was a direct-dependency
+figure being read as a closure figure, which is the more optimistic of the two by
+more than a factor of two.* Named individually, they include `rayon` and `rayon-core`,
 `parking_lot`, `atomic_refcell`, `servo_arc`, `to_shmem`, `icu_segmenter`,
 `cssparser`, `string_cache`, `thin-vec`, `uluru`, `euclid`, `app_units`,
 `encoding_rs`, `num_cpus`, `serde` and `url`. §3 approves `stylo`. It does not
@@ -120,10 +124,17 @@ named interpreter version; what is lost is the property that only
 against the weaker claim and the release documentation has to say the weaker
 thing.
 
-**The unsafe-line count stops being a number anybody reads.** It roughly
-doubles in one commit. The baseline remains useful as a *ratchet* — it catches
+**The unsafe-line count stops being a number anybody reviewed.** Measured
+after the fact: 18,261 lines across 36 crates becomes **21,675 across 109**, so
+73 new crates contribute 3,414 lines. The largest are `hashbrown` (496),
+`stylo` itself (481), `zerovec` (253), `crossbeam-epoch` (195) and
+`encoding_rs` (193). The baseline remains useful as a *ratchet* — it catches
 the next increase — but "the project has N unsafe lines" stops being a
-meaningful sentence about code anybody here reviewed.
+meaningful sentence about code anybody here read.
+
+*This paragraph originally predicted the count would "roughly double". It rises
+**18.7%**. The prediction was wrong and is corrected rather than quietly
+deleted, because the point of writing it down was to be checkable.*
 
 **`px-css` cannot keep `#![forbid(unsafe_code)]`.** That is a separate decision
 with its own narrower answer; see ADR 024. It is listed here because the two
@@ -171,8 +182,24 @@ all — that is ADR 021's tripwire and ADR 025's subject, not this one's.
 - **Audit status:** to be recorded from `cargo vet` output at acceptance. Mozilla
   audit set covers much of the closure; `to_shmem` and `servo_arc` need
   checking specifically.
-- **Unsafe-line count:** unknown until the closure is resolved; expected to
-  roughly double `ci/unsafe-baseline.json`. Committed with this ADR, not after.
-- **Transitive dependencies added:** ~45. Named individually above; `rayon`,
+- **Unsafe-line count:** measured. 18,261 -> 21,675 lines, 36 -> 109 crates
+  (+18.7%). `ci/unsafe-baseline.json` regenerated and committed with this ADR
+  rather than bumped by whatever commit first tripped the gate.
+- **Transitive dependencies added:** **+108** (`Cargo.lock` 84 -> 192); `stylo`
+  itself declares 50 direct dependencies. Named individually above; `rayon`,
   `rayon-core`, `num_cpus`, `atomic_refcell`, `to_shmem` and `servo_arc` are
-  the ones that need a decision rather than a note.
+  the ones that needed a decision rather than a note.
+- **Feature selection:** `default-features = false, features = ["servo"]`.
+  Verified necessary, not chosen: with neither `servo` nor `gecko` selected,
+  stylo's `build.rs` panics with *"The style crate requires enabling one of its
+  'servo' or 'gecko' feature flags"*.
+- **`web_atoms` unification — the Phase 4 gap, now closed and closed well.**
+  Phase 4's report listed this as unverifiable until stylo was a dependency, and
+  warned that two versions in the tree would surface as a type error at the
+  `TElement` boundary. Measured: **one version, `web_atoms 0.2.6`**, shared by
+  `markup5ever`/`html5ever 0.39` and `stylo 0.21`. The only duplicated crate in
+  the whole new closure is `syn` (2.x and 3.x), which is build-time only.
+- **Builds on Windows**, with the pinned interpreter, in about 80 seconds from
+  cold. `build-python/requirements.txt` pins Mako 1.4.1 and MarkupSafe 3.0.3;
+  `ci/setup-build-python.sh` materialises it and `ci/build-and-hash.sh` refuses
+  to build the release artifacts without it.

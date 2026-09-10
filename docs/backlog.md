@@ -753,3 +753,27 @@ Format: one entry per defect.
   both names from `corpus_empty`; the gate already fails if the list and the
   index disagree in that direction.
 - **Not done here because** they are Phase 3 targets and this is Phase 4.
+
+## build-python/requirements.txt pins versions, not hashes
+
+- **Found in:** phase 5, ADR 023
+- **Belongs to:** unassigned; before Phase 20 ships anything
+- **What:** `Mako==1.4.1` and `MarkupSafe==3.0.3` are exact version pins. They
+  are not hash pins, so `pip install` trusts whatever the index serves under
+  those version numbers.
+- **Why it matters:** ADR 023 made a Python interpreter and a Mako version into
+  build inputs for the release binary. `Cargo.lock` records a checksum for every
+  crate; this file records none for either package. A compromised or
+  impersonated index is inside the trust boundary of the shipped artifact, which
+  is the same class of exposure `cargo-vet` and `cargo-deny` exist to close on
+  the Rust side.
+- **What to do:** `pip install --require-hashes`, which needs every artifact
+  enumerated per version — MarkupSafe ships compiled wheels, so that is a Linux
+  wheel, a Windows wheel and an sdist, and a partial list breaks CI on whichever
+  platform it missed. Generate with `pip download --no-deps` followed by
+  `pip hash`, for both platforms, and have `ci/check_build_python_pin.py` assert
+  the requirements file carries hashes at all so the pin cannot silently regress
+  to version-only.
+- **Not done in Phase 5 because** a half-enumerated hash list is worse than an
+  honest version pin: it breaks one platform's CI and reads as stronger than it
+  is. The gap is stated in the requirements file itself rather than implied.

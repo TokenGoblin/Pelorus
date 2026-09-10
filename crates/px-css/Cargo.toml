@@ -6,5 +6,14 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# ADR 023. stylo's build.rs generates its property definitions through Python 3
+# and Mako, which is why build-python/requirements.txt exists and why invariant
+# 7 now names its build-time generators.
+#
+# default-features off deliberately: ADR 023 takes rayon's parallel traversal
+# "available but unused" -- traverse_dom accepts pool: Option<&ThreadPool> and
+# Phase 5 passes None -- so the goal is to pull in as little of the threading
+# surface as the crate allows. Which features that actually needs is what the
+# spike below determines; this is the starting point, not the answer.
+stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
+px-dom = { path = "../px-dom" }

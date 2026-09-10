@@ -53,8 +53,36 @@ case "$HOST" in
     *windows-msvc) REMAP="$REMAP -C link-arg=/Brepro" ;;
 esac
 
+# ADR 023: stylo's build.rs generates its property definitions by running
+# properties/build.py through Mako, so a Python interpreter and a Mako version
+# are build inputs. Invariant 7 now says as much -- "same source + same toolchain
+# + same pinned build-time generators" -- and this is where the pin is applied.
+#
+# Built inside $DEST rather than reused from the caller's tree, because $DEST is
+# what gets built and an interpreter from somewhere else is exactly the unpinned
+# input this closes. It costs a venv creation per build.
+#
+# Fail closed, per CLAUDE.md: if the pinned environment cannot be built, this
+# does not fall back to whatever `python3` resolves to on the machine. A
+# reproducibility check that quietly used a different generator than the one it
+# claims to have pinned would be worse than no check, because it would still
+# print two matching hashes.
 (
     cd "$DEST"
+    if ! PINNED_PYTHON="$(ci/setup-build-python.sh)"; then
+        echo "FAIL could not build the pinned Python environment (ADR 023);" >&2
+        echo "FAIL   refusing to build with an unpinned interpreter" >&2
+        exit 1
+    fi
+    # stylo's build.rs reads PYTHON3 and falls back to python3/python.exe. The
+    # export is the whole point: without it the fallback silently wins and the
+    # pin is decorative.
+    export PYTHON3="$PWD/$PINNED_PYTHON"
+    if [ ! -x "$PYTHON3" ]; then
+        echo "FAIL PYTHON3=$PYTHON3 is not executable" >&2
+        exit 1
+    fi
+    echo "  PYTHON3=$PYTHON3" >&2
     RUSTFLAGS="$REMAP" cargo build --workspace --locked --release >&2
 )
 

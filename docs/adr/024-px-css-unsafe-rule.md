@@ -14,8 +14,8 @@
 `#![forbid(unsafe_code)]`. The sole exception is `px-sandbox`."* Phase 0's gate
 asserts it, and `crates/px-css/src/lib.rs` line 1 carries it today.
 
-stylo's `TElement` declares six `unsafe fn` methods. An implementor must write
-them as `unsafe fn`, because the signature is part of the trait. And
+stylo's `TElement` declares `unsafe fn` methods that an implementor must write
+as `unsafe fn`, because the signature is part of the trait. And
 `#![forbid(unsafe_code)]` rejects *implementing* an unsafe method, not only
 writing an unsafe block:
 
@@ -32,6 +32,17 @@ pinned toolchain rather than inferring it. **Phase 5 cannot be written under the
 rule as it stands.** This is not a surprise to absorb quietly during the phase;
 it is a working-agreement amendment, and the person who wrote the rule should
 be the one to change it.
+
+**Counted in the published crate rather than taken from the research note.**
+The note said six `unsafe fn`, reading `servo/stylo` at HEAD. In `stylo 0.21.0`
+— the version ADR 023 takes — `TElement` declares **eight**, of which **five are
+required**: `set_handled_snapshot`, `set_dirty_descendants`,
+`unset_dirty_descendants`, `ensure_data` and `clear_data`. The other three
+(`set_animation_only_dirty_descendants`, its `unset_` partner, and
+`clear_descendant_bits`) ship default bodies, so an implementor may leave them
+alone. Five rather than six does not change the decision — one required
+`unsafe fn` is enough to make `forbid` impossible — but a number stated in an
+ADR should be the number in the crate being depended on.
 
 ## Decision
 
