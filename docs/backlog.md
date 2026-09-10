@@ -413,3 +413,42 @@ Format: one entry per defect.
   routes a content process's fetch through the broker — `px-content` does not
   fetch at all. The debt becomes real the moment something does, which is
   Phase 4 onward. That is the deadline this entry has.
+
+## The string interner is a cross-document channel until Phase 14
+
+- **Found in:** phase 4, ADR 017
+- **Belongs to:** phase 14 (out-of-process iframes)
+- **What:** `string_cache`, reached through `html5ever`, keeps a
+  **process-global** dynamic atom set behind sharded locks. Interning a string
+  that is already present is measurably cheaper than interning a new one, so
+  interner occupancy is readable by timing. Where two documents from different
+  sites share a process, that is a cross-document channel.
+- **Why it is not a Phase 4 fix:** the mitigation is process separation, and
+  build-spec §9 schedules that for Phase 14 — *"without this, 'one process per
+  site' is a claim rather than a property."* Nothing px-dom can do in Phase 4
+  closes it; writing our own interner would only move the same shared state.
+- **What it costs meanwhile:** the same as every other thing Phase 14 exists to
+  fix. This entry exists so that a cross-origin timing result during Phase 14
+  is recognised as a known consequence of a Phase 4 decision rather than
+  investigated from scratch.
+- **Deadline:** Phase 14. The Phase 13 cross-site leak harness is the cheapest
+  place to point a test at it first.
+
+## `ci/unsafe-audit.sh` counts crates that are never compiled
+
+- **Found in:** phase 4, ADR 017
+- **Belongs to:** whenever the baseline stops being readable
+- **What:** the audit runs `cargo vendor` and counts `unsafe` tokens in every
+  vendored crate, across all targets. `redox_syscall` contributes 178 tokens
+  for an operating system this project does not target. The number is a
+  ceiling, which is the correct direction for a gate — it never under-counts —
+  but it is drifting away from "unsafe that could run on a user's machine."
+- **Why it is not done now:** the gate's job is to detect *movement*, and it
+  does that correctly today. Filtering by target would make the absolute number
+  more meaningful and the delta no more meaningful, at the cost of teaching the
+  audit about target resolution.
+- **What it costs meanwhile:** every ADR that quotes the baseline has to say
+  which part of it ships. ADR 017 does; ADR 016 had to do the same thing for a
+  different reason (`ring`'s C and assembly, which the audit cannot see at
+  all). Two ADRs in a row needing a footnote on the same metric is the signal
+  that this is worth fixing.

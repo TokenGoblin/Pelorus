@@ -1,10 +1,24 @@
 
 # cargo-vet imports lock
 
+[[publisher.bitflags]]
+version = "2.13.2"
+when = "2026-09-10"
+user-id = 3204
+user-login = "KodrAus"
+user-name = "Ashley Mannix"
+
 [[publisher.cc]]
 version = "1.4.5"
 when = "2026-09-04"
 trusted-publisher = "github:rust-lang/cc-rs"
+
+[[publisher.fastrand]]
+version = "2.5.0"
+when = "2026-07-19"
+user-id = 33035
+user-login = "taiki-e"
+user-name = "Taiki Endo"
 
 [[publisher.find-msvc-tools]]
 version = "0.1.12"
@@ -18,11 +32,25 @@ user-id = 5059
 user-login = "newpavlov"
 user-name = "Artyom Pavlov"
 
+[[publisher.html5ever]]
+version = "0.39.0"
+when = "2026-03-13"
+user-id = 2396
+user-login = "jdm"
+user-name = "Josh Bowman-Matthews"
+
 [[publisher.libc]]
 version = "0.2.189"
 when = "2026-07-21"
 user-id = 55123
 user-login = "rust-lang-owner"
+
+[[publisher.lock_api]]
+version = "0.4.14"
+when = "2025-10-03"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
 
 [[publisher.log]]
 version = "0.4.34"
@@ -31,12 +59,68 @@ user-id = 3204
 user-login = "KodrAus"
 user-name = "Ashley Mannix"
 
+[[publisher.markup5ever]]
+version = "0.39.0"
+when = "2026-03-13"
+user-id = 2396
+user-login = "jdm"
+user-name = "Josh Bowman-Matthews"
+
+[[publisher.new_debug_unreachable]]
+version = "1.0.6"
+when = "2024-03-15"
+user-id = 2017
+user-login = "mbrubeck"
+user-name = "Matt Brubeck"
+
 [[publisher.once_cell]]
 version = "1.21.4"
 when = "2026-03-12"
 user-id = 2699
 user-login = "matklad"
 user-name = "Alex Kladov"
+
+[[publisher.parking_lot]]
+version = "0.12.5"
+when = "2025-10-03"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
+
+[[publisher.parking_lot_core]]
+version = "0.9.12"
+when = "2025-10-03"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
+
+[[publisher.phf]]
+version = "0.13.1"
+when = "2025-08-23"
+user-id = 51017
+user-login = "JohnTitor"
+user-name = "Yuki Okushi"
+
+[[publisher.phf_codegen]]
+version = "0.13.1"
+when = "2025-08-23"
+user-id = 51017
+user-login = "JohnTitor"
+user-name = "Yuki Okushi"
+
+[[publisher.phf_generator]]
+version = "0.13.1"
+when = "2025-08-23"
+user-id = 51017
+user-login = "JohnTitor"
+user-name = "Yuki Okushi"
+
+[[publisher.phf_shared]]
+version = "0.13.1"
+when = "2025-08-23"
+user-id = 51017
+user-login = "JohnTitor"
+user-name = "Yuki Okushi"
 
 [[publisher.proc-macro2]]
 version = "1.0.107"
@@ -73,6 +157,13 @@ user-id = 209038
 user-login = "cpu"
 user-name = "Daniel McCarney"
 
+[[publisher.scopeguard]]
+version = "1.2.0"
+when = "2023-07-17"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
+
 [[publisher.serde]]
 version = "1.0.229"
 when = "2026-07-18"
@@ -94,12 +185,47 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.siphasher]]
+version = "1.0.3"
+when = "2026-05-03"
+user-id = 468
+user-login = "jedisct1"
+user-name = "Frank Denis"
+
+[[publisher.smallvec]]
+version = "1.16.0"
+when = "2026-09-01"
+user-id = 2396
+user-login = "jdm"
+user-name = "Josh Bowman-Matthews"
+
+[[publisher.string_cache]]
+version = "0.9.0"
+when = "2025-08-26"
+user-id = 2844
+user-login = "mrobinson"
+user-name = "Martin Robinson"
+
+[[publisher.string_cache_codegen]]
+version = "0.6.1"
+when = "2025-09-08"
+user-id = 2844
+user-login = "mrobinson"
+user-name = "Martin Robinson"
+
 [[publisher.syn]]
 version = "3.0.5"
 when = "2026-09-04"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
+
+[[publisher.tendril]]
+version = "0.5.1"
+when = "2026-07-06"
+user-id = 2844
+user-login = "mrobinson"
+user-name = "Martin Robinson"
 
 [[publisher.thiserror]]
 version = "2.0.20"
@@ -135,6 +261,13 @@ when = "2025-06-10"
 user-id = 1
 user-login = "alexcrichton"
 user-name = "Alex Crichton"
+
+[[publisher.web_atoms]]
+version = "0.2.6"
+when = "2026-08-09"
+user-id = 2396
+user-login = "jdm"
+user-name = "Josh Bowman-Matthews"
 
 [[publisher.webpki-roots]]
 version = "1.0.9"
@@ -354,6 +487,13 @@ delta = "1.0.3 -> 1.0.4"
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "2.5.0 -> 2.6.1"
+
+[[audits.mozilla.audits.precomputed-hash]]
+who = "Bobby Holley <bobbyholley@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "This is a trivial crate."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.quote]]
 who = "Jan-Erik Rediger <jrediger@mozilla.com>"
