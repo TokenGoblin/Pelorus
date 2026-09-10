@@ -206,7 +206,7 @@ is in flight against that matrix. **Its numbers, not the ones above, are what
 close this item.** The table above is worth keeping because it is real
 coverage of the arena targets — it is simply less than the gate asks.
 
-## Dependencies added## Dependencies added
+## Dependencies added
 
 ADR 017. `html5ever` 0.39: **+21 crates, +967 unsafe tokens**.
 
@@ -322,6 +322,10 @@ where this crate's own logic is most intricate. What is covered is the
 dependency unsafe, which is the part nothing else checks and the reason §4.5
 names this crate.
 
+In CI the whole job takes **122 seconds**, against 50 for the `dom` gate on the
+same runner — measured on the first run, so ADR 022's "wrong if the CI cost is
+more than the table says" is a checked fact rather than an open question.
+
 Verified in both directions: a failing test in a covered suite turns the gate
 red, and so does a suite disappearing. The second one was worth checking — the
 first version reported a deleted file as *"miri found undefined behaviour in
@@ -354,15 +358,39 @@ has to change slot layout, `NodeId`, or the packing in order to write
 
 ## Carried out of this phase
 
-- The 24h mutation campaign (above) — the one gate item not met.
-- html5ever's quadratic tree builder: mitigated in `px_dom::parse`, not fixed.
-  Anything driving html5ever without going through it gets the old behaviour
-  back with no warning.
-- whatwg/html#12118 upstream to html5ever.
-- Six conformance exclusions that Phase 11 inherits.
-- `Arena::force_generation_to_last` has no release-artifact scan, because no
-  shipping binary links px-dom yet and the scan could not fail.
+**The one gate item not met**
+
+- The mutation campaign. Run 34453317232 is in flight against a matrix that
+  gives `dom_mutation` its 24 CPU-hours and covers `dom_parse`. Until its
+  numbers are here, this phase is not closed.
+
+**Deferred by decision, with the reasoning recorded**
+
+- The borrowed `StyleView` type — ADR 021, with an explicit tripwire for
+  Phase 5.
+- `whatwg/html#12118` upstream to html5ever; until then, 88 conformance cases
+  are set aside by ADR 019 with their count pinned.
+- Six conformance cases needing script execution, which Phase 11 inherits.
+
+**Known gaps, still open**
+
+- html5ever's quadratic tree builder: mitigated inside `px_dom::parse`, not
+  fixed. Anything driving html5ever without going through it gets the old
+  behaviour back with no warning.
 - `string_cache`'s process-global interner is a cross-document timing channel
   until Phase 14 makes one-process-per-site real.
-- Miri still does not run this crate's tests, which its CLAUDE.md claimed since
-  Phase 0. Corrected in place under a "Not true yet" heading.
+- `Arena::force_generation_to_last` has no release-artifact scan, because no
+  shipping binary links `px-dom` yet and the scan could not fail.
+- Miri covers five suites; the deep-nesting, generation-exhaustion and
+  conformance suites are out of reach, and its guarantee over `tendril` is
+  weakened by that crate's integer-to-pointer casts. `px-ipc` and `px-store`,
+  which §4.5 also names, have no Miri job.
+- `web_atoms` agreement with stylo cannot be checked until stylo is a
+  dependency. Two versions in the tree would fail as a type error at the
+  `TElement` boundary in the first hour of Phase 5.
+
+**Fixed during the phase, listed because the report above claims it**
+
+- Miri now runs on this crate. Its CLAUDE.md claimed so from Phase 0 while it
+  did not; that claim is now true, and narrower than it sounds — the file says
+  which suites and what is weakened.

@@ -133,9 +133,12 @@ the dependency unsafe is all behind `cfg` paths the tests do not reach. Checked
 directly: the `tendril` finding above is Miri reporting on a dependency's
 pointer handling during a parse, which is the coverage this ADR is for.
 
-Wrong if the CI cost turns out to be more than the table says. The numbers are
-local, on one machine, and CI runners are slower; if the job becomes the long
-pole it should lose suites rather than be disabled.
+Wrong if the CI cost turns out to be more than the table says. **Measured on
+the first CI run: 122 seconds end to end**, including installing the toolchain
+and the Miri component, against 50 seconds for the `dom` gate on the same
+runner. Not the long pole, and there is room to add `px-ipc` later without the
+job becoming one. If it ever does, it should lose suites rather than be
+disabled — a check nobody waits for is a check that gets turned off.
 
 It is **not** falsified by Miri finding no bugs. It is a check, not a
 prediction.
