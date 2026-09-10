@@ -578,3 +578,23 @@ Format: one entry per defect.
 - **What to do:** check `stylo`'s `web_atoms` requirement *before* adding it,
   and if it disagrees, resolve the version before writing a line of the trait
   impls. A `cargo tree -d web_atoms` showing two versions is the failure.
+
+## The borrowed style view, deferred out of Phase 4
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md` §4 item 2
+- **Belongs to:** phase 5
+- **What:** `StyleView<'_>` / `StyleNode<'dom>` — `Copy`, two words,
+  `Send + Sync`, constructed only through a generation-checked lookup, unable
+  to outlive the tree borrow. The type `px-css` implements `TNode`/`TElement`
+  on. The note says to build it in Phase 4.
+- **Why deferred:** ADR 021. The note gives one reason for the Phase 4 timing —
+  *"its whole value is that it forces the arena and slot layout decisions
+  early"* — and those decisions are made and recorded without it (ADRs 018 and
+  020, plus §3.5's packing). Writing the type now means writing it against an
+  inferred shape (§3.3 is marked `[I]`) of a trait the same note records as
+  churning: 24 releases in 28 months, breaking changes in most, a supertrait
+  added as recently as 2026-06-30.
+- **What Phase 5 must check first:** whether the arena actually supports it. If
+  slot layout, `NodeId`'s width, or the opaque packing has to change to write
+  `StyleNode`, ADR 021 was wrong in its central claim and should say so rather
+  than the difficulty being absorbed as ordinary Phase 5 friction.

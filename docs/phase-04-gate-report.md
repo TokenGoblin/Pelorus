@@ -352,6 +352,31 @@ The figure that reaches a user is **789, of which a mutex is 539**.
 trust entry: trusting its publisher would assert we vouch for a maintainer
 whose code we never build.
 
+## The one research item not taken
+
+`stylo-requirements.md` §4 item 2 — the borrowed `StyleView` / `StyleNode`
+type — says *"build it in Phase 4 even though nothing consumes it until Phase
+5."* It was not built. ADR 021 records why.
+
+The note gives one reason for the Phase 4 timing and states it as the whole
+reason: *"its whole value is that it forces the arena and slot layout decisions
+early."* Those decisions are made and recorded without it — stable addresses
+(ADR 020, decided precisely on §3.3's argument about `StyleNode<'dom>` holding
+`&'dom Slot`, at a measured 25% traversal cost), `NodeId` layout (ADR 018), and
+the opaque packing (§3.5). The forcing function worked; the artefact it was
+meant to work through is not needed for it to have worked.
+
+Against that, the note's own evidence: §3.3 is marked `[I]`, inferred, not
+`[V]`; and *"24 published versions in ~28 months, with breaking trait changes
+in most … `dom.rs` changed as recently as 2026-06-30 in a way that added a
+supertrait."* Writing an unconsumed type against an inferred shape of a
+churning trait, with no compiler able to say whether it is right, most likely
+means writing it twice.
+
+It is a close call and the ADR says so. The tripwire is explicit: if Phase 5
+has to change slot layout, `NodeId`, or the packing in order to write
+`StyleNode`, this decision was wrong and that is the first thing to say.
+
 ## Carried out of this phase
 
 - The 24h mutation campaign (above) — the one gate item not met.
