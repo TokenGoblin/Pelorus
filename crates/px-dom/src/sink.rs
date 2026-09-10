@@ -168,7 +168,15 @@ impl Sink {
         match error {
             // Ordinary: the tree builder detaches and re-appends freely, and
             // asking about a node that has already gone is not content loss.
-            TreeError::NoSuchNode | TreeError::WouldCycle => {}
+            //
+            // `Immovable` joins them rather than counting as truncation: it
+            // means the tree builder tried to move or remove the document,
+            // which the arena refuses. No content is lost by that refusal --
+            // the document is where the content goes.
+            TreeError::NoSuchNode
+            | TreeError::WouldCycle
+            | TreeError::Immovable
+            | TreeError::CannotHaveChildren => {}
             TreeError::TooDeep | TreeError::Exhausted => {
                 self.truncated.set(self.truncated.get() + 1);
             }

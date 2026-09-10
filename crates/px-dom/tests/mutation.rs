@@ -33,6 +33,27 @@ fn node(arena: &mut Arena, label: &str) -> NodeId {
     }
 }
 
+/// A `<div>`, for the tests that need something children can hang from.
+///
+/// Character data cannot have children — the DOM says so and `Arena` enforces
+/// it, after the mutation fuzz harness found that it did not and built a text
+/// node with a child list.
+fn container(arena: &mut Arena) -> NodeId {
+    match arena.create(NodeData::Element {
+        name: html5ever::QualName::new(
+            None,
+            html5ever::ns!(html),
+            html5ever::LocalName::from("div"),
+        ),
+        attrs: Vec::new(),
+        template_contents: None,
+        script_already_started: false,
+    }) {
+        Ok(id) => id,
+        Err(error) => unreachable!("a fresh arena has slots: {error:?}"),
+    }
+}
+
 fn label(arena: &Arena, id: NodeId) -> Option<String> {
     arena
         .get(id)
@@ -110,7 +131,7 @@ fn dom_mutation_snapshot_of_children_survives_reordering() {
     let mut arena = Arena::new();
     let doc = arena.document();
 
-    let parent = node(&mut arena, "parent");
+    let parent = container(&mut arena);
     arena.append_child(doc, parent).expect("append");
     for i in 0..8 {
         let child = node(&mut arena, &format!("c{i}"));
@@ -154,8 +175,8 @@ fn dom_mutation_reparent_children_moves_all_of_them() {
     let mut arena = Arena::new();
     let doc = arena.document();
 
-    let from = node(&mut arena, "from");
-    let to = node(&mut arena, "to");
+    let from = container(&mut arena);
+    let to = container(&mut arena);
     arena.append_child(doc, from).expect("append");
     arena.append_child(doc, to).expect("append");
 
@@ -196,9 +217,9 @@ fn dom_mutation_cycles_are_refused() {
     let mut arena = Arena::new();
     let doc = arena.document();
 
-    let grandparent = node(&mut arena, "gp");
-    let parent = node(&mut arena, "p");
-    let child = node(&mut arena, "c");
+    let grandparent = container(&mut arena);
+    let parent = container(&mut arena);
+    let child = container(&mut arena);
     arena.append_child(doc, grandparent).expect("append");
     arena.append_child(grandparent, parent).expect("append");
     arena.append_child(parent, child).expect("append");
@@ -303,7 +324,7 @@ fn dom_mutation_validate_accepts_real_trees() {
     let doc = arena.document();
     let mut nodes = Vec::new();
     for i in 0..64 {
-        let child = node(&mut arena, &format!("c{i}"));
+        let child = container(&mut arena);
         let parent = if i % 3 == 0 {
             doc
         } else {

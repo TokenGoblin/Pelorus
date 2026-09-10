@@ -24,7 +24,9 @@
 //! Gated behind `testing` and therefore absent from any release build, along
 //! with [`Arena::force_generation_to_last`], which is the point of the gate.
 
-use crate::{Arena, NodeData, NodeId};
+use html5ever::{QualName, local_name, ns};
+
+use crate::{Arena, BoundaryPoint, NodeData, NodeId, RangeId};
 
 /// Pick from a list by a byte, or `None` if the list is empty.
 fn pick(ids: &[NodeId], n: u8) -> Option<NodeId> {
@@ -238,19 +240,68 @@ fn assert_is_a_tree(arena: &Arena, _known: &[NodeId]) {
     }
 }
 
+/// Every live range still points somewhere real.
+///
+/// Cheap enough to run after every operation: `Option` lookups plus a child
+/// count, over a deliberately small set of ranges. The expensive property —
+/// that a range's start never comes to *follow* its end — needs a document
+/// order comparison, which is O(nodes), so it runs once at the end.
+fn assert_ranges_are_well_formed(arena: &Arena, ranges: &[RangeId]) {
+    for id in ranges {
+        let Some(range) = arena.range(*id) else {
+            // Dropped. Its handle stopping resolving is the point.
+            continue;
+        };
+        assert!(
+            arena.is_valid_boundary(range.start),
+            "a live range's start is out of bounds after a mutation: {:?}",
+            range.start
+        );
+        assert!(
+            arena.is_valid_boundary(range.end),
+            "a live range's end is out of bounds after a mutation: {:?}",
+            range.end
+        );
+    }
+}
+
 /// §9 Phase 4's "24h mutation fuzz clean", as a property rather than an
 /// absence of crashes.
+///
+/// # What counts as "mutation"
+///
+/// `px-dom` has three mutation surfaces, and an earlier version of this
+/// harness exercised one. Tree structure was fuzzed; **live ranges and
+/// attribute writes were not**, and both are mutation-path features — a range
+/// is updated by every insertion and removal, and an attribute write records a
+/// prior-state snapshot. Fuzzing the tree and calling that "mutation fuzz"
+/// is the same shape of gap as fuzzing the arena and calling it parser
+/// coverage.
+///
+/// So this drives all three, and checks what a wrong answer would not
+/// announce:
+///
+/// - the tree is still a tree ([`Arena::validate`]);
+/// - every live range still points somewhere real, after every operation;
+/// - no range's start has come to follow its end;
+/// - nothing leaked and nothing was double-freed.
 pub fn mutations(data: &[u8]) {
     let mut arena = Arena::new();
     let document = arena.document();
     let mut known: Vec<NodeId> = vec![document];
+    let mut ranges: Vec<RangeId> = Vec::new();
+
+    // Snapshot recording on, so attribute writes take the path that captures
+    // prior state rather than the cheap one. Off is the parse-time default and
+    // is already covered by every other target here.
+    arena.record_snapshots(true);
 
     let mut bytes = data.iter().copied();
     while let Some(op) = bytes.next() {
         let a = bytes.next().unwrap_or(0);
         let b = bytes.next().unwrap_or(0);
 
-        match op % 7 {
+        match op % 11 {
             0 | 1 => {
                 let Ok(id) = arena.create(NodeData::Text {
                     contents: "t".into(),
@@ -263,16 +314,32 @@ pub fn mutations(data: &[u8]) {
                 known.push(id);
             }
 
+            // An element, so the attribute operations have somewhere to go.
+            2 => {
+                let Ok(id) = arena.create(NodeData::Element {
+                    name: QualName::new(None, ns!(html), local_name!("div")),
+                    attrs: Vec::new(),
+                    template_contents: None,
+                    script_already_started: false,
+                }) else {
+                    continue;
+                };
+                if let Some(parent) = pick(&known, a) {
+                    let _ = arena.append_child(parent, id);
+                }
+                known.push(id);
+            }
+
             // Moving an existing node is the operation most likely to corrupt
             // the sibling chain: it unlinks and relinks in one step.
-            2 => {
+            3 => {
                 if let (Some(parent), Some(child)) = (pick(&known, a), pick(&known, b)) {
                     let _ = arena.append_child(parent, child);
                 }
             }
 
             // insert_before carries the first_child edge case.
-            3 => {
+            4 => {
                 let Ok(id) = arena.create(NodeData::Comment {
                     contents: "c".into(),
                 }) else {
@@ -284,27 +351,127 @@ pub fn mutations(data: &[u8]) {
                 known.push(id);
             }
 
-            4 => {
+            5 => {
                 if let Some(id) = pick(&known, a) {
                     let _ = arena.detach(id);
                 }
             }
 
-            5 => {
+            6 => {
                 if let Some(id) = pick(&known, a) {
                     let _ = arena.remove_subtree(id);
                 }
             }
 
-            _ => {
+            7 => {
                 if let (Some(from), Some(to)) = (pick(&known, a), pick(&known, b)) {
                     let _ = arena.reparent_children(from, to);
+                }
+            }
+
+            // A live range, which every later insertion and removal has to
+            // keep correct. Bounded at eight: the per-operation check below is
+            // linear in this, and the point is that ranges exist during the
+            // churn, not that there are many.
+            8 => {
+                if ranges.len() >= 8 {
+                    if let Some(id) = ranges.first().copied() {
+                        arena.drop_range(id);
+                        ranges.remove(0);
+                    }
+                    continue;
+                }
+                let (Some(start_node), Some(end_node)) = (pick(&known, a), pick(&known, b)) else {
+                    continue;
+                };
+                let start = BoundaryPoint::new(start_node, usize::from(a) % 3);
+                let end = BoundaryPoint::new(end_node, usize::from(b) % 3);
+                // Refused for an invalid or inverted pair, which is most of
+                // them; the ones that survive are the interesting ones.
+                if let Ok(id) = arena.new_range(start, end) {
+                    ranges.push(id);
+                }
+            }
+
+            9 => {
+                if let Some(id) = pick(&known, a) {
+                    let name = QualName::new(
+                        None,
+                        ns!(),
+                        match b % 3 {
+                            0 => local_name!("class"),
+                            1 => local_name!("id"),
+                            _ => local_name!("href"),
+                        },
+                    );
+                    let _ = arena.set_attribute(id, name, "v".into());
+                }
+            }
+
+            _ => {
+                if let Some(id) = pick(&known, a) {
+                    let name = QualName::new(
+                        None,
+                        ns!(),
+                        if b % 2 == 0 {
+                            local_name!("class")
+                        } else {
+                            local_name!("id")
+                        },
+                    );
+                    let _ = arena.remove_attribute(id, &name);
                 }
             }
         }
 
         assert_is_a_tree(&arena, &known);
+        assert_ranges_are_well_formed(&arena, &ranges);
     }
+
+    // There is deliberately **no assertion here that a range's start still
+    // precedes its end.**
+    //
+    // It was written, and it fires: a sequence of legal mutations produces a
+    // range whose start compares as following its own end, with both boundary
+    // points still individually valid. What is *not* established is whether
+    // that is a defect in the mutation rules or an inherent property of
+    // (node, offset) boundary points — moving a container carries its boundary
+    // points with it, and nothing in the DOM's rules re-checks ordering
+    // afterwards.
+    //
+    // Every case reachable by hand keeps the ordering. The fuzzer's does not,
+    // and the difference is a long sequence in which parts of the tree are
+    // detached, where the comparison has no answer at all.
+    //
+    // Asserting it would fail the build on a property this project has not
+    // established; dropping it silently would lose the question. So it is an
+    // #[ignore]d test carrying the reproducer, in
+    // crates/px-dom/tests/open_questions.rs — which is what /CLAUDE.md
+    // prescribes for exactly this: "If a spec is ambiguous, encode the
+    // ambiguity as an #[ignore] test with a comment and raise it. Do not
+    // guess."
+
+    // A snapshot per node written to, at most once each -- and **not** bounded
+    // by the nodes still alive.
+    //
+    // The first version of this asserted "no more snapshots than live
+    // elements", and it failed on the first run: an element mutated and then
+    // removed keeps its record. That is correct and deliberate. The snapshot
+    // describes what the element looked like as of the last restyle, and a
+    // restyle still needs to know it changed even though it has since gone;
+    // Servo's `SnapshotMap` persists the same way, until the flush.
+    //
+    // It is safe here for a reason that is not true of Servo's pointer keys:
+    // the key is a generational `NodeId`, so a reused slot gets a different
+    // key and a stale snapshot can never be matched to the new occupant
+    // (§3.5, `NodeId::to_opaque`). Without that, this behaviour would be the
+    // bug rather than the design.
+    assert!(
+        arena.snapshot_count() <= known.len(),
+        "there are {} snapshots for {} nodes ever created",
+        arena.snapshot_count(),
+        known.len()
+    );
 
     // Accounting. A leak and a double-free both show up here as a mismatch,
     // and neither shows up as a crash.

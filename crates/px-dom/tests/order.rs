@@ -30,12 +30,39 @@ fn link(arena: &mut Arena, parent: NodeId, child: NodeId) {
     }
 }
 
+/// An element named `name`, for the nodes that have children.
+///
+/// Character data cannot have children — the DOM says so and `Arena` enforces
+/// it — so the branches of the sample tree are elements and the leaves are
+/// text.
+fn element(arena: &mut Arena, name: &str) -> NodeId {
+    match arena.create(NodeData::Element {
+        name: html5ever::QualName::new(
+            None,
+            html5ever::ns!(html),
+            html5ever::LocalName::from(name),
+        ),
+        attrs: Vec::new(),
+        template_contents: None,
+        script_already_started: false,
+    }) {
+        Ok(id) => id,
+        Err(error) => unreachable!("a fresh arena has slots: {error:?}"),
+    }
+}
+
+/// A node's label: its text, or its element name.
 fn label(arena: &Arena, id: NodeId) -> String {
-    arena
-        .get(id)
-        .and_then(|node| node.text())
-        .map(|text| text.to_string())
-        .unwrap_or_else(|| "<gone>".to_owned())
+    let Some(node) = arena.get(id) else {
+        return "<gone>".to_owned();
+    };
+    if let Some(text) = node.text() {
+        return text.to_string();
+    }
+    match node.element_name() {
+        Some(name) => name.local.to_string(),
+        None => "<gone>".to_owned(),
+    }
 }
 
 /// Build:
@@ -52,8 +79,8 @@ fn sample() -> (Arena, Vec<(&'static str, NodeId)>) {
     let mut arena = Arena::new();
     let doc = arena.document();
 
-    let a = node(&mut arena, "a");
-    let b = node(&mut arena, "b");
+    let a = element(&mut arena, "a");
+    let b = element(&mut arena, "b");
     let a1 = node(&mut arena, "a1");
     let a2 = node(&mut arena, "a2");
     let b1 = node(&mut arena, "b1");

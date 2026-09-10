@@ -654,3 +654,26 @@ Format: one entry per defect.
 - **What to do:** wire `px-ipc` when it gains a dependency whose unsafe its
   tests execute, and `px-store` when it exists. `ci/gate-miri.sh` is written to
   take more crates without restructuring.
+
+## Open: can a live range's start come to follow its end?
+
+- **Found in:** phase 4, by the mutation fuzz harness once it was taught to
+  create ranges
+- **Belongs to:** unassigned — it is a question, not a defect
+- **What:** a sequence of individually legal mutations ends with a range whose
+  `compare_boundaries(start, end)` is `After`, with both boundary points still
+  valid. Not a dangling range: a span that runs backwards.
+- **What is not known:** whether that is a defect in `Arena`'s implementation
+  of the DOM's mutation rules, or inherent to `(node, offset)` boundary points.
+  Moving a container carries its boundary points with it and no rule re-checks
+  ordering; but every inversion reachable by hand turns out to be corrected by
+  the removal and insertion rules. The fuzzer's sequence is 33 operations and
+  spends part of it with subtrees detached, where the comparison has no answer.
+- **Recorded as** an `#[ignore]`d test with the reproducer,
+  `crates/px-dom/tests/open_questions.rs`, per `/CLAUDE.md`: *"If a spec is
+  ambiguous, encode the ambiguity as an #[ignore] test with a comment and
+  raise it. Do not guess."* Deliberately outside `ci/gate-dom.sh`'s suite list,
+  and named to avoid its filters — an open question should not be dressed as
+  either a pass or a failure.
+- **How to settle it:** reduce the sequence to something readable and check
+  each step against the spec's remove and insert algorithms.

@@ -331,6 +331,66 @@ red, and so does a suite disappearing. The second one was worth checking — the
 first version reported a deleted file as *"miri found undefined behaviour in
 snapshots"*, which is untrue and sends somebody looking in the wrong place.
 
+## What the mutation harness found once it covered all three surfaces
+
+`px-dom` has three mutation surfaces. The harness exercised one.
+
+Tree structure was fuzzed; **live ranges and attribute writes were not** — and
+both are mutation-path features built during this phase. A range is updated by
+every insertion and removal; an attribute write records a prior-state
+snapshot. Fuzzing the tree and calling that "mutation fuzz" is the same shape
+of gap as fuzzing the arena and calling it parser coverage.
+
+Teaching it all three found **four defects in the first second**, none of which
+the 13 hand-written range tests or the 12 snapshot tests had reached.
+
+**The document node could be removed.** `remove_subtree(document)` succeeded,
+freed every node, and left `document()` handing out a stale handle — and
+`validate()` still returned `Ok(())`. The arena's most basic invariant, broken,
+with the validator reporting healthy.
+
+**The document node could be given a parent.** `append_child(orphan, document)`
+succeeded. Same silence from `validate()`.
+
+**A text node could have children.** Nothing stopped `append_child(text, x)`.
+That matters beyond tidiness: a boundary point's offset means *children* for a
+node that has them and *bytes* for character data, so a text node with a child
+list has two incompatible notions of its own length and every range pointing
+into it is nonsense. This is the DOM's `HierarchyRequestError`, and it is now
+`TreeError::CannotHaveChildren`.
+
+**`precedes` contradicted itself.** It walked from the document and returned on
+the first node found — so with `a` detached and `b` attached, it answered "a
+does not precede b", *and* answered "b precedes a". `compare_boundary_points`
+inverts the mirrored answer, so an inconsistent `precedes` produced ranges that
+compared as following themselves. Nodes outside the document tree are not
+comparable in document order, and `None` is that answer.
+
+Plus one behaviour that turned out to be correct and undocumented: a removed
+element **keeps** its snapshot, because a restyle still needs to know it
+changed. Safe here only because the key is a generational `NodeId` — with
+Servo's pointer keys it would be the bug rather than the design. Now written
+down where it looks like a leak.
+
+### And one question left open
+
+The harness also produces a range whose start compares as *following its own
+end*, with both boundary points still valid — a span running backwards rather
+than a dangling range.
+
+Whether that is a defect here or inherent to `(node, offset)` boundary points
+is **not established**. Moving a container carries its boundary points with it
+and no DOM rule re-checks ordering; but every inversion reachable by hand is
+corrected by the removal and insertion rules. The fuzzer's sequence is 33
+operations and spends part of it with subtrees detached, where the comparison
+has no answer at all.
+
+Asserting it would fail the build on a property this project has not
+established. Deleting it would lose the question. So it is an `#[ignore]`d test
+carrying the reproducer, per `/CLAUDE.md`'s rule for exactly this — outside the
+gate's suite list and named to avoid its filters, because an open question
+should not be dressed as either a pass or a failure.
+
 ## The one research item not taken
 
 `stylo-requirements.md` §4 item 2 — the borrowed `StyleView` / `StyleNode`

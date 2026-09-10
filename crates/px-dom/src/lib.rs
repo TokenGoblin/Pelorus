@@ -83,14 +83,35 @@ impl Arena {
         if !self.contains(a) || !self.contains(b) || a == b {
             return None;
         }
-        for id in self.descendants(self.document()) {
+        // Both, or neither. Returning on the first one found gives a definite
+        // answer for a pair that has none: with `a` detached and `b` in the
+        // document, the walk reaches `b` first and reports "a does not precede
+        // b" — and the mirrored call reports "b precedes a", so the relation
+        // contradicts itself.
+        //
+        // `compare_boundary_points` inverts the mirrored answer, so an
+        // inconsistent `precedes` produced a range whose start compared as
+        // following its own end. The mutation fuzz harness found it once it
+        // was allowed to create ranges and detach subtrees in the same run.
+        //
+        // Nodes outside the document tree are not comparable in document
+        // order, and `None` is that answer.
+        let mut position_of_a = None;
+        let mut position_of_b = None;
+        for (index, id) in self.descendants(self.document()).enumerate() {
             if id == a {
-                return Some(true);
+                position_of_a = Some(index);
             }
             if id == b {
-                return Some(false);
+                position_of_b = Some(index);
+            }
+            if position_of_a.is_some() && position_of_b.is_some() {
+                break;
             }
         }
-        None
+        match (position_of_a, position_of_b) {
+            (Some(first), Some(second)) => Some(first < second),
+            _ => None,
+        }
     }
 }

@@ -77,19 +77,37 @@ fn dom_stale_handle_does_not_resolve_to_the_slot_reuser() {
     assert!(arena.get(second).is_some());
 }
 
+/// A `<div>`, for the tests that nest. Character data cannot have children —
+/// the DOM says so and `Arena` enforces it — so a chain has to be elements.
+fn element(arena: &mut Arena) -> px_dom::NodeId {
+    match arena.create(NodeData::Element {
+        name: html5ever::QualName::new(
+            None,
+            html5ever::ns!(html),
+            html5ever::LocalName::from("div"),
+        ),
+        attrs: Vec::new(),
+        template_contents: None,
+        script_already_started: false,
+    }) {
+        Ok(id) => id,
+        Err(error) => unreachable!("a fresh arena has slots: {error:?}"),
+    }
+}
+
 /// Removing a subtree invalidates every handle in it, not only the root's.
 #[test]
 fn dom_stale_handles_are_invalidated_throughout_a_removed_subtree() {
     let mut arena = Arena::new();
     let doc = arena.document();
 
-    let root = text(&mut arena, "root");
+    let root = element(&mut arena);
     arena.append_child(doc, root).expect("append");
 
     let mut descendants = Vec::new();
     let mut parent = root;
-    for depth in 0..100 {
-        let child = text(&mut arena, &format!("d{depth}"));
+    for _ in 0..100 {
+        let child = element(&mut arena);
         arena.append_child(parent, child).expect("append");
         descendants.push(child);
         parent = child;

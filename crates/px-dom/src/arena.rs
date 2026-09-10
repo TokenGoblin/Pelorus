@@ -45,6 +45,24 @@ pub enum TreeError {
     /// The arena has no slot to give: 2³² slots allocated, or every remaining
     /// slot retired.
     Exhausted,
+    /// The parent cannot have children: it is text, a comment, a doctype or a
+    /// processing instruction.
+    ///
+    /// The DOM calls this a `HierarchyRequestError`. It matters here beyond
+    /// tidiness because a boundary point's offset means *children* for a node
+    /// that has them and *bytes* for character data — so a text node with a
+    /// child list has two incompatible notions of its own length, and every
+    /// range that points into it is nonsense. The mutation fuzz harness found
+    /// exactly that, by moving a node under a text node.
+    CannotHaveChildren,
+    /// The operation would have moved or removed the document node.
+    ///
+    /// The document is the one node the arena assumes exists: `document()`
+    /// hands out its handle, every traversal starts there, and `validate`
+    /// checks the tree from it. Letting it be removed or re-parented turns
+    /// every one of those into a silent lie — which is what happened, and what
+    /// the mutation fuzz harness found once it was allowed to try.
+    Immovable,
 }
 
 /// One slot. Occupied, vacant, or retired.
@@ -540,6 +558,12 @@ impl Arena {
         if !self.contains(id) {
             return Err(TreeError::NoSuchNode);
         }
+        // The document is not removable. Without this, `remove_subtree(doc)`
+        // succeeded, freed every node, left `document()` handing out a stale
+        // handle -- and `validate()` still returned `Ok(())`.
+        if id == self.document {
+            return Err(TreeError::Immovable);
+        }
         self.detach(id)?;
 
         let mut freed = 0usize;
@@ -566,6 +590,45 @@ impl Arena {
                 freed += 1;
             }
         }
+
+        // Drop any range left pointing into what was just freed.
+        //
+        // The DOM's removal rule collapses a boundary point inside a removed
+        // subtree to where that subtree used to be, and `detach` applies it —
+        // but `detach` returns early for a node with no parent, so freeing a
+        // *detached* subtree ran no rule at all and left live ranges pointing
+        // at freed slots. The mutation fuzz harness found it within a second
+        // of being taught to create ranges.
+        //
+        // There is no removal site to collapse to when the subtree had no
+        // parent, and a live range whose endpoints do not resolve is worse
+        // than no range: it reads as usable and is not. So the range is
+        // dropped, and its handle goes stale like any other.
+        //
+        // This is a px-dom concept with no DOM equivalent. In the DOM a range
+        // keeps its nodes alive and the question never arises; here removal is
+        // explicit, so the behaviour has to be chosen rather than inherited.
+        if !self.ranges.is_empty() {
+            let doomed: Vec<RangeId> = self
+                .ranges
+                .iter()
+                .enumerate()
+                .filter_map(|(index, slot)| {
+                    let range = slot.range?;
+                    let dangling =
+                        !self.contains(range.start.node()) || !self.contains(range.end.node());
+                    if !dangling {
+                        return None;
+                    }
+                    let index = u32::try_from(index).ok()?;
+                    Some(RangeId::new(index, slot.generation))
+                })
+                .collect();
+            for id in doomed {
+                self.drop_range(id);
+            }
+        }
+
         Ok(freed)
     }
 
@@ -889,6 +952,23 @@ impl Arena {
 
     /// Take every snapshot, clearing the table.
     ///
+    /// **Removing a node does not drop its snapshot**, and that is deliberate.
+    /// The record describes what an element looked like as of the last
+    /// restyle, and a restyle still needs to know it changed even though it
+    /// has since gone — Servo's `SnapshotMap` persists the same way. So the
+    /// table can hold records for nodes that no longer resolve, and does.
+    ///
+    /// That is safe here for a reason that is not true of Servo's pointer
+    /// keys: the key is a generational `NodeId`, so a reused slot gets a
+    /// different key and a stale record can never be matched to the new
+    /// occupant of its slot (see `NodeId::to_opaque`). Without generational
+    /// keys this would be the bug rather than the design.
+    ///
+    /// The cost is that a page which creates, mutates and discards elements
+    /// accumulates records until the next flush. Bounded by the restyle
+    /// interval — one frame, for anything animating — and worth knowing before
+    /// somebody reads a growing table as a leak.
+    ///
     /// This is the flush: after it, the next mutation of an element captures
     /// fresh prior state. Stylo calls the equivalent at the start of a restyle
     /// and the `handled_snapshot` bit is what stops it processing one twice --
@@ -1125,6 +1205,21 @@ impl Arena {
         // walk went too far" — indistinguishable from a legitimately over-deep
         // node. Here a cycle is a node no root can reach, which is exactly what
         // a cycle is.
+        // The document exists and is a root.
+        //
+        // Checked here because it was not, and both ways of breaking it
+        // returned `Ok(())` from this function: removing the document, and
+        // giving it a parent. A validator that reports a healthy tree with no
+        // document is worse than no validator, because the thing it is trusted
+        // for is exactly this.
+        match self.get(self.document) {
+            None => return Err((self.document, "the document node does not resolve")),
+            Some(node) if node.parent().is_some() => {
+                return Err((self.document, "the document node has a parent"));
+            }
+            Some(_) => {}
+        }
+
         let mut visited = vec![false; self.slots.len()];
         let mut stack: Vec<(NodeId, usize)> = Vec::new();
 
@@ -1225,6 +1320,22 @@ impl Arena {
         }
         if parent == child {
             return Err(TreeError::WouldCycle);
+        }
+        // The document cannot become anybody's child. Without this,
+        // `append_child(some_detached_node, document)` succeeded and the
+        // document acquired a parent, which makes it a node in somebody
+        // else's subtree -- removable along with it, and no longer the root
+        // every traversal assumes.
+        if child == self.document {
+            return Err(TreeError::Immovable);
+        }
+        // Only a document, a fragment or an element can hold children.
+        let can_have_children = matches!(
+            self.get(parent).map(Node::data),
+            Some(NodeData::Document | NodeData::Fragment | NodeData::Element { .. })
+        );
+        if !can_have_children {
+            return Err(TreeError::CannotHaveChildren);
         }
 
         // The loop visits `parent` and then each of its ancestors, so the

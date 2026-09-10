@@ -34,8 +34,15 @@ const MANY: usize = 100_000;
 // cannot be exhausted, and a node built two lines above is not stale.
 fn element(arena: &mut Arena, name: &str) -> px_dom::NodeId {
     let _ = name;
-    match arena.create(NodeData::Text {
-        contents: "x".into(),
+    match arena.create(NodeData::Element {
+        name: html5ever::QualName::new(
+            None,
+            html5ever::ns!(html),
+            html5ever::LocalName::from("div"),
+        ),
+        attrs: Vec::new(),
+        template_contents: None,
+        script_already_started: false,
     }) {
         Ok(id) => id,
         Err(error) => unreachable!("a fresh arena has slots: {error:?}"),
