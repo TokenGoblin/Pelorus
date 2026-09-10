@@ -177,7 +177,16 @@ that exact corruption.
 **This item is incomplete and the phase should not be called closed on it.**
 
 Run [34434827530](https://github.com/TokenGoblin/Pelorus/actions/runs/34434827530)
-is in flight: 11 shards × 4 hours, three of them the DOM targets. The matrix
+is in flight: 11 shards × 4 hours, three of them the DOM targets.
+
+**And it does not cover `dom_parse`.** It was launched at `a599761`, which
+predates that target by several commits, so it is fuzzing the two arena targets
+and none of the parser. A campaign that reports clean while never touching the
+code it was meant to is this project's recurring failure — Phase 1's did it
+through a default `-max_len`, and this would do it through a matrix written
+before the target existed. Recorded here rather than discovered when the run
+goes green: **a second campaign is owed for `dom_parse` before Phase 4 closes**,
+and the first one's result covers less than the gate item asks. The matrix
 did not know these targets existed until this phase added them, so a campaign
 run before that would have reported clean while never touching them — the
 Phase 1 failure again, arrived at by omission rather than by a wrong flag.

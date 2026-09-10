@@ -598,3 +598,20 @@ Format: one entry per defect.
   slot layout, `NodeId`'s width, or the opaque packing has to change to write
   `StyleNode`, ADR 021 was wrong in its central claim and should say so rather
   than the difficulty being absorbed as ordinary Phase 5 friction.
+
+## The Phase 4 campaign predates dom_parse and does not cover it
+
+- **Found in:** phase 4
+- **Belongs to:** phase 4, before it closes
+- **What:** campaign run 34434827530 was launched at `a599761`, several commits
+  before `dom_parse` existed. It fuzzes `dom_stale_handle` and `dom_mutation`
+  and no parser at all.
+- **Why it matters:** this is the project's recurring failure, arriving by a
+  third route. Phase 1's campaign reported clean for 24 hours against a default
+  `-max_len` that put the code out of reach; Phase 3's ran before the HTTP
+  targets had a `-max_len` that straddled their own limits; this one would
+  report clean against a matrix written before the target existed.
+- **What to do:** re-run the campaign at a commit that includes `dom_parse`
+  before calling Phase 4 done, and put both results in the gate report. The
+  first run's numbers are still worth having — they cover the arena targets —
+  but they do not satisfy the gate item on their own.
