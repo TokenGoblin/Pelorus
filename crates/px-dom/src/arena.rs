@@ -9,6 +9,10 @@ use core::num::NonZeroU32;
 
 use crate::handle::NodeId;
 use crate::node::{Node, NodeData};
+use crate::range::{
+    BoundaryPoint, Position, Range, RangeId, compare_boundary_points, index_of,
+    is_inclusive_ancestor, node_length,
+};
 
 /// The maximum depth of the tree, per build-spec §4.4 ("start at 512").
 ///
@@ -64,6 +68,21 @@ pub struct Arena {
     live: usize,
     retired: usize,
     document: NodeId,
+    /// Live ranges, and the generation of each slot.
+    ///
+    /// Ranges are held by the tree rather than by their creator because the
+    /// DOM's ranges are *live*: the tree has to be able to reach every one of
+    /// them on every mutation. Same slot-and-generation shape as nodes, for
+    /// the same reason — a dropped range's slot gets reused, and a stale
+    /// `RangeId` resolving to somebody else's selection is the same class of
+    /// bug as a stale `NodeId` resolving to somebody else's node.
+    ranges: Vec<RangeSlot>,
+    free_ranges: Vec<u32>,
+}
+
+struct RangeSlot {
+    generation: NonZeroU32,
+    range: Option<Range>,
 }
 
 impl Arena {
@@ -78,6 +97,8 @@ impl Arena {
             // this state: `create` on an empty arena cannot fail, because the
             // only failure is exhaustion and nothing has been allocated.
             document: NodeId::new(0, NonZeroU32::MIN),
+            ranges: Vec::new(),
+            free_ranges: Vec::new(),
         };
         if let Ok(id) = arena.create(NodeData::Document) {
             arena.document = id;
@@ -276,6 +297,23 @@ impl Arena {
         self.get_mut(parent)
             .ok_or(TreeError::NoSuchNode)?
             .last_child = Some(child);
+
+        // No range notification here, and it is worth writing down why rather
+        // than leaving the asymmetry with `insert_before` to look like an
+        // oversight.
+        //
+        // An append lands at the end, so its insertion index is the parent's
+        // previous child count. The DOM's rule moves only boundary points
+        // whose offset is *greater* than that index — and the largest valid
+        // offset in a parent is exactly its child count, which is the index
+        // itself. Nothing can be greater. An append therefore never moves a
+        // boundary point.
+        //
+        // The first version of this called `child_ids(parent).count()` to pass
+        // the index anyway. That is a walk of the whole child list on every
+        // append, which is quadratic over a parse: 100,000 paragraphs took
+        // 145 seconds, against 2 for a million-deep nesting bomb. Proving the
+        // notification unnecessary is cheaper than making it fast.
         Ok(())
     }
 
@@ -316,6 +354,10 @@ impl Arena {
                     .first_child = Some(new_node);
             }
         }
+
+        if let Some(index) = index_of(self, new_node) {
+            self.ranges_after_insert(parent, index);
+        }
         Ok(())
     }
 
@@ -331,6 +373,11 @@ impl Arena {
             // freely and checking first would be the same walk twice.
             return Ok(());
         };
+
+        // Before anything is unlinked. The rule needs this node still in
+        // place: it asks for the node index and for which boundary points sit
+        // inside its subtree, and neither question survives the unlink.
+        self.ranges_before_remove(id);
 
         match previous {
             Some(previous) => {
@@ -485,6 +532,210 @@ impl Arena {
             }
         }
         Some(children)
+    }
+
+    // -----------------------------------------------------------------------
+    // Ranges (DOM 4.4), live across mutation
+    // -----------------------------------------------------------------------
+
+    /// Whether a boundary point is currently valid: the node resolves and the
+    /// offset is within it.
+    ///
+    /// A question about *now*, deliberately. A boundary point is a value and
+    /// the tree keeps changing, so a type that guaranteed validity at
+    /// construction would be lying by the next mutation.
+    pub fn is_valid_boundary(&self, point: BoundaryPoint) -> bool {
+        node_length(self, point.node()).is_some_and(|length| point.offset() <= length)
+    }
+
+    /// Compare two boundary points in document order.
+    ///
+    /// <https://dom.spec.whatwg.org/#concept-range-bp-position>
+    ///
+    /// `None` when they cannot be compared -- a stale handle, or nodes in
+    /// different trees. Deliberately not `Position::Equal`: "these cannot be
+    /// compared" and "these are the same place" are different answers, and
+    /// collapsing them is how a range silently starts covering the wrong text.
+    pub fn compare_boundaries(&self, a: BoundaryPoint, b: BoundaryPoint) -> Option<Position> {
+        compare_boundary_points(self, a, b)
+    }
+
+    /// Create a live range. It is updated by every subsequent mutation until
+    /// [`Arena::drop_range`].
+    ///
+    /// Refuses boundary points that are invalid *now*, and refuses a range
+    /// whose end precedes its start. The DOM normalises that second case by
+    /// moving one point onto the other; doing so silently here would hide a
+    /// caller bug behind a range that covers nothing.
+    pub fn new_range(
+        &mut self,
+        start: BoundaryPoint,
+        end: BoundaryPoint,
+    ) -> Result<RangeId, TreeError> {
+        if !self.is_valid_boundary(start) || !self.is_valid_boundary(end) {
+            return Err(TreeError::NoSuchNode);
+        }
+        if compare_boundary_points(self, start, end) == Some(Position::After) {
+            return Err(TreeError::WouldCycle);
+        }
+
+        let range = Range { start, end };
+        if let Some(index) = self.free_ranges.pop() {
+            let slot = self
+                .ranges
+                .get_mut(index as usize)
+                .ok_or(TreeError::Exhausted)?;
+            let generation = slot.generation;
+            slot.range = Some(range);
+            return Ok(RangeId::new(index, generation));
+        }
+        let index = u32::try_from(self.ranges.len()).map_err(|_| TreeError::Exhausted)?;
+        self.ranges.push(RangeSlot {
+            generation: NonZeroU32::MIN,
+            range: Some(range),
+        });
+        Ok(RangeId::new(index, NonZeroU32::MIN))
+    }
+
+    /// Resolve a range handle. `None` if it is stale.
+    pub fn range(&self, id: RangeId) -> Option<Range> {
+        let slot = self.ranges.get(id.index() as usize)?;
+        if slot.generation != id.generation() {
+            return None;
+        }
+        slot.range
+    }
+
+    /// Stop tracking a range. Its handle stops resolving, permanently.
+    pub fn drop_range(&mut self, id: RangeId) -> bool {
+        let Some(slot) = self.ranges.get_mut(id.index() as usize) else {
+            return false;
+        };
+        if slot.generation != id.generation() || slot.range.is_none() {
+            return false;
+        }
+        slot.range = None;
+        // Generations spent means the slot is retired, exactly as for nodes:
+        // it never returns to the free list, so nothing is ever allocated
+        // there again and no future handle can collide with the ones already
+        // handed out.
+        if let Some(next) = slot.generation.checked_add(1) {
+            slot.generation = next;
+            self.free_ranges.push(id.index());
+        }
+        true
+    }
+
+    /// Live ranges currently held.
+    pub fn range_count(&self) -> usize {
+        self.ranges
+            .iter()
+            .filter(|slot| slot.range.is_some())
+            .count()
+    }
+
+    /// Whether a node lies within a range, by document position.
+    pub fn range_contains(&self, id: RangeId, node: NodeId) -> Option<bool> {
+        let range = self.range(id)?;
+        let point = BoundaryPoint::new(node, 0);
+        let after_start = compare_boundary_points(self, point, range.start)?;
+        let before_end = compare_boundary_points(self, point, range.end)?;
+        Some(after_start != Position::Before && before_end != Position::After)
+    }
+
+    /// The DOM insertion rule for live ranges.
+    ///
+    /// <https://dom.spec.whatwg.org/#concept-node-insert>
+    ///
+    /// > For each live range whose start node is parent and start offset is
+    /// > greater than child index, increase its start offset by one.
+    ///
+    /// A boundary point counts *positions between children*, so inserting
+    /// ahead of one moves it along. Without this a selection silently comes to
+    /// cover different content whenever anything is inserted before it, which
+    /// is a bug the user sees and nothing else reports.
+    fn ranges_after_insert(&mut self, parent: NodeId, index: usize) {
+        // The overwhelmingly common case, and the one a parse is entirely made
+        // of: no live ranges at all. Ranges appear when something selects, not
+        // when a document is built.
+        if self.ranges.is_empty() {
+            return;
+        }
+        for slot in &mut self.ranges {
+            let Some(range) = slot.range.as_mut() else {
+                continue;
+            };
+            if range.start.node() == parent && range.start.offset() > index {
+                range.start = BoundaryPoint::new(parent, range.start.offset() + 1);
+            }
+            if range.end.node() == parent && range.end.offset() > index {
+                range.end = BoundaryPoint::new(parent, range.end.offset() + 1);
+            }
+        }
+    }
+
+    /// The DOM removal rule for live ranges. Must run **before** the node is
+    /// unlinked: it needs the index and the subtree still intact.
+    ///
+    /// <https://dom.spec.whatwg.org/#concept-node-remove>
+    ///
+    /// Two separate rules, and conflating them is the classic error:
+    ///
+    /// - a boundary point *inside* the removed subtree collapses to where that
+    ///   subtree used to be, `(parent, index)`;
+    /// - a boundary point in the parent *after* the removed node shifts down
+    ///   by one, because the parent now has one fewer child.
+    ///
+    /// A range with one point inside and one outside is ordinary, and must end
+    /// up collapsed at the removal site on one side only.
+    fn ranges_before_remove(&mut self, node: NodeId) {
+        // Same early-out as the insertion rule, and it matters more here: the
+        // work below includes an `index_of`, which walks the child list.
+        if self.ranges.is_empty() {
+            return;
+        }
+        let Some(parent) = self.get(node).and_then(Node::parent) else {
+            return;
+        };
+        let Some(index) = index_of(self, node) else {
+            return;
+        };
+
+        // Which boundary points sit inside the doomed subtree, worked out
+        // before anything is touched: `is_inclusive_ancestor` needs the tree
+        // intact, and the loop below is about to change it.
+        let inside: Vec<(usize, bool, bool)> = self
+            .ranges
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| {
+                let range = slot.range?;
+                Some((
+                    i,
+                    is_inclusive_ancestor(self, node, range.start.node()),
+                    is_inclusive_ancestor(self, node, range.end.node()),
+                ))
+            })
+            .collect();
+
+        for (i, start_inside, end_inside) in inside {
+            let Some(slot) = self.ranges.get_mut(i) else {
+                continue;
+            };
+            let Some(range) = slot.range.as_mut() else {
+                continue;
+            };
+            if start_inside {
+                range.start = BoundaryPoint::new(parent, index);
+            } else if range.start.node() == parent && range.start.offset() > index {
+                range.start = BoundaryPoint::new(parent, range.start.offset() - 1);
+            }
+            if end_inside {
+                range.end = BoundaryPoint::new(parent, index);
+            } else if range.end.node() == parent && range.end.offset() > index {
+                range.end = BoundaryPoint::new(parent, range.end.offset() - 1);
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

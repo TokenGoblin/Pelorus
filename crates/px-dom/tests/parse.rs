@@ -240,11 +240,29 @@ fn parse_bounds_a_nesting_bomb_in_time_as_well_as_depth() {
 /// must parse whole.
 #[test]
 fn parse_does_not_abandon_a_large_but_shallow_document() {
+    use std::time::Instant;
+
     let big = format!(
         "<html><body>{}</body></html>",
         "<p>text</p>".repeat(100_000)
     );
+    let start = Instant::now();
     let dom = parse(&big);
+    let elapsed = start.elapsed();
+
+    // A ceiling as well as a correctness check, because this test caught a
+    // quadratic once and would only have got slower the next time.
+    //
+    // `append_child` briefly walked the parent's child list on every append,
+    // to hand a live-range notification an index it did not need. These
+    // 100,000 paragraphs took 145 seconds; they now take about two. The
+    // ceiling is deliberately far above that — it is here to catch an order of
+    // magnitude, not to measure a machine.
+    assert!(
+        elapsed.as_secs() < 60,
+        "parsing 100,000 shallow paragraphs took {elapsed:?}; something on the \
+         append path has gone quadratic again"
+    );
 
     assert!(!dom.abandoned, "a shallow document was abandoned");
     assert_eq!(dom.truncated, 0, "nothing here is past the depth limit");

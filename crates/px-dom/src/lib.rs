@@ -33,12 +33,14 @@ mod handle;
 pub mod harness;
 mod iter;
 mod node;
+mod range;
 mod sink;
 
 pub use arena::{Arena, MAX_DEPTH, TreeError};
 pub use handle::NodeId;
 pub use iter::{Ancestors, Children, Descendants};
 pub use node::{Node, NodeData};
+pub use range::{BoundaryPoint, Position, Range, RangeId};
 pub use sink::{Dom, ParseOptions, Sink, parse, parse_fragment, parse_with};
 
 impl Arena {

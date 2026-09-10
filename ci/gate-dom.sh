@@ -37,11 +37,23 @@ fi
 # #[test] functions for it, and none of them is #[ignore]d.
 # ---------------------------------------------------------------------------
 
+# `ranges` is not one of §9 Phase 4's four gate items. It is in this list
+# anyway, because §9's *phase* names four deliverables -- "mutation-safe
+# iteration, tree ordering, ranges, depth limits" -- and its gate only covers
+# three of them. A deliverable named in the phase and absent from its gate is
+# one that can be skipped with nothing going red, which was very nearly what
+# happened here: ranges were the last thing found missing, after the gate had
+# already gone green.
+#
+# This gate has always been allowed to check more than §9 lists -- the
+# no-infallible-accessor and no-owned-children scans below are not gate items
+# either. This is the same kind of addition.
 SUITES="
 stale-handles::dom_stale::crates/px-dom/tests/handles.rs
 deep-nesting::dom_depth::crates/px-dom/tests/depth.rs
 tree-order::dom_order::crates/px-dom/tests/order.rs
 mutation-safety::dom_mutation::crates/px-dom/tests/mutation.rs
+ranges::range_::crates/px-dom/tests/ranges.rs
 "
 
 ignored_tests="$(cargo test --workspace --locked -- --list --ignored 2>/dev/null \
