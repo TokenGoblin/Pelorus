@@ -204,6 +204,26 @@ jobs:
         shell: bash
         run: ci/gate-network.sh
 
+  # Phase 4. Written failing before px-dom has an arena, and expected to stay
+  # red for the length of the phase — a gate added only once it passes has
+  # never been seen to fail, which is the one thing a gate has to be able to do.
+  dom:
+    name: dom (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    # Phase 4's deliverable, red until the phase closes. Not required yet, for
+    # the same reason compat-list is not: a job red for a known and recorded
+    # reason has to be separable from one that means something broke.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 4 gate
+        shell: bash
+        run: ci/gate-dom.sh
+
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
   # explicitly rather than by directory override, so the fence assertion in
