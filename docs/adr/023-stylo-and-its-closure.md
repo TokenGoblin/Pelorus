@@ -1,6 +1,6 @@
 # 023 — `stylo`, its 45-crate closure, and the Python in its build
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-09-10
 - **Phase:** 5
 - **Invariants touched:** 7 (reproducible builds) directly and unavoidably.
@@ -46,8 +46,9 @@ things the borrow checker cannot express.
 
 ## Decision
 
-**Proposed, and blocking — this ADR asks for three answers rather than
-recording three.**
+**Decided 2026-09-10.** The reproducibility trade was put to the user
+explicitly, against the vendoring alternative below, and the pinned-interpreter
+option was chosen with the weaker invariant understood as its cost.
 
 1. **Take `stylo` 0.21.0** with `rayon`'s parallel traversal *available but
    unused*: `traverse_dom` takes `pool: Option<&rayon::ThreadPool>` and `None`
@@ -79,15 +80,17 @@ commit first trips the gate.
 ## Alternatives rejected
 
 **Vendor stylo's generated property files and drop the Python build step.**
-This is the option that would preserve invariant 7 intact, and it is the one I
-would want if the generated output were small and stable. It is neither: the
+This is the option that would preserve invariant 7 intact, and it was put to the
+user alongside the decision above rather than rejected here unilaterally. It is
+the right choice if currency matters less than the invariant. It is neither
+small nor stable: the
 generated code is large, it is regenerated from `properties.py` on every stylo
 version bump, and vendoring it means either re-running the generator by hand at
 each of the 24-releases-in-28-months cadence or pinning stylo forever at 0.21.0.
 Worse, a vendored generated file that has drifted from the `.py` it came from
-fails in a way that looks like a stylo bug. Rejected — but if the user prefers
-reproducibility over currency, this is the trade to make, and it should be made
-now rather than at Phase 20.
+fails in a way that looks like a stylo bug. **Not chosen**, with the weaker
+invariant accepted as the price — and it was made now rather than at Phase 20,
+which is the part that mattered.
 
 **Fork stylo to remove the Mako step.** Same maintenance cost as vendoring,
 plus owning a fork of the highest-churn dependency in the project. Rejected.

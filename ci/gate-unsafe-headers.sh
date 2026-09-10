@@ -1,23 +1,41 @@
 #!/usr/bin/env bash
 #
-# Gate check 4 — forbid(unsafe_code) everywhere (build-spec §4, CLAUDE.md).
+# Gate check 4 — the per-crate unsafe rules (build-spec §4, CLAUDE.md).
 #
 # A source-text assertion, not a convention. Every crate's entry point must
-# open with #![forbid(unsafe_code)]. px-sandbox is the sole exception and must
-# instead carry #![deny(unsafe_op_in_unsafe_fn)] — and must NOT carry forbid,
-# which would make the crate unable to do the one job it exists for.
+# open with #![forbid(unsafe_code)]. Two crates are excepted, with different
+# rules, and the difference is the point:
+#
+#   px-sandbox (ADR 008)  must carry #![deny(unsafe_op_in_unsafe_fn)] and must
+#                         NOT carry forbid, which would make the crate unable
+#                         to do the one job it exists for.
+#
+#   px-css (ADR 024)      may drop forbid, because stylo's TElement declares six
+#                         unsafe fn methods and forbid rejects *implementing* an
+#                         unsafe method. In exchange the crate must contain zero
+#                         unsafe blocks and zero unsafe impl — an unsafe fn body
+#                         needs neither, so nothing in the crate does anything
+#                         the compiler is not checking.
+#
+# px-css is checked in both states rather than only the one it will end up in.
+# While it still carries forbid — true today, and true until stylo actually
+# lands — the gate says so and requires nothing else. The moment forbid goes,
+# the two zero-counts become the rule. Written this way because the commit that
+# removes forbid is the one window in which the guarantee could lapse unnoticed,
+# and that is exactly the kind of window this project keeps falling through.
 #
 # OS-independent: this reads source text. CI runs it on Linux only.
 
 . "$(dirname "$0")/lib.sh"
 
 SANDBOX="px-sandbox"
+STYLO_CRATE="px-css"
 
 shopt -s nullglob
 crates=(crates/px-*/)
 if [ ${#crates[@]} -eq 0 ]; then
     fail "no crates found under crates/ — nothing to audit"
-    verdict "unsafe-headers"
+verdict "unsafe-headers"
 fi
 
 for dir in "${crates[@]}"; do
@@ -43,6 +61,13 @@ for dir in "${crates[@]}"; do
             if grep -q '^#!\[forbid(unsafe_code)\]' "$entry"; then
                 fail "$entry carries forbid(unsafe_code); $SANDBOX is the crate that needs unsafe"
             fi
+        elif [ "$name" = "$STYLO_CRATE" ]; then
+            # Either state is legal; neither is unchecked.
+            if grep -q '^#!\[forbid(unsafe_code)\]' "$entry"; then
+                ok "$entry forbid(unsafe_code), still (ADR 024 not yet needed)"
+            else
+                ok "$entry has dropped forbid under ADR 024"
+            fi
         else
             if grep -q '^#!\[forbid(unsafe_code)\]' "$entry"; then
                 ok "$entry forbid(unsafe_code)"
@@ -65,6 +90,10 @@ scanned_any=0
 while IFS= read -r -d '' path; do
     scanned_any=1
     case "$path" in crates/$SANDBOX/*) continue ;; esac
+    # px-css is allowed to not carry forbid (ADR 024), so an allow(unsafe_code)
+    # there is redundant rather than a bypass -- but it is also a sign somebody
+    # reached for the blanket exemption the ADR rejected, so it still fails.
+    # The rule for that crate is enforced positively just below.
     if grep -nE '(allow|expect)\(unsafe_code\)' "$path" >/dev/null 2>&1; then
         fail "$path switches off unsafe_code locally; only $SANDBOX may use unsafe"
         grep -nE '(allow|expect)\(unsafe_code\)' "$path" | head -n 5 | sed 's/^/       /' >&2
@@ -94,6 +123,34 @@ for crate in px-content px-net px-mcp px-ipc; do
 done
 if [ "$waiver_scanned" -eq 0 ]; then
     fail "the panic-lint waiver scan matched no files at all"
+fi
+
+# ADR 024's two counts, positively enforced.
+#
+# Duplicated from ci/gate-style.sh deliberately. That gate is Phase 5's and
+# phase gates are not run forever; this one is permanent, and the rule it
+# encodes outlives the phase that needed it. A rule enforced only by the gate of
+# the phase that introduced it stops being enforced when the phase closes.
+#
+# `|| true` on each grep because under `set -o pipefail` a grep that matches
+# nothing exits 1 and takes the script with it — which would skip both
+# assertions in exactly the zero-unsafe case they exist to confirm.
+if [ -d "crates/$STYLO_CRATE/src" ]; then
+css_blocks="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]*\{' "crates/$STYLO_CRATE/src" || true; } | { grep -vE '^[[:space:]]*//|///' || true; } | wc -l)"
+css_impls="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]+impl' "crates/$STYLO_CRATE/src" || true; } | { grep -vE '^[[:space:]]*//|///' || true; } | wc -l)"
+if [ "$css_blocks" -eq 0 ]; then
+    ok "$STYLO_CRATE contains no unsafe block (ADR 024)"
+else
+    fail "$STYLO_CRATE contains $css_blocks unsafe block(s); ADR 024 says zero."
+    fail "  An unsafe fn required by a stylo trait signature needs no unsafe"
+    fail "  body. A real unsafe operation belongs in $SANDBOX (ADR 008)."
+fi
+if [ "$css_impls" -eq 0 ]; then
+    ok "$STYLO_CRATE contains no unsafe impl (ADR 024)"
+else
+    fail "$STYLO_CRATE contains $css_impls unsafe impl(s); ADR 024 says zero."
+    fail "  Send/Sync over a borrowed view are derivable rather than asserted."
+fi
 fi
 
 verdict "unsafe-headers"

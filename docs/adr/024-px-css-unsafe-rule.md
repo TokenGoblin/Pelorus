@@ -1,12 +1,12 @@
 # 024 — `px-css` declares `unsafe fn` and contains no `unsafe` block
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-09-10
 - **Phase:** 5
 - **Invariants touched:** none in build-spec §1. This amends `/CLAUDE.md`'s
-  first hard rule and Phase 0's gate check 4, which is a working-agreement
-  change rather than an invariant change — and is why it is proposed rather
-  than taken.
+  first hard rule and Phase 0's gate check 4 — a working-agreement change
+  rather than an invariant change, which is why it was put to the user rather
+  than taken on the standing authorisation.
 
 ## Context
 
@@ -35,8 +35,9 @@ be the one to change it.
 
 ## Decision
 
-**Proposed.** Replace `forbid(unsafe_code)` in `px-css` with a rule that is
-*narrower* than an exemption:
+**Decided 2026-09-10**, against the blanket-exemption and shim-crate
+alternatives below. Replace `forbid(unsafe_code)` in `px-css` with a rule that
+is *narrower* than an exemption:
 
 > `px-css` may declare `unsafe fn` where a `stylo` trait signature requires it.
 > It contains **zero** `unsafe` blocks and **zero** `unsafe impl`.
