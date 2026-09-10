@@ -377,6 +377,16 @@ Format: one entry per defect.
   which is invariant 9 in its strongest form but costs a channel per
   partition.
 
+- **Phase 4 came and went without it, deliberately.** The "whichever comes
+  first" above named Phase 4 as a possible owner, so this records that the
+  answer was no rather than letting the clause expire unread. Both options are
+  ADR 009 decisions — one weakens a check this project wrote on purpose, the
+  other spends a channel per partition — and ADR 009 is marked PROPOSED with a
+  note that it was not taken on the standing authorisation. Choosing between
+  them unattended is exactly what that note exists to prevent.
+- **It is now unowned.** No phase in §9 names it, and the two candidate phases
+  have both passed. That is the state to fix, not the design.
+
   Both are protocol-shape decisions, and ADR 009 — the IPC protocol shape — is
   marked PROPOSED with an explicit note that it was **not** taken on the
   standing authorisation because it is a design with several defensible shapes
