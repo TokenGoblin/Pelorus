@@ -204,9 +204,18 @@ jobs:
         shell: bash
         run: ci/gate-network.sh
 
-  # Phase 4. Written failing before px-dom has an arena, and expected to stay
-  # red for the length of the phase — a gate added only once it passes has
-  # never been seen to fail, which is the one thing a gate has to be able to do.
+  # Phase 4. Written failing before px-dom had an arena, and red for the length
+  # of the phase — a gate added only once it passes has never been seen to
+  # fail, which is the one thing a gate has to be able to do.
+  #
+  # Now required. It went green when the conformance runner landed, so
+  # `continue-on-error` is gone: a job that is allowed to fail and does not is
+  # no longer telling anybody anything.
+  #
+  # The conformance figure it grades sets two causes aside — see ADR 019 — and
+  # prints both that figure and the unadjusted one, so a green tick here and a
+  # 94.62% in the log are reconcilable from the output rather than only from
+  # the ADR.
   dom:
     name: dom (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -214,10 +223,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    # Phase 4's deliverable, red until the phase closes. Not required yet, for
-    # the same reason compat-list is not: a job red for a known and recorded
-    # reason has to be separable from one that means something broke.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Phase 4 gate

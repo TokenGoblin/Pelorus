@@ -495,3 +495,48 @@ Format: one entry per defect.
   neither of which is Phase 4 work.
 - **Deadline:** revisit when Phase 13 adds streaming navigation, which is the
   first thing likely to want its own feed loop.
+
+## Upstream whatwg/html#12118 to html5ever
+
+- **Found in:** phase 4, ADR 019
+- **Belongs to:** whenever html5ever is next upgraded
+- **What:** `<?target data?>` became a `ProcessingInstruction` node in 2025
+  (whatwg/html#12118). html5ever 0.39 predates it and produces the older bogus
+  comment, which is 88 of the 105 conformance failures. Chromium is
+  implementing the change too (issues.chromium.org/issues/481087638).
+- **Why it is not fixed here:** the change is in html5ever's tokenizer, and
+  ADR 019 rejected forking the one dependency whose value is being the widely
+  tested version. Contributing it upstream is the version of this that is
+  worth doing.
+- **What to do when it lands:** delete the exclusion in
+  `crates/px-dom/tests/html5lib.rs` rather than resizing
+  `EXPECTED_PROCESSING_INSTRUCTION`, and raise the whole-corpus floor. The
+  assertion message says so, because adjusting the number is the tempting
+  move at that moment.
+
+## Phase 11 inherits six conformance exclusions
+
+- **Found in:** phase 4, ADR 019
+- **Belongs to:** phase 11 (JavaScript)
+- **What:** six `scripted_*` corpus tests run `<script>` that mutates the DOM
+  mid-parse. They are excluded from the graded conformance figure because no
+  Phase 4 work could pass them.
+- **What to do:** when Boa lands, delete the `NeedsScripting` exclusion and
+  the `EXPECTED_NEEDS_SCRIPTING` constant. They become real failures at that
+  point, which is correct — they will be measuring something this project can
+  then actually do.
+
+## px-dom has a testing-only symbol and no release-artifact scan
+
+- **Found in:** phase 4, `crates/px-dom/src/arena.rs`
+- **Belongs to:** whenever px-content links px-dom
+- **What:** `Arena::force_generation_to_last` is `#[cfg(feature = "testing")]`
+  and §14.4 asks for a release-artifact scan for symbols like it. There is
+  none.
+- **Why not now:** no shipping binary links px-dom, so the scan would find
+  nothing whether the feature was on or off. That is the same conclusion
+  `ci/gate-network.sh` reached and recorded for `client_config_trusting`, and
+  a check that cannot fail reads as assurance while providing none.
+- **What to do:** add the scan to `ci/gate-dom.sh` when px-content takes the
+  dependency, following the pattern `ci/gate-sandbox.sh` uses for
+  `PX_TEST_FORCE_SANDBOX_UNAVAILABLE`.

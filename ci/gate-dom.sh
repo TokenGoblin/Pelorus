@@ -207,6 +207,23 @@ else
     fi
 fi
 
+# The percentage itself, printed rather than merely asserted.
+#
+# ADR 019: the graded figure sets two causes aside — tests needing a
+# JavaScript engine, and the whatwg/html#12118 processing-instruction change
+# that html5ever 0.39 predates — while the unadjusted figure is measured on
+# every run and held to a floor. Both numbers reach the log here, because
+# "Phase 4 passed" and "94.62%" have to be reconcilable by somebody reading
+# the output rather than only by somebody who finds the ADR.
+info "html5lib conformance (see docs/adr/019-conformance-gate-exclusions.md)"
+# One thread, so the two suites' output does not interleave into a line that
+# reads as neither number.
+if cargo test -p px-dom --locked --test html5lib -- --nocapture --test-threads=1 2>&1         | grep -E "^(html5lib |  set aside:)" ; then
+    ok "conformance reported above"
+else
+    fail "the conformance suite did not report a number"
+fi
+
 # ---------------------------------------------------------------------------
 # 24h mutation fuzz, and the stale-handle target §4.1 names explicitly.
 # ---------------------------------------------------------------------------
