@@ -156,7 +156,7 @@ tripping is a rule people comply with by deleting the explanation.
 Every check verified in both directions: fires on an injected violation, silent
 on the clean tree.
 
-## The 24h campaign: not run
+## The 24h campaign: running, not yet reported
 
 `dom_stale_handle` and `dom_mutation` exist, compile, and run as ordinary tests
 on every push — about a tenth of a second for twelve hundred operation
@@ -175,8 +175,21 @@ Verified by breaking the arena on purpose: `detach` made to skip its
 that exact corruption.
 
 **This item is incomplete and the phase should not be called closed on it.**
-The campaign runs on a schedule; the report belongs with its numbers, the way
-Phase 3's did.
+
+Run [34434827530](https://github.com/TokenGoblin/Pelorus/actions/runs/34434827530)
+is in flight: 11 shards × 4 hours, three of them the DOM targets. The matrix
+did not know these targets existed until this phase added them, so a campaign
+run before that would have reported clean while never touching them — the
+Phase 1 failure again, arrived at by omission rather than by a wrong flag.
+
+Their `-max_len` is 4 KB against the 1.1 MB the IPC targets get and the 8.5 MB
+the HTTP ones get. These harnesses assert the whole tree's invariants after
+every operation and one byte is roughly one operation, so cost grows with the
+square of the input: 1 KB is 0.4 ms, 4 KB 2.9 ms, 16 KB 20 ms, 64 KB 170 ms. At
+the default a single execution would take minutes and the campaign would
+explore almost nothing.
+
+The numbers belong in this section when they exist, the way Phase 3's did.
 
 ## Ranges, which the gate never asked for
 
