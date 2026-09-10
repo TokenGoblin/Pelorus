@@ -303,6 +303,39 @@ addresses as integers rather than holding references across the growth, because
 holding them is exactly what the borrow checker refuses, and that refusal is
 why the flat layout looks fine right up until Phase 5 needs it not to be.
 
+## Node identity, packed the way stylo will key on it
+
+`stylo-requirements.md` §3.5, and it calls this a Phase 4 decision because it
+constrains how `NodeId` is laid out.
+
+Stylo keys its snapshot map and its traversal-root comparison on `OpaqueNode`,
+which in Servo is a **pointer**. Pointer-derived identity is stale-unsafe
+across free and reuse: a removed element's snapshot can be matched to a
+different element later allocated at the same address. Packing the generational
+handle instead makes that structurally impossible — a reused slot has a
+different generation, so it packs to a different key, so a stale snapshot
+simply misses. §4.1's guarantee extending into stylo's own data structures.
+
+The trap the note names: `OpaqueElement` is `NonNull<()>` reached through
+`NonNull::new_unchecked`, so **a zero value is undefined behaviour with no
+diagnostic**, and a node at index 0 with generation 0 packs to zero. It cannot
+happen here because `generation` is `NonZeroU32` — the same niche that makes
+`Option<NodeId>` free under ADR 018 is what makes this safe. *"One line in
+Phase 4, an afternoon of debugging in Phase 5."*
+
+Five tests, verified against two wrong packings: identity that ignores the
+generation (pointer-style) fails the reuse and injectivity tests by name, and a
+shift of 16 instead of 32 fails the round trip.
+
+A compile-time assertion refuses a target whose `usize` is narrower than 64
+bits, rather than silently truncating every node identity to its generation.
+
+**Atoms** (item 4) are half-verified: `px-dom` reaches `web_atoms 0.2.6`
+through html5ever, and `html5ever::LocalName` *is* `web_atoms::LocalName`, so
+names are already in the interner stylo's `SelectorImpl` names. The other half
+— which version stylo pins — cannot be checked until stylo is a dependency, and
+is in the backlog against Phase 5.
+
 ## Dependencies added
 
 ADR 017. `html5ever` 0.39: **+21 crates, +967 unsafe tokens**.

@@ -61,3 +61,73 @@ impl NodeId {
         self.generation
     }
 }
+
+/// A `NodeId` packed into a non-zero, pointer-sized value.
+///
+/// This is what stylo's `OpaqueNode(pub usize)` and
+/// `OpaqueElement(NonNull<()>)` will hold. See [`NodeId::to_opaque`].
+pub type OpaqueNodeId = core::num::NonZeroUsize;
+
+// The packing puts the index in the high 32 bits, so `usize` has to be at
+// least 64 bits wide. Both targets this project builds for are, and a build
+// for one that is not should stop here rather than silently truncate every
+// node identity to its generation.
+const _: () = assert!(
+    core::mem::size_of::<usize>() >= 8,
+    "px-dom packs a 32-bit index and a 32-bit generation into a usize; on a \
+     target with a narrower usize this would truncate, and two different nodes \
+     would get the same opaque identity"
+);
+
+impl NodeId {
+    /// Pack into the non-zero, pointer-sized value stylo uses as an identity
+    /// key.
+    ///
+    /// # Why this is a Phase 4 concern
+    ///
+    /// `docs/research/stylo-requirements.md` §3.5. Stylo keys its snapshot map
+    /// and its traversal-root comparison on `OpaqueNode`, which in Servo is a
+    /// **pointer**. Pointer-derived identity is stale-unsafe across free and
+    /// reuse: a removed element's snapshot can be matched to a different
+    /// element later allocated at the same address.
+    ///
+    /// Packing the generational handle instead makes that structurally
+    /// impossible. A reused slot has a different generation, so it packs to a
+    /// different value, so a stale snapshot simply misses — §4.1's guarantee
+    /// extending into stylo's own data structures for free.
+    ///
+    /// # The trap this avoids
+    ///
+    /// `OpaqueElement` is `NonNull<()>`, and stylo reaches it through
+    /// `NonNull::new_unchecked`, so **a zero value is undefined behaviour with
+    /// no diagnostic**. A node at index 0 with generation 0 would pack to zero.
+    ///
+    /// It cannot happen here, and the reason is worth stating because it is
+    /// load-bearing rather than incidental: `NodeId::generation` is
+    /// `NonZeroU32`, so the low half is never zero, so the packed word is never
+    /// zero. The niche that makes `Option<NodeId>` cost nothing (ADR 018) is
+    /// the same property that makes this safe.
+    ///
+    /// The research note puts the cost of getting it wrong at "one line in
+    /// Phase 4, an afternoon of debugging in Phase 5".
+    pub fn to_opaque(self) -> OpaqueNodeId {
+        let packed = ((self.index as usize) << 32) | (self.generation.get() as usize);
+        // Non-zero because `generation` is non-zero and occupies the low half.
+        // `NonZeroUsize::new` rather than the unchecked form: this crate is
+        // `forbid(unsafe_code)`, and the fallback is unreachable rather than
+        // wrong.
+        OpaqueNodeId::new(packed).unwrap_or(OpaqueNodeId::MIN)
+    }
+
+    /// Recover a handle from its packed form.
+    ///
+    /// `None` if the value did not come from [`NodeId::to_opaque`] — a zero
+    /// generation is the only way that can show, and it is exactly the shape a
+    /// pointer misread as a packed handle would have.
+    pub fn from_opaque(value: OpaqueNodeId) -> Option<Self> {
+        let packed = value.get();
+        let generation = core::num::NonZeroU32::new((packed & 0xFFFF_FFFF) as u32)?;
+        let index = u32::try_from(packed >> 32).ok()?;
+        Some(Self { index, generation })
+    }
+}

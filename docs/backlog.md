@@ -557,3 +557,24 @@ Format: one entry per defect.
 - **What to do:** add the scan to `ci/gate-dom.sh` when px-content takes the
   dependency, following the pattern `ci/gate-sandbox.sh` uses for
   `PX_TEST_FORCE_SANDBOX_UNAVAILABLE`.
+
+## Phase 5 must match web_atoms 0.2.6, or the atoms are two different types
+
+- **Found in:** phase 4, `docs/research/stylo-requirements.md` item 4
+- **Belongs to:** phase 5, before stylo is added
+- **What:** the note says to *"verify the `web_atoms` version agreement between
+  your pinned `html5ever` and your pinned `stylo` before writing the tree
+  builder."* Half of that is now checkable and checked: `px-dom` reaches
+  `web_atoms 0.2.6` through `html5ever 0.39` / `markup5ever 0.39`, and
+  `html5ever::LocalName` *is* `web_atoms::LocalName` — element names are
+  already stored in the interner stylo's `SelectorImpl` names, not converted at
+  a boundary.
+- **What is not checkable yet:** the other half. Stylo is not a dependency, so
+  nothing here can confirm which `web_atoms` it pins.
+- **Why it matters:** `web_atoms` uses static atom sets generated at build
+  time. Two versions in the tree are two unrelated types with the same name,
+  and the failure is a type error at the `TElement` boundary at the worst
+  possible moment — the first hour of the phase §9 already calls the riskiest.
+- **What to do:** check `stylo`'s `web_atoms` requirement *before* adding it,
+  and if it disagrees, resolve the version before writing a line of the trait
+  impls. A `cargo tree -d web_atoms` showing two versions is the failure.

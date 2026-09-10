@@ -38,7 +38,7 @@ mod sink;
 mod snapshot;
 
 pub use arena::{Arena, MAX_DEPTH, TreeError};
-pub use handle::NodeId;
+pub use handle::{NodeId, OpaqueNodeId};
 pub use iter::{Ancestors, Children, Descendants};
 pub use node::{Node, NodeData};
 pub use range::{BoundaryPoint, Position, Range, RangeId};
