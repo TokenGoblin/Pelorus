@@ -418,6 +418,84 @@ impl TreeSink for Sink {
         }
     }
 
+    /// <https://html.spec.whatwg.org/#maybe-clone-an-option-into-selectedcontent>
+    ///
+    /// When an `<option>` closes inside a `<select>` that contains a
+    /// `<selectedcontent>`, the option's children are cloned into it. This is
+    /// how `<selectedcontent>` renders the chosen option's markup rather than
+    /// its text.
+    ///
+    /// Implemented rather than left as the trait's no-op default, whose
+    /// documentation says only that it "will result in a (slightly) incorrect
+    /// DOM tree". It does not currently move the conformance number, because
+    /// html5ever calls this only for an *explicit* `</option>` -- its own
+    /// FIXME, servo/html5ever#712 -- and the corpus cases that exercise
+    /// `<selectedcontent>` close the option implicitly. It is here because the
+    /// contract says so, and a sink that is correct only where it is currently
+    /// measured is a sink that breaks when the measurement improves.
+    fn maybe_clone_an_option_into_selectedcontent(&self, option: &NodeId) {
+        let mut arena = self.arena.borrow_mut();
+
+        // The nearest <select> ancestor.
+        let mut select = None;
+        let mut cursor = arena.get(*option).and_then(Node::parent);
+        let mut budget = crate::arena::MAX_DEPTH;
+        while let Some(current) = cursor {
+            if budget == 0 {
+                return;
+            }
+            budget -= 1;
+            let Some(node) = arena.get(current) else {
+                return;
+            };
+            if node
+                .element_name()
+                .is_some_and(|name| name.local == local_name!("select"))
+            {
+                select = Some(current);
+                break;
+            }
+            cursor = node.parent();
+        }
+        let Some(select) = select else {
+            return;
+        };
+
+        // The first <selectedcontent> under it, in document order.
+        let Some(target) = arena.descendants(select).find(|id| {
+            arena
+                .get(*id)
+                .and_then(Node::element_name)
+                .is_some_and(|name| name.local == local_name!("selectedcontent"))
+        }) else {
+            return;
+        };
+
+        // Replace its contents with a copy of the option's children.
+        let Some(existing) = arena.children(target) else {
+            return;
+        };
+        for child in existing {
+            let _ = arena.remove_subtree(child);
+        }
+        let Some(children) = arena.children(*option) else {
+            return;
+        };
+        for child in children {
+            match arena.clone_subtree(child) {
+                Ok(copy) => {
+                    if arena.append_child(target, copy).is_err() {
+                        // Past the depth limit, or out of slots. Stop rather
+                        // than leaving a half-copied subtree attached.
+                        let _ = arena.remove_subtree(copy);
+                        return;
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+    }
+
     fn is_mathml_annotation_xml_integration_point(&self, handle: &NodeId) -> bool {
         self.arena
             .borrow()
@@ -425,6 +503,46 @@ impl TreeSink for Sink {
             .map(Node::is_mathml_annotation_xml_integration_point)
             .unwrap_or(false)
     }
+}
+
+/// Hand `html` to `parser` in bounded chunks, stopping if the tree starts
+/// refusing content.
+///
+/// Shared by [`parse`] and [`parse_fragment`] so that the bound cannot be
+/// present in one and forgotten in the other. See [`parse`] for why it exists.
+fn feed<S>(mut parser: html5ever::Parser<S>, html: &str, truncated: &Rc<Cell<usize>>) -> Dom
+where
+    S: TreeSink<Output = Dom>,
+{
+    use html5ever::tendril::TendrilSink;
+
+    let mut abandoned = false;
+    let mut rest = html;
+    while !rest.is_empty() {
+        if truncated.get() >= MAX_REFUSALS_BEFORE_ABANDONING {
+            abandoned = true;
+            break;
+        }
+        // Split on a character boundary. `floor_char_boundary` is not stable,
+        // so walk back from the nominal split point; at most three bytes.
+        let mut end = FEED_CHUNK_BYTES.min(rest.len());
+        while end > 0 && !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        // A split point that walked all the way back to zero would mean the
+        // remainder is a single character longer than the chunk size, which
+        // cannot happen for a valid `str`. Feed the rest rather than loop.
+        let (chunk, remainder) = match end {
+            0 => (rest, ""),
+            _ => rest.split_at(end),
+        };
+        parser.process(chunk.into());
+        rest = remainder;
+    }
+
+    let mut dom = parser.finish();
+    dom.abandoned = abandoned;
+    dom
 }
 
 /// Parse a complete HTML document.
@@ -468,43 +586,72 @@ impl TreeSink for Sink {
 /// [`MAX_REFUSALS_BEFORE_ABANDONING`] pieces of content the rest is not fed at
 /// all. The threshold is far past anything a real document reaches: it needs a
 /// document that has already nested 512 deep and then done it again eight
-/// times over.
+/// times over. With the bound in place a million-deep document costs about
+/// 65 ms, flat in input size.
 ///
 /// Abandoning loses content, so it is reported in [`Dom::abandoned`] rather
 /// than being silent. A truncated page that says it is truncated is a bug
 /// report; one that does not is a mystery.
 pub fn parse(html: &str) -> Dom {
-    use html5ever::tendril::TendrilSink;
+    parse_with(html, ParseOptions::default())
+}
 
+/// How to parse.
+///
+/// Separate from html5ever's `ParseOpts` on purpose: that type carries knobs
+/// this project has no business exposing (`drop_doctype`, `exact_errors`), and
+/// a browser that lets a caller ask for a DOCTYPE-free tree has handed out a
+/// way to force quirks mode.
+#[derive(Clone, Copy, Debug)]
+pub struct ParseOptions {
+    /// Whether scripting is enabled for this document.
+    ///
+    /// This is not a preference, it changes the tree: with scripting on, the
+    /// contents of a `<noscript>` element are a single text node; with it off
+    /// they are parsed as markup. A document parsed with the wrong value has
+    /// the wrong DOM, not merely a differently rendered one.
+    pub scripting: bool,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        // Enabled, because that is what a browser is. Phase 11 makes it true
+        // in fact as well as in the parser.
+        Self { scripting: true }
+    }
+}
+
+/// Parse a complete HTML document with explicit options. See [`parse`].
+pub fn parse_with(html: &str, options: ParseOptions) -> Dom {
     let sink = Sink::new();
     let truncated = Rc::clone(&sink.truncated);
-    let mut parser = html5ever::parse_document(sink, html5ever::ParseOpts::default());
+    let mut opts = html5ever::ParseOpts::default();
+    opts.tree_builder.scripting_enabled = options.scripting;
+    feed(html5ever::parse_document(sink, opts), html, &truncated)
+}
 
-    let mut abandoned = false;
-    let mut rest = html;
-    while !rest.is_empty() {
-        if truncated.get() >= MAX_REFUSALS_BEFORE_ABANDONING {
-            abandoned = true;
-            break;
-        }
-        // Split on a character boundary. `floor_char_boundary` is not stable,
-        // so walk back from the nominal split point; at most three bytes.
-        let mut end = FEED_CHUNK_BYTES.min(rest.len());
-        while end > 0 && !rest.is_char_boundary(end) {
-            end -= 1;
-        }
-        // A chunk boundary that landed nowhere usable means the remainder is
-        // one enormous character, which cannot happen for valid `str`. Feed
-        // the rest and let the parser finish rather than looping forever.
-        let (chunk, remainder) = match end {
-            0 => (rest, ""),
-            _ => rest.split_at(end),
-        };
-        parser.process(chunk.into());
-        rest = remainder;
-    }
-
-    let mut dom = parser.finish();
-    dom.abandoned = abandoned;
-    dom
+/// Parse an HTML fragment in the context of `context`, the way `innerHTML`
+/// does.
+///
+/// Carries the same feed bound as [`parse`], for the same reason: a fragment
+/// is attacker-controlled markup just as much as a document, and `innerHTML`
+/// is a more convenient place to point a nesting bomb than a navigation is.
+///
+/// `scripting` is the context element's "allows scripting" flag, which changes
+/// how `<noscript>` tokenises.
+pub fn parse_fragment(
+    html: &str,
+    context: QualName,
+    context_attrs: Vec<Attribute>,
+    scripting: bool,
+) -> Dom {
+    let sink = Sink::new();
+    let truncated = Rc::clone(&sink.truncated);
+    let mut opts = html5ever::ParseOpts::default();
+    opts.tree_builder.scripting_enabled = scripting;
+    feed(
+        html5ever::parse_fragment(sink, opts, context, context_attrs, scripting),
+        html,
+        &truncated,
+    )
 }

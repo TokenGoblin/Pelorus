@@ -415,6 +415,56 @@ impl Arena {
         Ok(freed)
     }
 
+    /// Deep-copy a subtree, returning the root of the copy. The copy is
+    /// detached.
+    ///
+    /// Iterative, with parentage carried on the work stack — the recursive
+    /// version of this is one of the walks the Phase 4 gate exists to keep
+    /// out, and a clone is exactly the kind of operation somebody writes
+    /// recursively because it reads so well.
+    ///
+    /// A clone is a new node with a new handle: nothing that held a handle to
+    /// the original now holds one to the copy. That is worth stating because
+    /// the DOM's `cloneNode` is the one place where "the same content" and
+    /// "the same node" are easiest to confuse.
+    pub fn clone_subtree(&mut self, id: NodeId) -> Result<NodeId, TreeError> {
+        let data = self.get(id).ok_or(TreeError::NoSuchNode)?.data().clone();
+        let root = self.create(data)?;
+
+        // (source, destination parent) pairs still to copy.
+        let mut stack: Vec<(NodeId, NodeId)> = self
+            .children(id)
+            .ok_or(TreeError::NoSuchNode)?
+            .into_iter()
+            .map(|child| (child, root))
+            .collect();
+        // Reversed so the first child is processed first and sibling order is
+        // preserved on the way out.
+        stack.reverse();
+
+        let mut budget = self.slots.len().saturating_add(1);
+        while let Some((source, parent)) = stack.pop() {
+            if budget == 0 {
+                return Err(TreeError::TooDeep);
+            }
+            budget -= 1;
+
+            let data = self
+                .get(source)
+                .ok_or(TreeError::NoSuchNode)?
+                .data()
+                .clone();
+            let copy = self.create(data)?;
+            self.append_child(parent, copy)?;
+
+            let children = self.children(source).ok_or(TreeError::NoSuchNode)?;
+            for child in children.into_iter().rev() {
+                stack.push((child, copy));
+            }
+        }
+        Ok(root)
+    }
+
     /// This node's children, as a snapshot.
     ///
     /// A snapshot rather than an iterator borrowing the arena, deliberately.

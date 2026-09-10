@@ -39,7 +39,7 @@ pub use arena::{Arena, MAX_DEPTH, TreeError};
 pub use handle::NodeId;
 pub use iter::{Ancestors, Children, Descendants};
 pub use node::{Node, NodeData};
-pub use sink::{Dom, Sink, parse};
+pub use sink::{Dom, ParseOptions, Sink, parse, parse_fragment, parse_with};
 
 impl Arena {
     /// This node's children, in order.
