@@ -63,7 +63,7 @@ use crate::node::{Node, NodeData};
 /// html5ever reports one per violation and a hostile document can produce
 /// millions, so this is a heap bound, not a preference (§4.4). The count is
 /// kept in full; only the messages are dropped.
-const MAX_RECORDED_ERRORS: usize = 256;
+pub const MAX_RECORDED_ERRORS: usize = 256;
 
 /// How many refusals to absorb before abandoning the parse.
 ///
@@ -72,7 +72,7 @@ const MAX_RECORDED_ERRORS: usize = 256;
 /// each refusal costs roughly `MAX_DEPTH` dropped elements, so this is about
 /// four thousand elements past the nesting limit, in a document that has
 /// already nested 512 deep once. Nothing on the web does that by accident.
-const MAX_REFUSALS_BEFORE_ABANDONING: usize = 8;
+pub const MAX_REFUSALS_BEFORE_ABANDONING: usize = 8;
 
 /// How much input to hand the parser between checks.
 ///

@@ -20,8 +20,8 @@
 //! Nothing recurses over tree depth. Nodes do not own each other — they sit
 //! flat in the arena and reference each other by handle — so dropping a
 //! hundred-thousand-level document drops one allocation rather than unwinding
-//! a hundred thousand stack frames. Every traversal in [`iter`] carries an
-//! explicit work stack.
+//! a hundred thousand stack frames. Every traversal — [`Children`],
+//! [`Descendants`], [`Ancestors`] — carries an explicit work stack.
 //!
 //! The `Drop` nobody writes on purpose is the one this guards against. It is
 //! written by the compiler, and it appears the moment a node holds a
@@ -42,7 +42,10 @@ pub use handle::{NodeId, OpaqueNodeId};
 pub use iter::{Ancestors, Children, Descendants};
 pub use node::{Node, NodeData};
 pub use range::{BoundaryPoint, Position, Range, RangeId};
-pub use sink::{Dom, ParseOptions, Sink, parse, parse_fragment, parse_with};
+pub use sink::{
+    Dom, MAX_RECORDED_ERRORS, MAX_REFUSALS_BEFORE_ABANDONING, ParseOptions, Sink, parse,
+    parse_fragment, parse_with,
+};
 pub use snapshot::ElementSnapshot;
 
 impl Arena {

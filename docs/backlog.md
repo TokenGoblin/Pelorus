@@ -701,3 +701,29 @@ Format: one entry per defect.
   point it is inverted with nothing having moved either endpoint. `new_range`
   now requires the ordering to be establishable. Six crash inputs committed to
   `fuzz/corpus/dom_mutation/` per ADR 006.
+
+## Public docs link to private items, and nothing checks
+
+- **Found in:** phase 4, by running `cargo doc` for the first time
+- **Belongs to:** unassigned — the two remaining are in `px-net`, which is
+  merged, so fixing them here would be an out-of-phase change
+- **What:** rustdoc warns when public documentation links to a private item.
+  The link then renders as plain text, so a reader cannot follow it. Three
+  existed; the `px-dom` one is fixed in phase, and two remain:
+  `px-net/src/cookie.rs:62` links to `MAX_COOKIE_BYTES` and
+  `px-net/src/dns.rs:18` links to `MAX_JUMPS`.
+- **Why it matters more here than in most projects:** the working agreement
+  requires the reasoning to live where the decision does, so the documentation
+  *is* a deliverable. A link that does not resolve is reasoning the reader was
+  pointed at and cannot reach — and both of these point at exactly the
+  constants that make the surrounding paragraph mean something.
+- **The fix in both cases is `pub`**, not deleting the reference: these are
+  observable behaviour — a cookie header limit and a DNS pointer-loop bound —
+  and a caller interpreting a refusal has a legitimate reason to know them.
+  That is what was done for `px-dom`'s `MAX_RECORDED_ERRORS` and
+  `MAX_REFUSALS_BEFORE_ABANDONING`.
+- **And then gate it.** `cargo doc --workspace --no-deps` currently emits three
+  warnings and nothing looks at them. Once the two above are fixed the
+  workspace is clean, and a gate step that fails on rustdoc warnings would keep
+  it that way. Not added now, because a gate that fails the moment it lands is
+  a gate somebody disables.
