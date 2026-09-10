@@ -168,7 +168,7 @@ fn every_committed_corpus_seed_replays_clean() {
     }
 
     assert!(
-        total >= 18,
+        total >= 25,
         "only {total} corpus seeds replayed; the campaign starts from these,          so a corpus that quietly shrank is a campaign that explores less --          and six of them are crashes this harness could not find on its own"
     );
 }

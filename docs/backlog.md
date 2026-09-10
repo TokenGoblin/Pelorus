@@ -733,3 +733,23 @@ Format: one entry per defect.
   workspace is clean, and a gate step that fails on rustdoc warnings would keep
   it that way. Not added now, because a gate that fails the moment it lands is
   a gate somebody disables.
+
+## The HTTP fuzz targets have no committed corpus
+
+- **Found in:** phase 4, while fixing `every_committed_corpus_seed_replays_clean`
+- **Belongs to:** phase 3's targets; unassigned
+- **What:** `http_response` and `http_chunked` have no seed files in the git
+  index. `ci/gate-structure.sh` now names both in `corpus_empty`, so the gap is
+  recorded rather than silent, and the gate fails if a third target joins them.
+- **Why it matters:** every campaign starts those two targets from nothing.
+  They still reach billions of executions because their inputs are bytes rather
+  than structure, so this is much less costly than it would be for the DOM
+  targets — but a `200 OK` with a sane header block is not something a fuzzer
+  should have to rediscover from an empty corpus each time, and a well-formed
+  chunked body even less so.
+- **What to do:** commit a handful of hand-written seeds the way `dom_parse`
+  has them — a minimal response, one with a header block worth mutating, a
+  chunked body with a trailer, and a response at `MAX_CHUNK_BYTES`. Then remove
+  both names from `corpus_empty`; the gate already fails if the list and the
+  index disagree in that direction.
+- **Not done here because** they are Phase 3 targets and this is Phase 4.

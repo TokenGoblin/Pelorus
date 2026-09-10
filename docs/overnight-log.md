@@ -390,3 +390,49 @@ ADR 021 with an explicit tripwire: if Phase 5 has to change slot layout,
 `NodeId`, or the opaque packing to write `StyleNode`, that ADR was wrong and
 its central claim — that the forcing function had already been banked — is
 what was wrong. Say so rather than absorbing it as ordinary Phase 5 friction.
+
+## 2026-09-10, resumed — the campaign closed, and the log above was wrong
+
+Two things happened, and the second is the one worth reading.
+
+### The campaign is clean and the gate item closes
+
+Run 34483936230 finished at 17:49Z: 19 shards, 28.2 billion executions, no
+crashes, no artifacts. Six `dom_mutation` shards, so the item's twenty-four
+hours are twenty-four hours of that target. Numbers are in
+`docs/phase-04-gate-report.md`.
+
+The `-max_len` verification the entry above asked for needed more than the
+recipe it gave. `dom_parse` and `broker_sequence` both end below their
+configured ceiling, which reads exactly like the flag being ignored — it is
+`-len_control` ramping the ceiling up from the largest seed. `dom_mutation`
+starts at `lim: 66`, its largest seed to the byte, and all six shards reach
+`lim: 4096` within 43-70 minutes and hold it to the final line. The recipe
+"look for `lim:`" would have passed a genuinely ignored flag too; what
+distinguishes them is whether the ramp completes.
+
+### The branch was not green, and this log said it was
+
+The entry above opens with *"the gate passes on both operating systems and 21
+of 22 CI jobs are green"*. It was not. Four jobs were red — `dom` and `sandbox`
+on both platforms — and had been since `f504c2d`, five commits earlier. The
+README commit, the docs commit and this log's own last entry each asserted a
+green that nobody had looked at.
+
+One missing directory caused all four. `fuzz/corpus/dom_stale_handle` was empty
+on this machine; git cannot store an empty directory and `git status` does not
+report one, so it existed here and nowhere else. The new corpus-replay test
+read it with `read_dir`, found it, iterated nothing, and passed. In CI the
+directory was absent and the test panicked.
+
+**The lesson is not "check CI before writing a summary", though that is also
+true.** It is that this is the fourth instance of the same shape — a check that
+was real, reading something CI would not read. The fix is written against the
+git index instead of the filesystem, because the index is the only view of the
+tree that is the same on both machines. `ci/gate-structure.sh` now enforces it
+for every fuzz target, and `dom_stale_handle` has seven hand-written seeds
+covering all five harness branches.
+
+Phase 4 merges when this is green in CI on both platforms, and not on the
+strength of a local run — which is the same sentence the entry above should
+have been held to.

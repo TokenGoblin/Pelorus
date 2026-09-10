@@ -14,9 +14,13 @@
 Ranges are named in the phase but in none of the four gate items. They were
 missing, are now built, and are gated anyway — see below.
 
-`ci/gate-dom.sh` passes locally on Windows. The `dom` CI job is now required —
-`continue-on-error` removed, since a job allowed to fail that does not is no
-longer telling anybody anything.
+`ci/gate-dom.sh` passes on Windows and Linux, locally and in CI. The `dom` CI
+job is now required — `continue-on-error` removed, since a job allowed to fail
+that does not is no longer telling anybody anything.
+
+**An earlier draft of this line said the job was green when it was red**, and
+what made that possible is worth reading before Phase 5 — see *The green that
+was not green* below.
 
 ## Conformance: two numbers, on purpose
 
@@ -264,6 +268,54 @@ carrying to Phase 5: **finish the code, then start the four-hour job.** A
 campaign launched against moving code measures nothing except how recently you
 edited it.
 
+## The green that was not green
+
+`every_committed_corpus_seed_replays_clean` was added in `f504c2d` to run the
+committed corpus on every push. It passed on this machine and failed in CI from
+the moment it landed, and the `dom` job was red for five commits — through the
+README update, the docs commit and the overnight log, each of which stated the
+job was green.
+
+**The cause is that an empty directory is invisible to git.** Git cannot store
+one, and `git status` does not report it, so `fuzz/corpus/dom_stale_handle`
+existed on the machine that ran the gate and existed nowhere else. The test
+reads the directory with `read_dir`, found it, iterated zero files, and passed.
+In CI the directory was simply absent and the same test panicked with *the
+dom_stale_handle corpus is missing*. Nothing was ignored and no output was
+misread: the two machines were running against different trees, and only one of
+them was the repository.
+
+It also failed `sandbox` on both platforms, because that job runs the workspace
+suite. One missing directory, four red jobs, and a summary line that read *21
+of 22 green* because it was written from the last run anybody had looked at.
+
+**Two things are fixed, and only the first is about the corpus.**
+
+`dom_stale_handle` now has seven committed seeds, hand-written the way
+`dom_parse`'s are rather than harvested, because this target has never crashed
+and so has no ADR 006 reproducers to commit. Between them they drive all five
+branches of the harness — create, remove, detach, move, and ADR 018's forced
+generation exhaustion, which ordinary churn cannot reach — plus operations
+against an empty tree and a trailing op byte with no selector after it. The
+count is pinned at 25 across the three DOM targets for the same reason ADR 019
+pins its exclusions.
+
+`ci/gate-structure.sh` now enumerates the fuzz targets from `fuzz/Cargo.toml`
+and asserts each has at least one corpus file **in the git index**, which is
+the only view of the tree that is identical on every machine. Reading the
+filesystem is what hid this; a check that reads the filesystem would hide it
+again. `http_response` and `http_chunked` are named in that gate's
+`corpus_empty` list — they genuinely have no seeds, which is a Phase 3 gap now
+in the backlog — and the gate fails if the list and the index disagree in
+either direction, so the exception cannot quietly grow.
+
+**This is the fourth time this project has recorded a check that passed locally
+and failed in CI**, after Phase 1's product binary exiting failure behind a
+green gate, Phase 1's campaign against an out-of-reach `-max_len`, and Phase
+3's HTTP targets fuzzed inside their own limits. The shape is constant: the
+check was real, and the thing it read was not what CI would read. Worth stating
+plainly because the previous three were each treated as a one-off.
+
 ## Dependencies added
 
 ADR 017. `html5ever` 0.39: **+21 crates, +967 unsafe tokens**.
@@ -502,7 +554,9 @@ has to change slot layout, `NodeId`, or the packing in order to write
 
 **All four gate items pass.** The last one to close was the mutation
 campaign, run 34483936230, whose numbers are above. Nothing in §9 Phase 4 is
-outstanding.
+outstanding — but the phase is done when the gate is green *in CI on both
+operating systems*, and that had not been true for five commits. See *The green
+that was not green*.
 
 **Deferred by decision, with the reasoning recorded**
 
