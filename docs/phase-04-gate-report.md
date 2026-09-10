@@ -11,6 +11,9 @@
 | 24h mutation fuzz clean | `dom_mutation` target exists and runs as a test; the campaign has not been run for this phase yet | **Incomplete** — see below |
 | 100,000-level nesting without stack overflow | `dom_depth_*` ×6, on a 256 KB stack | **Pass**, and it found a hang |
 
+Ranges are named in the phase but in none of the four gate items. They were
+missing, are now built, and are gated anyway — see below.
+
 `ci/gate-dom.sh` passes locally on Windows. The `dom` CI job is now required —
 `continue-on-error` removed, since a job allowed to fail that does not is no
 longer telling anybody anything.
@@ -174,6 +177,40 @@ that exact corruption.
 **This item is incomplete and the phase should not be called closed on it.**
 The campaign runs on a schedule; the report belongs with its numbers, the way
 Phase 3's did.
+
+## Ranges, which the gate never asked for
+
+§9 Phase 4 names four deliverables — *"mutation-safe iteration, tree ordering,
+ranges, depth limits"* — and its gate covers three. Ranges were missing
+entirely, and nothing was red. They were found by re-reading the phase
+description after the gate had already gone green, which is precisely the
+failure a gate exists to prevent.
+
+`ranges` is now a gate suite despite not being a §9 gate item. This gate has
+always checked more than §9 enumerates — the no-infallible-accessor and
+no-owned-children source scans are not gate items either.
+
+Thirteen tests, mostly about **liveness**: what a range does when the tree
+moves underneath it. The DOM does not invalidate a range whose node was
+removed, it *moves* it, so "the handle stopped resolving" and "the range is
+meaningless" are different states and are kept apart.
+
+Both mutation rules verified load-bearing by disabling each and watching the
+tests written for it fail — 2 for insertion, 4 for removal.
+
+### And the quadratic I put in
+
+The parse suite went from 3 seconds to 145. `append_child` was calling
+`child_ids(parent).count()` to hand the insertion rule an index — a walk of
+the whole child list on every append. 100,000 shallow paragraphs took **145
+seconds**, against 2 for a million-deep nesting bomb.
+
+The fix was not a faster count. An append lands at the end, the DOM's rule
+moves only offsets *greater* than the insertion index, and the largest valid
+offset in a parent is exactly that index — so an append cannot move a boundary
+point, and the notification was never needed. Back to 3 seconds, with a
+wall-clock ceiling on that test so the next one fails rather than merely
+crawls.
 
 ## Dependencies added
 
