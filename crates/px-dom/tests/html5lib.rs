@@ -377,7 +377,10 @@ fn every_test_in_the_corpus_is_attempted() {
 /// bug — and never "we think this one is fine".
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Cause {
-    /// Needs a JavaScript engine to run `<script>` during parsing. Phase 11.
+    /// Needs script execution *with DOM bindings* to run `<script>` during
+    /// parsing. Boa arrives in Phase 10; the `document.getElementById` these
+    /// tests call needs the bindings of Phase 11, so Phase 11 is the earliest
+    /// they can pass.
     NeedsScripting,
     /// `<?target data?>` as a processing instruction: a 2025 WHATWG change,
     /// whatwg/html#12118, which html5ever 0.39 predates — it still produces
@@ -406,7 +409,7 @@ fn classify(case: &Case, actual: &str) -> Cause {
     Cause::Unattributed
 }
 
-/// Exactly how many tests need a JavaScript engine.
+/// Exactly how many tests need script execution.
 ///
 /// Pinned, and this is the whole safety of the arrangement. An exclusion
 /// defined by a predicate can silently grow: widen `classify` by accident, or
@@ -456,7 +459,7 @@ fn percent(n: usize, d: usize) -> f64 {
 /// Two groups of failures are not this parser's to fix, and both are
 /// identified mechanically rather than by judgement:
 ///
-/// - **Tests that need a JavaScript engine.** Whole files named `scripted_*`,
+/// - **Tests that need script execution.** Whole files named `scripted_*`,
 ///   whose inputs run `<script>` that mutates the DOM mid-parse. Phase 11
 ///   brings the engine. Nothing Phase 4 could do would pass them.
 /// - **The whatwg/html#12118 processing-instruction change.** `<?target
@@ -492,7 +495,7 @@ fn html5lib_conformance_is_at_least_99_percent() {
 
     assert_eq!(
         scripting, EXPECTED_NEEDS_SCRIPTING,
-        "the JS-engine exclusion changed size ({scripting} against a pinned          {EXPECTED_NEEDS_SCRIPTING}). If a `scripted_*` test started or          stopped failing, say so deliberately by changing the constant -- an          exclusion that resizes itself is how a conformance number gets          better while a parser gets worse"
+        "the script-execution exclusion changed size ({scripting} against a pinned          {EXPECTED_NEEDS_SCRIPTING}). If a `scripted_*` test started or          stopped failing, say so deliberately by changing the constant -- an          exclusion that resizes itself is how a conformance number gets          better while a parser gets worse"
     );
     assert_eq!(
         pi, EXPECTED_PROCESSING_INSTRUCTION,
@@ -540,7 +543,7 @@ actual:
         "
 html5lib (graded): {graded_passed}/{graded_total} = {rate:.2}%"
     );
-    eprintln!("  set aside: {scripting} needing a JS engine (Phase 11)");
+    eprintln!("  set aside: {scripting} needing script execution (Phase 11)");
     eprintln!("  set aside: {pi} whatwg/html#12118, see ADR 019");
 
     assert!(

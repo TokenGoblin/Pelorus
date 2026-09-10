@@ -15,7 +15,7 @@ about this parser.
 | | count |
 |---|---:|
 | whatwg/html#12118 — `<?target data?>` as a processing instruction | 88 |
-| tests needing a JavaScript engine to run `<script>` mid-parse | 6 |
+| tests needing script execution with DOM bindings, mid-parse | 6 |
 | html5ever tree-builder gaps | 11 |
 
 **None of the 105 is `px-dom`'s sink.** That was checked rather than assumed.
@@ -43,9 +43,10 @@ number alongside it.**
 
 Set aside:
 
-- **Tests needing a JavaScript engine.** Whole files named `scripted_*`. They
-  leave the denominator: Phase 11 brings the engine, and no work in Phase 4
-  could pass them.
+- **Tests needing script execution.** Whole files named `scripted_*`. They
+  leave the denominator. Boa arrives in Phase 10 and the DOM bindings these
+  scripts call (`document.getElementById`) in Phase 11, so Phase 11 is the
+  earliest they can pass — and no work in Phase 4 could.
 - **The whatwg/html#12118 cases.** Counted as passes, because the tree
   `px-dom` builds is correct under the spec html5ever implements.
 
@@ -110,7 +111,8 @@ exclusions in its output rather than only here.
 gets deleted, and the floor rises. The assertion message says so, because the
 tempting move at that moment is to adjust the number and move on.
 
-**Phase 11 inherits a small debt.** When the JavaScript engine lands, the six
+**Phase 11 inherits a small debt.** When script execution and the DOM
+bindings land, the six
 `scripted_*` failures become real failures and the exclusion should go. Noted
 in `docs/backlog.md` against Phase 11.
 

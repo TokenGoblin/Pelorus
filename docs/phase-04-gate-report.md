@@ -22,7 +22,7 @@ longer telling anybody anything.
 
 ```
 html5lib (graded):       1935/1946 = 99.43%
-  set aside: 6 needing a JS engine (Phase 11)
+  set aside: 6 needing script execution (Phase 11)
   set aside: 88 whatwg/html#12118, see ADR 019
 html5lib (whole corpus): 1847/1952 = 94.62%
 ```
@@ -35,7 +35,7 @@ The 105 failures, by cause:
 | Cause | Count |
 |---|---:|
 | [whatwg/html#12118](https://github.com/whatwg/html/pull/12118) — `<?target data?>` became a `ProcessingInstruction` in 2025; html5ever 0.39 predates it | 88 |
-| Needs a JavaScript engine to run `<script>` mid-parse (Phase 11) | 6 |
+| Needs script execution with DOM bindings, mid-parse (Boa is Phase 10, bindings Phase 11) | 6 |
 | html5ever tree-builder gaps — counted against us | 11 |
 
 **None is `px-dom`'s sink**, and that was checked rather than assumed. For the
