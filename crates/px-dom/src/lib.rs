@@ -29,6 +29,8 @@
 
 mod arena;
 mod handle;
+#[cfg(feature = "testing")]
+pub mod harness;
 mod iter;
 mod node;
 

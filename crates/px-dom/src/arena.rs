@@ -116,6 +116,43 @@ impl Arena {
         self.slots.len()
     }
 
+    /// Move a slot's generation to the last one it will ever have, and return
+    /// a handle at that generation.
+    ///
+    /// §14.3 asks Phase 4 for "a fuzz target that forces generation
+    /// exhaustion", and ADR 018 explains why it has to be forced rather than
+    /// reached: the 32/32 layout gives four billion generations per slot, so
+    /// retirement is unreachable by churning. That is the whole argument for
+    /// the layout — and it means the retirement branch, which is the most
+    /// consequential branch in this file, would never execute in testing.
+    /// A safety property that only runs in situations nobody can produce is a
+    /// safety property nobody has checked.
+    ///
+    /// Test-only, and gated the way §14.4 requires rather than left `pub` with
+    /// a warning in the docs: without the feature this function does not exist
+    /// in the build at all.
+    ///
+    /// There is deliberately **no release-artifact scan for this symbol yet.**
+    /// §14.4 asks for one, and `ci/gate-sandbox.sh` has a real one for
+    /// `PX_TEST_FORCE_SANDBOX_UNAVAILABLE`, so the omission needs a reason.
+    /// The reason is the one `ci/gate-network.sh` already worked out and wrote
+    /// down for `client_config_trusting`: no shipping binary links `px-dom`
+    /// yet, so a scan would find nothing whether or not the feature was on. A
+    /// check that cannot fail reads as assurance and provides none.
+    ///
+    /// Add the scan when `px-content` links this crate, which is when it
+    /// starts being able to fail. Tracked in `docs/backlog.md`.
+    #[cfg(feature = "testing")]
+    pub fn force_generation_to_last(&mut self, id: NodeId) -> Option<NodeId> {
+        let slot = self.slots.get_mut(id.index() as usize)?;
+        if slot.generation != id.generation() || slot.node.is_none() {
+            return None;
+        }
+        let last = NonZeroU32::new(u32::MAX)?;
+        slot.generation = last;
+        Some(NodeId::new(id.index(), last))
+    }
+
     // -----------------------------------------------------------------------
     // Allocation
     // -----------------------------------------------------------------------

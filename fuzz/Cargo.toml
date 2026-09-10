@@ -17,6 +17,10 @@ libfuzzer-sys = "0.4"
 px-ipc = { path = "../crates/px-ipc" }
 px-broker = { path = "../crates/px-broker" }
 px-net = { path = "../crates/px-net" }
+# `testing` for Arena::force_generation_to_last: §14.3 asks for a target
+# that forces generation exhaustion, and ADR 018 chose a layout where four
+# billion generations makes it unreachable by churn.
+px-dom = { path = "../crates/px-dom", features = ["testing"] }
 
 [[bin]]
 name = "frame_request"
@@ -56,6 +60,20 @@ bench = false
 [[bin]]
 name = "http_chunked"
 path = "fuzz_targets/http_chunked.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dom_stale_handle"
+path = "fuzz_targets/dom_stale_handle.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dom_mutation"
+path = "fuzz_targets/dom_mutation.rs"
 test = false
 doc = false
 bench = false

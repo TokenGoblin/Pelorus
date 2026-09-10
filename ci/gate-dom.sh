@@ -79,6 +79,21 @@ done
 info "cargo test --workspace --locked"
 cargo test --workspace --locked || fail "tests failed"
 
+# The fuzz targets' bodies, as ordinary tests.
+#
+# `px_dom::harness` holds what `fuzz_targets/dom_stale_handle.rs` and
+# `dom_mutation.rs` run, and it is behind the `testing` feature, so the
+# workspace run above does not execute a line of it. Without this step the two
+# targets are checked by nothing until the next campaign — and Phase 1 already
+# shipped a 24-hour campaign that reported clean while never reaching the code
+# it was built for.
+#
+# Cheap enough to be unconditional: about a tenth of a second for twelve
+# hundred operation sequences.
+info "cargo test -p px-dom --features testing (the fuzz bodies)"
+cargo test -p px-dom --features testing --locked \
+    || fail "the fuzz target bodies failed as tests"
+
 # ---------------------------------------------------------------------------
 # §4.1: there is no infallible index API, not even a private one.
 #
