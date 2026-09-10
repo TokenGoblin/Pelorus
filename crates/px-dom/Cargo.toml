@@ -6,5 +6,22 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# The tokenizer and tree-construction state machine only. The tree itself is
+# ours -- see ADR 017 for what this closure costs and where the cost actually
+# sits, which is not where you would guess.
+html5ever = "0.39.0"
+
+# §14.4: test-only capability, absent from a build without the flag rather
+# than merely disabled in one. Currently just the generation-exhaustion hook
+# the stale-handle fuzz target needs -- see Arena::force_generation_to_last,
+# which also records why there is no release-artifact scan for it yet.
+[features]
+testing = []
+
+# px-dom is not in the root CLAUDE.md's list of no-panic crates, and should
+# be: it holds attacker-controlled markup and every tree walk in the engine
+# runs over it. `indexing_slicing` in particular is the rule a generational
+# arena wants anyway -- a slot lookup that panics on a bad index is a slot
+# lookup that skipped the generation check.
+[lints]
+workspace = true

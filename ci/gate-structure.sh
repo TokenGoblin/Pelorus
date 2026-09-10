@@ -87,4 +87,50 @@ else
     ok "no session URLs in commit messages"
 fi
 
+# Every fuzz target's committed corpus is checked through the git index, not
+# through the filesystem.
+#
+# An empty directory is invisible to git: it cannot be committed, and
+# `git status` does not report it, so `fuzz/corpus/dom_stale_handle` existed on
+# the machine that ran the gate and did not exist anywhere else. The px-dom
+# harness test read it with read_dir, found it, and passed. In CI the directory
+# was absent and the same test panicked. The `dom` job was red for five commits
+# while three commit messages said it was green.
+#
+# That is the fourth time this project has shipped a check that passes locally
+# and fails in CI, so the check is written against the index -- the only view of
+# the tree that is the same on every machine.
+#
+# Targets with no seeds are named here rather than allowed by silence. The list
+# is a debt, not a policy: an empty corpus means the campaign starts that target
+# from nothing.
+corpus_empty="http_response http_chunked"
+corpus_bad=0
+while read -r target; do
+    [ -n "$target" ] || continue
+    seeds="$(git ls-files -- "fuzz/corpus/$target" | wc -l)"
+    case " $corpus_empty " in
+        *" $target "*)
+            if [ "$seeds" -eq 0 ]; then
+                ok "$target has no committed corpus, which is a known gap"
+            else
+                fail "$target now has $seeds committed seed(s);"
+                fail "  remove it from corpus_empty in $0"
+                corpus_bad=1
+            fi
+            ;;
+        *)
+            if [ "$seeds" -gt 0 ]; then
+                ok "$target has $seeds committed corpus seed(s) in the index"
+            else
+                fail "fuzz target $target has no corpus file in the git index."
+                fail "  A directory that exists only on your machine is not a corpus:"
+                fail "  git cannot store an empty directory, so CI will not see it."
+                corpus_bad=1
+            fi
+            ;;
+    esac
+done < <(grep -E '^name = ' fuzz/Cargo.toml | sed -e 's/^name = "//' -e 's/"$//' | grep -v '^px-fuzz$')
+[ "$corpus_bad" -eq 0 ] && ok "every fuzz target's corpus is accounted for"
+
 verdict "structure"

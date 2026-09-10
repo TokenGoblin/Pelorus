@@ -94,9 +94,33 @@ fi
 # 32 MiB ceiling would spend the whole budget generating enormous inputs
 # instead of exploring structure, and the chunk bound is the one a declared
 # length reaches directly rather than by accumulation.
+#
+# The DOM targets go the other way, and for a different reason. Their harnesses
+# assert the whole tree's invariants after *every* operation, and one byte is
+# roughly one operation, so cost grows with the square of the input. Measured,
+# release: 1 KB is 0.4 ms, 4 KB is 2.9 ms, 16 KB is 20 ms, 64 KB is 170 ms. At
+# the 1,100,000 default a single execution would take minutes and the campaign
+# would explore almost nothing.
+#
+# 4 KB is about two thousand operations — enough to build real trees, churn
+# slots, and reach the forced generation-exhaustion path — at roughly 350
+# executions per second. The check-everything-every-step design is what makes
+# these targets precise, and this is what it costs.
 max_len_for() {
     case "$1" in
         http_response | http_chunked) echo 8500000 ;;
+        dom_stale_handle | dom_mutation) echo 4096 ;;
+        # The parser goes the other way again: its input is HTML, and the
+        # committed corpus holds a 1.1 MB seed -- 100,000 levels of nesting
+        # opened and closed, which §4.4 asks for by name. A smaller -max_len
+        # would truncate it and quietly drop the coverage the seed exists for.
+        #
+        # Affordable because `parse` abandons a nesting bomb after eight
+        # refusals: measured on release, the 1.1 MB nesting seed costs 75 ms
+        # and a 1 MB shallow document 104 ms, against 6 ms at 64 KB. Large
+        # inputs are the cheap ones here, which is the opposite of the two
+        # arena targets above.
+        dom_parse) echo 1200000 ;;
         *) echo 1100000 ;;
     esac
 }
@@ -113,7 +137,27 @@ for target in $targets; do
             -print_final_stats=1); then
         ok "$target"
     else
-        fail "$target found a crash; the reproducer is under fuzz/artifacts/$target/"
+        # A non-zero exit is not the same as a crash, and saying so matters:
+        # libFuzzer writes a reproducer when it crashes the target and writes
+        # nothing when it could not start. Reporting the second as the first
+        # sends somebody hunting for a file that does not exist.
+        #
+        # Both happen. On a Windows machine without the MSVC ASAN runtime every
+        # target exits 0xc0000135 (STATUS_DLL_NOT_FOUND) before executing a
+        # single input, and this script reported nine crashes and nine
+        # reproducer paths, all of them empty directories.
+        found="$(find "fuzz/artifacts/$target" -type f 2>/dev/null | head -1)"
+        if [ -n "$found" ]; then
+            fail "$target found a crash; the reproducer is $found"
+        else
+            # One `fail`, then `info` for the explanation: `fail` increments
+            # the count the verdict reports, and four lines about one problem
+            # would read as four problems.
+            fail "$target did not run to completion and wrote no reproducer"
+            info "so this is a harness or toolchain failure, not a finding."
+            info "On Windows without the MSVC ASAN runtime every target exits"
+            info "0xc0000135 here; ADR 011 covers the sanitizer toolchain."
+        fi
     fi
 done
 

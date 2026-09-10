@@ -6,3 +6,14 @@ tests/compat/**/*.har   binary
 tests/compat/**/*.warc  binary
 tests/**/*.png          binary
 data/**                 binary
+
+# The HTML conformance corpus is byte-exact test data, not text. Several files
+# deliberately contain carriage returns, because how the tokenizer treats CR is
+# one of the things they test.
+#
+# Today those are lone CRs, which `text=auto eol=lf` happens to leave alone --
+# checked against upstream, byte-identical. That is luck rather than design: a
+# future corpus update carrying a meaningful CRLF would be normalised to LF on
+# commit, and the test would then be asserting something the corpus does not
+# say. Marked binary so the question stops arising.
+tests/html5lib/**/*.dat binary

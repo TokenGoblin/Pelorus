@@ -3,11 +3,23 @@
 
 [audits]
 
+[[trusted.bitflags]]
+criteria = "safe-to-deploy"
+user-id = 3204 # Ashley Mannix (KodrAus)
+start = "2019-05-02"
+end = "2027-09-10"
+
 [[trusted.cc]]
 criteria = "safe-to-deploy"
 trusted-publisher = "github:rust-lang/cc-rs"
 start = "2025-09-01"
 end = "2027-09-09"
+
+[[trusted.fastrand]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2021-04-24"
+end = "2027-09-10"
 
 [[trusted.find-msvc-tools]]
 criteria = "safe-to-deploy"
@@ -27,11 +39,23 @@ user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-06-28"
 end = "2027-09-09"
 
+[[trusted.html5ever]]
+criteria = "safe-to-deploy"
+user-id = 2396 # Josh Bowman-Matthews (jdm)
+start = "2019-04-27"
+end = "2027-09-10"
+
 [[trusted.libc]]
 criteria = "safe-to-deploy"
 user-id = 55123 # rust-lang-owner
 start = "2024-08-15"
 end = "2027-09-09"
+
+[[trusted.lock_api]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-05-04"
+end = "2027-09-10"
 
 [[trusted.log]]
 criteria = "safe-to-deploy"
@@ -39,11 +63,59 @@ user-id = 3204 # Ashley Mannix (KodrAus)
 start = "2019-07-10"
 end = "2027-09-09"
 
+[[trusted.markup5ever]]
+criteria = "safe-to-deploy"
+user-id = 2396 # Josh Bowman-Matthews (jdm)
+start = "2019-04-27"
+end = "2027-09-10"
+
+[[trusted.new_debug_unreachable]]
+criteria = "safe-to-deploy"
+user-id = 2017 # Matt Brubeck (mbrubeck)
+start = "2019-02-26"
+end = "2027-09-10"
+
 [[trusted.once_cell]]
 criteria = "safe-to-deploy"
 user-id = 2699 # Alex Kladov (matklad)
 start = "2019-05-07"
 end = "2027-09-09"
+
+[[trusted.parking_lot]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-05-04"
+end = "2027-09-10"
+
+[[trusted.parking_lot_core]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-05-04"
+end = "2027-09-10"
+
+[[trusted.phf]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-09-10"
+
+[[trusted.phf_codegen]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-09-10"
+
+[[trusted.phf_generator]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-09-10"
+
+[[trusted.phf_shared]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-09-10"
 
 [[trusted.proc-macro2]]
 criteria = "safe-to-deploy"
@@ -93,6 +165,12 @@ user-id = 209038 # Daniel McCarney (cpu)
 start = "2023-07-04"
 end = "2027-09-09"
 
+[[trusted.scopeguard]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2020-02-16"
+end = "2027-09-10"
+
 [[trusted.serde]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
@@ -111,11 +189,41 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-01"
 end = "2027-09-09"
 
+[[trusted.siphasher]]
+criteria = "safe-to-deploy"
+user-id = 468 # Frank Denis (jedisct1)
+start = "2019-09-20"
+end = "2027-09-10"
+
+[[trusted.smallvec]]
+criteria = "safe-to-deploy"
+user-id = 2396 # Josh Bowman-Matthews (jdm)
+start = "2019-06-10"
+end = "2027-09-10"
+
+[[trusted.string_cache]]
+criteria = "safe-to-deploy"
+user-id = 2844 # Martin Robinson (mrobinson)
+start = "2023-02-22"
+end = "2027-09-10"
+
+[[trusted.string_cache_codegen]]
+criteria = "safe-to-deploy"
+user-id = 2844 # Martin Robinson (mrobinson)
+start = "2025-08-26"
+end = "2027-09-10"
+
 [[trusted.syn]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-01"
 end = "2027-09-09"
+
+[[trusted.tendril]]
+criteria = "safe-to-deploy"
+user-id = 2844 # Martin Robinson (mrobinson)
+start = "2026-07-06"
+end = "2027-09-10"
 
 [[trusted.thiserror]]
 criteria = "safe-to-deploy"
@@ -146,6 +254,12 @@ criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2020-06-03"
 end = "2027-09-09"
+
+[[trusted.web_atoms]]
+criteria = "safe-to-deploy"
+user-id = 2396 # Josh Bowman-Matthews (jdm)
+start = "2025-04-18"
+end = "2027-09-10"
 
 [[trusted.webpki-roots]]
 criteria = "safe-to-deploy"

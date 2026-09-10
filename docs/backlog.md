@@ -177,7 +177,7 @@ Format: one entry per defect.
   invariant 7 is load-bearing enough that it should not be amended by whoever
   happens to hit this first.
 
-## Phase 4's gate omits the mutation-side snapshot path stylo needs
+## Phase 4's gate omits the mutation-side snapshot path stylo needs — CLOSED
 
 - **Found in:** phase 1, `docs/research/stylo-requirements.md`
 - **Belongs to:** phase 4
@@ -187,6 +187,23 @@ Format: one entry per defect.
   it means touching every attribute setter twice.
 - **Why deferred:** phase 4 owns it; recorded now so the gate can be written
   with it rather than amended after.
+- **Closed in phase 4.** `crates/px-dom/src/snapshot.rs` and the attribute
+  mutators on `Arena`. Modelled in this crate's types rather than importing
+  stylo, which is a Phase 5 dependency and would need an ADR — and a Phase 4
+  crate depending on the thing Phase 5 exists to try is backwards. `ElementState`
+  is absent for the same reason: it is stylo's, and there is no state to record
+  until something computes style.
+- **What is gated, and how:** twelve tests, plus a source check in
+  `ci/gate-dom.sh`. The source check is the load-bearing one. A sink that
+  reaches into `NodeData::Element { attrs }` and pushes directly builds exactly
+  the right tree and passes the whole conformance corpus; it is wrong only in
+  that nothing recorded what the attribute used to be. A first attempt to test
+  that failed instructively — the test called the arena method directly, so
+  rewriting the sink to bypass the arena left it green.
+- **Still owed by Phase 5:** the `has_snapshot` / `handled_snapshot` bits are
+  derived from the table rather than stored on the node, and `ElementState`
+  has no representation yet. Both are Phase 5's to reconcile with stylo's
+  actual `ElementSnapshot` trait.
 
 ## Style fixtures must run with debug assertions on
 
@@ -360,6 +377,16 @@ Format: one entry per defect.
   which is invariant 9 in its strongest form but costs a channel per
   partition.
 
+- **Phase 4 came and went without it, deliberately.** The "whichever comes
+  first" above named Phase 4 as a possible owner, so this records that the
+  answer was no rather than letting the clause expire unread. Both options are
+  ADR 009 decisions — one weakens a check this project wrote on purpose, the
+  other spends a channel per partition — and ADR 009 is marked PROPOSED with a
+  note that it was not taken on the standing authorisation. Choosing between
+  them unattended is exactly what that note exists to prevent.
+- **It is now unowned.** No phase in §9 names it, and the two candidate phases
+  have both passed. That is the state to fix, not the design.
+
   Both are protocol-shape decisions, and ADR 009 — the IPC protocol shape — is
   marked PROPOSED with an explicit note that it was **not** taken on the
   standing authorisation because it is a design with several defensible shapes
@@ -413,3 +440,316 @@ Format: one entry per defect.
   routes a content process's fetch through the broker — `px-content` does not
   fetch at all. The debt becomes real the moment something does, which is
   Phase 4 onward. That is the deadline this entry has.
+
+## The string interner is a cross-document channel until Phase 14
+
+- **Found in:** phase 4, ADR 017
+- **Belongs to:** phase 14 (out-of-process iframes)
+- **What:** `string_cache`, reached through `html5ever`, keeps a
+  **process-global** dynamic atom set behind sharded locks. Interning a string
+  that is already present is measurably cheaper than interning a new one, so
+  interner occupancy is readable by timing. Where two documents from different
+  sites share a process, that is a cross-document channel.
+- **Why it is not a Phase 4 fix:** the mitigation is process separation, and
+  build-spec §9 schedules that for Phase 14 — *"without this, 'one process per
+  site' is a claim rather than a property."* Nothing px-dom can do in Phase 4
+  closes it; writing our own interner would only move the same shared state.
+- **What it costs meanwhile:** the same as every other thing Phase 14 exists to
+  fix. This entry exists so that a cross-origin timing result during Phase 14
+  is recognised as a known consequence of a Phase 4 decision rather than
+  investigated from scratch.
+- **Deadline:** Phase 14. The Phase 13 cross-site leak harness is the cheapest
+  place to point a test at it first.
+
+## `ci/unsafe-audit.sh` counts crates that are never compiled
+
+- **Found in:** phase 4, ADR 017
+- **Belongs to:** whenever the baseline stops being readable
+- **What:** the audit runs `cargo vendor` and counts `unsafe` tokens in every
+  vendored crate, across all targets. `redox_syscall` contributes 178 tokens
+  for an operating system this project does not target. The number is a
+  ceiling, which is the correct direction for a gate — it never under-counts —
+  but it is drifting away from "unsafe that could run on a user's machine."
+- **Why it is not done now:** the gate's job is to detect *movement*, and it
+  does that correctly today. Filtering by target would make the absolute number
+  more meaningful and the delta no more meaningful, at the cost of teaching the
+  audit about target resolution.
+- **What it costs meanwhile:** every ADR that quotes the baseline has to say
+  which part of it ships. ADR 017 does; ADR 016 had to do the same thing for a
+  different reason (`ring`'s C and assembly, which the audit cannot see at
+  all). Two ADRs in a row needing a footnote on the same metric is the signal
+  that this is worth fixing.
+
+## px-dom's CLAUDE.md claimed Miri ran, and it never has — CLOSED
+
+- **Found in:** phase 4, `crates/px-dom/CLAUDE.md`
+- **Belongs to:** phase 4, once the html5ever integration lands
+- **What:** the file has said "Miri runs this crate's unit tests in CI" since
+  Phase 0. No Miri job exists. The line has been corrected in place rather
+  than deleted, under a "Not true yet" heading, because a false assurance that
+  is quietly removed leaves nobody knowing it was ever claimed.
+- **Why it is worth making true:** px-dom is `#![forbid(unsafe_code)]`, so
+  Miri finds nothing in this crate's own code and would be theatre today. It
+  stops being theatre the moment the `TreeSink` integration means these tests
+  drive `tendril`, `smallvec` and `string_cache` — about 800 unsafe tokens of
+  dependency (ADR 017) that no other check in this project exercises at
+  runtime. `ci/unsafe-audit.sh` counts them; nothing runs them.
+- **What it costs meanwhile:** the dependency unsafe that html5ever brought in
+  is accounted for and unexercised. That is the gap ADR 017 accepted and this
+  is where it gets closed.
+- **Closed in phase 4.** ADR 022 and `ci/gate-miri.sh`. Five suites, on the
+  nightly ADR 006 pins, by the mechanism ADR 011 established. It found
+  something on the first run: `tendril` does integer-to-pointer casts, so
+  Miri's provenance tracking is weakened for the crate holding every string in
+  the DOM — a green run says less about `tendril` than about the rest. The
+  deep-nesting, generation-exhaustion and conformance suites remain out of
+  reach and are named in the ADR rather than left implied.
+
+## html5ever's tree builder is quadratic in nesting depth
+
+- **Found in:** phase 4, measured in `crates/px-dom/src/sink.rs`
+- **Belongs to:** nobody yet; mitigated, not fixed
+- **What:** html5ever's stack of open elements grows with the input's nesting
+  however shallow the tree we actually build, and the spec's "has an element in
+  scope" tests scan it on every start tag. §4.4's depth limit bounds *our* tree
+  and does nothing about that stack. Release measurements on nested `<div>`s:
+  2,000 → 11 ms, 4,000 → 44 ms, 8,000 → 192 ms, 16,000 → 686 ms, against an
+  arena cost that doubled rather than quadrupled. A five-megabyte file of
+  nothing but `<div>` extrapolates to roughly three quarters of an hour.
+- **Mitigated by:** `px_dom::parse` feeding the parser in 8 KB chunks and
+  stopping once the tree has refused eight pieces of content, reported as
+  `Dom::abandoned`. A million-deep document now costs about 65 ms. Tests cover
+  both directions: the bomb is bounded, and neither a large shallow document
+  nor legal 400-deep nesting is abandoned.
+- **Why it is still here:** the mitigation bounds the damage, it does not make
+  the tree builder linear. Anything that drives html5ever *without* going
+  through `px_dom::parse` — a future incremental or streaming parse path, or
+  anything that calls `.one()` — gets the quadratic behaviour back with no
+  warning. The durable fix is upstream, or a bound inside the tree builder,
+  neither of which is Phase 4 work.
+- **Deadline:** revisit when Phase 13 adds streaming navigation, which is the
+  first thing likely to want its own feed loop.
+
+## Upstream whatwg/html#12118 to html5ever
+
+- **Found in:** phase 4, ADR 019
+- **Belongs to:** whenever html5ever is next upgraded
+- **What:** `<?target data?>` became a `ProcessingInstruction` node in 2025
+  (whatwg/html#12118). html5ever 0.39 predates it and produces the older bogus
+  comment, which is 88 of the 105 conformance failures. Chromium is
+  implementing the change too (issues.chromium.org/issues/481087638).
+- **Why it is not fixed here:** the change is in html5ever's tokenizer, and
+  ADR 019 rejected forking the one dependency whose value is being the widely
+  tested version. Contributing it upstream is the version of this that is
+  worth doing.
+- **What to do when it lands:** delete the exclusion in
+  `crates/px-dom/tests/html5lib.rs` rather than resizing
+  `EXPECTED_PROCESSING_INSTRUCTION`, and raise the whole-corpus floor. The
+  assertion message says so, because adjusting the number is the tempting
+  move at that moment.
+
+## Phase 11 inherits six conformance exclusions
+
+- **Found in:** phase 4, ADR 019
+- **Belongs to:** phase 11 (JavaScript)
+- **What:** six `scripted_*` corpus tests run `<script>` that mutates the DOM
+  mid-parse. They are excluded from the graded conformance figure because no
+  Phase 4 work could pass them.
+- **What to do:** when Boa lands, delete the `NeedsScripting` exclusion and
+  the `EXPECTED_NEEDS_SCRIPTING` constant. They become real failures at that
+  point, which is correct — they will be measuring something this project can
+  then actually do.
+
+## px-dom has a testing-only symbol and no release-artifact scan
+
+- **Found in:** phase 4, `crates/px-dom/src/arena.rs`
+- **Belongs to:** whenever px-content links px-dom
+- **What:** `Arena::force_generation_to_last` is `#[cfg(feature = "testing")]`
+  and §14.4 asks for a release-artifact scan for symbols like it. There is
+  none.
+- **Why not now:** no shipping binary links px-dom, so the scan would find
+  nothing whether the feature was on or off. That is the same conclusion
+  `ci/gate-network.sh` reached and recorded for `client_config_trusting`, and
+  a check that cannot fail reads as assurance while providing none.
+- **What to do:** add the scan to `ci/gate-dom.sh` when px-content takes the
+  dependency, following the pattern `ci/gate-sandbox.sh` uses for
+  `PX_TEST_FORCE_SANDBOX_UNAVAILABLE`.
+
+## Phase 5 must match web_atoms 0.2.6, or the atoms are two different types
+
+- **Found in:** phase 4, `docs/research/stylo-requirements.md` item 4
+- **Belongs to:** phase 5, before stylo is added
+- **What:** the note says to *"verify the `web_atoms` version agreement between
+  your pinned `html5ever` and your pinned `stylo` before writing the tree
+  builder."* Half of that is now checkable and checked: `px-dom` reaches
+  `web_atoms 0.2.6` through `html5ever 0.39` / `markup5ever 0.39`, and
+  `html5ever::LocalName` *is* `web_atoms::LocalName` — element names are
+  already stored in the interner stylo's `SelectorImpl` names, not converted at
+  a boundary.
+- **What is not checkable yet:** the other half. Stylo is not a dependency, so
+  nothing here can confirm which `web_atoms` it pins.
+- **Why it matters:** `web_atoms` uses static atom sets generated at build
+  time. Two versions in the tree are two unrelated types with the same name,
+  and the failure is a type error at the `TElement` boundary at the worst
+  possible moment — the first hour of the phase §9 already calls the riskiest.
+- **What to do:** check `stylo`'s `web_atoms` requirement *before* adding it,
+  and if it disagrees, resolve the version before writing a line of the trait
+  impls. A `cargo tree -d web_atoms` showing two versions is the failure.
+
+## The borrowed style view, deferred out of Phase 4
+
+- **Found in:** phase 1, `docs/research/stylo-requirements.md` §4 item 2
+- **Belongs to:** phase 5
+- **What:** `StyleView<'_>` / `StyleNode<'dom>` — `Copy`, two words,
+  `Send + Sync`, constructed only through a generation-checked lookup, unable
+  to outlive the tree borrow. The type `px-css` implements `TNode`/`TElement`
+  on. The note says to build it in Phase 4.
+- **Why deferred:** ADR 021. The note gives one reason for the Phase 4 timing —
+  *"its whole value is that it forces the arena and slot layout decisions
+  early"* — and those decisions are made and recorded without it (ADRs 018 and
+  020, plus §3.5's packing). Writing the type now means writing it against an
+  inferred shape (§3.3 is marked `[I]`) of a trait the same note records as
+  churning: 24 releases in 28 months, breaking changes in most, a supertrait
+  added as recently as 2026-06-30.
+- **What Phase 5 must check first:** whether the arena actually supports it. If
+  slot layout, `NodeId`'s width, or the opaque packing has to change to write
+  `StyleNode`, ADR 021 was wrong in its central claim and should say so rather
+  than the difficulty being absorbed as ordinary Phase 5 friction.
+
+## The Phase 4 campaign predates dom_parse and does not cover it — CLOSED
+
+- **Found in:** phase 4
+- **Belongs to:** phase 4, before it closes
+- **What:** campaign run 34434827530 was launched at `a599761`, several commits
+  before `dom_parse` existed. It fuzzes `dom_stale_handle` and `dom_mutation`
+  and no parser at all.
+- **Why it matters:** this is the project's recurring failure, arriving by a
+  third route. Phase 1's campaign reported clean for 24 hours against a default
+  `-max_len` that put the code out of reach; Phase 3's ran before the HTTP
+  targets had a `-max_len` that straddled their own limits; this one would
+  report clean against a matrix written before the target existed.
+- **What to do:** re-run the campaign at a commit that includes `dom_parse`
+  before calling Phase 4 done, and put both results in the gate report. The
+  first run's numbers are still worth having — they cover the arena targets —
+  but they do not satisfy the gate item on their own.
+- **Done, and it turned up a second shortfall.** The first run completed clean
+  (11 shards, 30.7bn executions). Reading its numbers showed `dom_mutation` had
+  received eight CPU-hours against a gate item that says twenty-four — the
+  campaign total was 44 hours, which is true of the campaign and not of the
+  item. The matrix now gives that target six shards.
+- **Closed by run 34483936230** — 19 shards, 28.2bn executions, clean, with
+  three `dom_parse` shards and six for `dom_mutation`. Run 34453317232, named
+  here earlier, was cancelled and replaced; it never produced numbers. Both
+  results are in `docs/phase-04-gate-report.md`, and the `-max_len` check is
+  written up there because it needed interpreting this time: `-len_control`
+  ramps `lim:` up from the largest seed, so two targets end below their
+  configured ceiling without the flag having been ignored.
+
+## Miri still does not run on px-ipc or px-store
+
+- **Found in:** phase 4, ADR 022
+- **Belongs to:** unassigned; px-store has no implementation yet
+- **What:** build-spec §4.5 names Miri on `px-dom`, `px-ipc` and `px-store`.
+  ADR 022 covers `px-dom` only, and supersedes the earlier "Miri is not run on
+  px-ipc" entry's stated blocker — the ADR 006 fence is no longer the obstacle,
+  because ADR 022 shows the mechanism ADR 011 established works for a third
+  consumer.
+- **What is left:** `px-ipc` has no `unsafe` and no dependency with unsafe in
+  its test paths, so Miri over it checks UB in `std` calls — real but thin, and
+  that reasoning has not changed. `px-store` is still a skeleton.
+- **What to do:** wire `px-ipc` when it gains a dependency whose unsafe its
+  tests execute, and `px-store` when it exists. `ci/gate-miri.sh` is written to
+  take more crates without restructuring.
+
+## Open: can a live range's start come to follow its end? — ANSWERED, it was a defect
+
+- **Found in:** phase 4, by the mutation fuzz harness once it was taught to
+  create ranges
+- **Belongs to:** unassigned — it is a question, not a defect
+- **What:** a sequence of individually legal mutations ends with a range whose
+  `compare_boundaries(start, end)` is `After`, with both boundary points still
+  valid. Not a dangling range: a span that runs backwards.
+- **What is not known:** whether that is a defect in `Arena`'s implementation
+  of the DOM's mutation rules, or inherent to `(node, offset)` boundary points.
+  Moving a container carries its boundary points with it and no rule re-checks
+  ordering; but every inversion reachable by hand turns out to be corrected by
+  the removal and insertion rules. The fuzzer's sequence is 33 operations and
+  spends part of it with subtrees detached, where the comparison has no answer.
+- **Recorded as** an `#[ignore]`d test with the reproducer,
+  `crates/px-dom/tests/open_questions.rs`, per `/CLAUDE.md`: *"If a spec is
+  ambiguous, encode the ambiguity as an #[ignore] test with a comment and
+  raise it. Do not guess."* Deliberately outside `ci/gate-dom.sh`'s suite list,
+  and named to avoid its filters — an open question should not be dressed as
+  either a pass or a failure.
+- **How to settle it:** reduce the sequence to something readable and check
+  each step against the spec's remove and insert algorithms.
+- **Settled that way, and the answer was "defect".** Delta-reducing the 34
+  operations to 16 showed the range had been inverted *before* the mutation
+  that appeared to invert it. Two bugs, both mine:
+  `compare_boundary_points`'s last step was a bare `Some(Before)`, justified by
+  an earlier step having mirrored the call — which only holds when `precedes`
+  gives an answer. And `precedes` walked from `document()` alone, so every pair
+  inside a detached subtree was incomparable, so the fall-through fired
+  constantly. A range built in a fragment compared as correctly ordered while
+  being inverted, and only told the truth once a mutation collapsed an endpoint
+  into an ancestor relationship — at which point the inversion looked like
+  something that mutation had caused.
+- **Now:** `precedes` orders within whatever tree the nodes share, `None` only
+  for genuinely different trees; `compare_boundary_points` returns `None`
+  rather than guessing. Two regression tests in `tests/ranges.rs` — the minimal
+  form and the reduced sequence — and the mutation fuzz harness asserts the
+  invariant again.
+- **And that was premature.** The next campaign failed all six `dom_mutation`
+  shards in minutes on a 25-byte input. A **third** defect, in the constructor
+  rather than the comparison: `new_range` refused a pair comparing as `After`,
+  but a pair in different trees does not compare at all, and `None` is not
+  `Some(After)`. The range is well-formed until the trees are joined, at which
+  point it is inverted with nothing having moved either endpoint. `new_range`
+  now requires the ordering to be establishable. Six crash inputs committed to
+  `fuzz/corpus/dom_mutation/` per ADR 006.
+
+## Public docs link to private items, and nothing checks
+
+- **Found in:** phase 4, by running `cargo doc` for the first time
+- **Belongs to:** unassigned — the two remaining are in `px-net`, which is
+  merged, so fixing them here would be an out-of-phase change
+- **What:** rustdoc warns when public documentation links to a private item.
+  The link then renders as plain text, so a reader cannot follow it. Three
+  existed; the `px-dom` one is fixed in phase, and two remain:
+  `px-net/src/cookie.rs:62` links to `MAX_COOKIE_BYTES` and
+  `px-net/src/dns.rs:18` links to `MAX_JUMPS`.
+- **Why it matters more here than in most projects:** the working agreement
+  requires the reasoning to live where the decision does, so the documentation
+  *is* a deliverable. A link that does not resolve is reasoning the reader was
+  pointed at and cannot reach — and both of these point at exactly the
+  constants that make the surrounding paragraph mean something.
+- **The fix in both cases is `pub`**, not deleting the reference: these are
+  observable behaviour — a cookie header limit and a DNS pointer-loop bound —
+  and a caller interpreting a refusal has a legitimate reason to know them.
+  That is what was done for `px-dom`'s `MAX_RECORDED_ERRORS` and
+  `MAX_REFUSALS_BEFORE_ABANDONING`.
+- **And then gate it.** `cargo doc --workspace --no-deps` currently emits three
+  warnings and nothing looks at them. Once the two above are fixed the
+  workspace is clean, and a gate step that fails on rustdoc warnings would keep
+  it that way. Not added now, because a gate that fails the moment it lands is
+  a gate somebody disables.
+
+## The HTTP fuzz targets have no committed corpus
+
+- **Found in:** phase 4, while fixing `every_committed_corpus_seed_replays_clean`
+- **Belongs to:** phase 3's targets; unassigned
+- **What:** `http_response` and `http_chunked` have no seed files in the git
+  index. `ci/gate-structure.sh` now names both in `corpus_empty`, so the gap is
+  recorded rather than silent, and the gate fails if a third target joins them.
+- **Why it matters:** every campaign starts those two targets from nothing.
+  They still reach billions of executions because their inputs are bytes rather
+  than structure, so this is much less costly than it would be for the DOM
+  targets — but a `200 OK` with a sane header block is not something a fuzzer
+  should have to rediscover from an empty corpus each time, and a well-formed
+  chunked body even less so.
+- **What to do:** commit a handful of hand-written seeds the way `dom_parse`
+  has them — a minimal response, one with a header block worth mutating, a
+  chunked body with a trailer, and a response at `MAX_CHUNK_BYTES`. Then remove
+  both names from `corpus_empty`; the gate already fails if the list and the
+  index disagree in that direction.
+- **Not done here because** they are Phase 3 targets and this is Phase 4.

@@ -18,3 +18,22 @@ url = "https://raw.githubusercontent.com/divviup/libprio-rs/main/supply-chain/au
 
 [imports.mozilla]
 url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
+
+[[exemptions.redox_syscall]]
+version = "0.5.18"
+criteria = "safe-to-deploy"
+notes = """
+The one exemption, and the reason it is an exemption rather than a trust entry
+(ADR 017).
+
+redox_syscall is target-gated to Redox and compiles for neither Windows nor
+Linux -- `cargo tree -i redox_syscall` prints nothing without `--target all`.
+It is reached through parking_lot_core, which string_cache pulls in for its
+global interner.
+
+Trusting its publisher would say we vouch for a maintainer whose code we never
+build. An exemption says what is actually true: unaudited, and accepted because
+it does not ship. It is also version-pinned, so a bump turns the gate red and
+somebody re-reads this note -- the right amount of friction for a crate whose
+acceptability rests entirely on "we do not compile it."
+"""
