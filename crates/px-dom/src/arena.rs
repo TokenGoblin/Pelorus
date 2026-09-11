@@ -258,7 +258,20 @@ impl Arena {
 
     /// Slots allocated, live or not. The bound every traversal uses to stay
     /// finite on a tree it has no reason to trust.
-    pub(crate) fn slot_count(&self) -> usize {
+    ///
+    /// Public from Phase 5. `px-css` sizes its per-element style table by this
+    /// rather than by [`Self::len`], because the table is indexed by a
+    /// `NodeId`'s slot index and `len` is the count of *live* nodes — the two
+    /// diverge the moment anything is removed, and sizing by the wrong one
+    /// fails as an out-of-bounds read in the middle of a style traversal.
+    ///
+    /// Publishing an existing accessor is not ADR 021's tripwire. That ADR
+    /// names three things whose change would falsify it — the arena's slot
+    /// layout, `NodeId`'s representation, and the opaque packing — and a
+    /// visibility keyword is none of them. `tests/layout.rs` and
+    /// `tests/opaque.rs` are untouched, which is what `ci/gate-style.sh` checks
+    /// rather than taking this paragraph's word for it.
+    pub fn slot_count(&self) -> usize {
         self.slots.len()
     }
 
