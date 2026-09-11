@@ -326,10 +326,19 @@ impl StyleEngine {
     /// taking them in the same phase that first implements `TElement` would make
     /// a data race and a trait bug indistinguishable.
     pub fn resolve(&self, arena: &Arena, root: &crate::view::StyleRoot) -> Option<usize> {
+        mark_thread_as_layout();
+
+        // Scoped rather than constructed: the node records and their context are
+        // two locals that reference each other, so they cannot outlive this call
+        // and a `Dom` cannot be returned from one. See `view::with_dom`.
+        crate::view::with_dom(arena, root, |dom| self.resolve_in(dom))?
+    }
+
+    /// The body of [`Self::resolve`], inside the `with_dom` scope.
+    fn resolve_in(&self, dom: crate::view::Dom<'_>) -> Option<usize> {
         use style::dom::{TDocument as _, TElement as _, TNode as _};
         use style::traversal::DomTraversal as _;
 
-        let dom = crate::view::Dom::new(arena, root)?;
         let document = crate::dom::StyleDocument::new(dom)?;
 
         // The root element, which is <html> for any parsed document. Found by
@@ -402,4 +411,39 @@ pub fn quirks_mode_of(dom: &px_dom::Dom) -> QuirksMode {
         html5ever::interface::QuirksMode::LimitedQuirks => QuirksMode::LimitedQuirks,
         html5ever::interface::QuirksMode::NoQuirks => QuirksMode::NoQuirks,
     }
+}
+
+/// Register this thread as a layout thread, once.
+///
+/// stylo asserts `thread_state::get().contains(ThreadState::LAYOUT)` when it
+/// builds a `StyleContext`, and panics otherwise:
+///
+/// ```text
+/// assertion failed: thread_state::get().contains(ThreadState::LAYOUT)
+/// ```
+///
+/// This is the second embedder requirement in this phase that appears nowhere in
+/// a trait or a function signature — the first was ADR 027's pointer-sized
+/// element. Servo satisfies it by initialising its layout threads on creation; a
+/// library embedding stylo has to do it wherever style actually runs.
+///
+/// `initialize` panics if called twice with *different* states, so it is guarded
+/// by a `Once` rather than called on every pass. A `Once` rather than an
+/// idempotency check inside stylo, because there is no way to ask stylo whether a
+/// thread is initialised without also asserting what it was initialised to.
+fn mark_thread_as_layout() {
+    use std::sync::Once;
+    // Per-thread rather than per-process: `thread_state` is a thread-local, so a
+    // process-wide `Once` would initialise the first thread to call `resolve` and
+    // leave every other one failing the assertion. Phase 5 resolves on one thread
+    // (ADR 023 passes `pool: None`), and this is written so that stops being true
+    // safely.
+    thread_local! {
+        static MARKED: Once = const { Once::new() };
+    }
+    MARKED.with(|once| {
+        once.call_once(|| {
+            style::thread_state::initialize(style::thread_state::ThreadState::LAYOUT);
+        });
+    });
 }

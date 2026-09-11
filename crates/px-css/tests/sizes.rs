@@ -35,26 +35,21 @@ fn computed_node_id_is_exactly_one_word() {
     );
 }
 
-/// The views are currently 32 bytes, and stylo needs 8.
+/// The views fit the word stylo reserves for an element.
 ///
-/// Asserted at the wrong value on purpose: this records the measured state that
-/// ADR 027 is about, so the number in the ADR and the number in the build cannot
-/// drift apart while the fix is outstanding. When the views shrink, this test
-/// fails and is replaced by the one below it.
-#[test]
-fn computed_view_size_is_the_one_adr_027_recorded() {
-    assert_eq!(size_of::<StyleNode<'static>>(), 32);
-    assert_eq!(size_of::<StyleElement<'static>>(), 32);
-}
-
-/// What ADR 027 has to achieve.
+/// This was ADR 027's acceptance test, `#[ignore]`d while the views were 32
+/// bytes. It passes now: a `StyleNode` is a reference to one per-node record and
+/// nothing else.
 ///
-/// `#[ignore]`d rather than deleted: it is the acceptance test for the fix, and
-/// running it is how you know the fix is done. `cargo test -- --ignored` is the
-/// whole verification.
+/// It stays because the requirement is invisible to the compiler. Adding a field
+/// to a view would not be a type error — it would be a panic on the next style
+/// pass, three modules into a dependency, reading `left: 10256, right: 9488`.
 #[test]
-#[ignore = "ADR 027: the views are 32 bytes and stylo requires 8; this is the fix's acceptance test"]
 fn computed_views_fit_the_word_stylo_reserves() {
-    assert_eq!(size_of::<StyleElement<'static>>(), size_of::<usize>());
+    assert_eq!(
+        size_of::<StyleElement<'static>>(),
+        size_of::<usize>(),
+        "ADR 027: stylo's sharing cache transmutes through a usize-sized element"
+    );
     assert_eq!(size_of::<StyleNode<'static>>(), size_of::<usize>());
 }

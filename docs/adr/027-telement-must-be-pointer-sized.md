@@ -1,6 +1,6 @@
 # 027 — stylo requires `TElement` to be pointer-sized, and the borrowed view is not
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-09-10
 - **Phase:** 5
 - **Invariants touched:** none. Bears directly on ADR 021 and on §4.1's
@@ -87,32 +87,47 @@ what it does today. The table is built once at the start of a pass, when the
 whole arena is in hand, which is the same moment and the same justification as
 ADR 026's style-data table; it can be built alongside it.
 
-**B does not work, and the reason is worth writing down.** It was the
-recommendation when this ADR was drafted, on the strength of costing 24 bytes per
-slot and keeping the compile-time guarantee. Working through it kills it:
-`TNode::parent_node` and the sibling accessors have only `&self`, so an entry must
-be able to reach the *table* to turn a neighbour's `NodeId` back into a
-`&'a NodeEntry`. That makes `NodeEntry` hold a reference to the collection it
-lives in — `Table<'a>` containing `Vec<NodeEntry<'a>>` containing
-`&'a Table<'a>` — which is a self-referential structure. The two-phase
-construction that usually rescues this (`OnceCell` entries filled in through
-shared access after the table exists) still requires the table to outlive a
-lifetime that borrows it, so it is not expressible without `unsafe` — and ADR 024
-forbids `unsafe` in this crate.
+**B is the decision, and this ADR was wrong about it twice before getting
+there.** The draft recommended B. The first revision rejected it as impossible:
+`TNode::parent_node` and the sibling accessors have only `&self`, so a record
+must reach the *table* to turn a neighbour's `NodeId` back into a reference,
+which makes the record hold a reference to the collection it lives in — a
+self-referential structure. That reasoning was right about the shape and wrong
+about the conclusion.
 
-**So the decision is A, with the lost guarantee replaced rather than written
-off.** `StyleNode` becomes the `NodeId` alone and the arena is read from a
-thread-local established for the duration of `resolve()`. What the borrow checker
-was providing — no `&mut Arena` can exist while a view does — becomes a
-convention, so it gets a check: the thread-local stores the arena pointer a pass
-was entered with, and every view records nothing but the handle, so a debug
-assertion can confirm a view is being resolved against the arena it came from.
-That is weaker than a type error and it is what is available.
+It is expressible without `unsafe`, and the cycle closes in two steps:
 
-The day ADR 023's `pool: None` becomes `Some`, the thread-local needs per-thread
-establishment, and stylo's traversal already hands each worker its own
-`ThreadLocalStyleContext` — so the seam exists, but it is work that has to be
-done deliberately rather than inherited.
+```rust
+let ctx = DomCtx { arena, root, entries: OnceCell::new(), document };
+let entries: Vec<NodeEntry<'_>> = (0..arena.slot_count())
+    .map(|_| NodeEntry { ctx: &ctx, id: document })
+    .collect();
+ctx.entries.set(&entries).ok()?;
+```
+
+`OnceCell::set` takes `&self`, so closing the cycle needs no mutable borrow while
+the records already hold a shared one. Neither type implements `Drop`, so dropck
+permits two locals that reference each other. Verified by compiling a
+thirty-line probe before touching the crate, rather than by reasoning about it a
+third time — which is the actual lesson here: the first rejection was a
+conclusion reached by thinking, and thinking was what had been wrong the time
+before.
+
+So `StyleNode` is `&'a NodeEntry<'a>` — **eight bytes** — the arena and style
+root live in a per-pass `DomCtx`, and the lifetime keeps doing exactly what it
+did. Nothing is given up.
+
+The construction has one consequence worth stating: the context and the records
+are two locals that reference each other, so neither can outlive the call that
+made them and a `Dom` cannot be returned. The entry point is therefore
+`with_dom(arena, root, |dom| ...)`, a scope rather than a constructor. That is
+forced by the lifetimes, not a stylistic choice.
+
+**Design A, the scoped thread-local, is not needed and was not taken.** It would
+have traded the compile-time guarantee — that no `&mut Arena` can exist while a
+view does — for a convention plus a debug assertion, and it would have wanted a
+new dependency (`scoped-tls` is not in the closure) because a thread-local cannot
+hold a borrowed reference without `unsafe`. Both costs are avoided.
 
 ## Alternatives rejected
 
@@ -138,20 +153,26 @@ unblock this phase.
 `stylo-requirements.md` §3.2's resolution — resolve once at the boundary, borrow
 thereafter — is still right, and is still what makes §4.1's generational handles
 coexist with an infallible traversal. What was wrong was assuming the borrow
-could be carried *inline in the view*. It moves to a pass-scoped thread-local and
-everything else stands.
+could be carried *inline in the view*. It moves one indirection away and
+everything else stands — including the compile-time guarantee, which was the
+whole reason for choosing a borrowed view.
 
-**The guarantee moves from the compiler to a convention, and that is the real
-cost.** Today no `&mut Arena` can exist while a view does, because the view holds
-`&'a Arena` and the borrow checker says so. Under A the view holds a handle and
-nothing else, so the rule becomes "do not mutate the arena during a pass" plus a
-debug assertion. Every other safety property survives — the generation check
-still happens, the accessors still return `Option` — but this one is downgraded,
-and it was the property that made the borrowed-view design attractive.
+**Cross-arena confusion becomes a type error rather than a runtime check.**
+Under the old representation two views from different arenas had the same type,
+and `PartialEq` compared arena pointers to keep a traversal from mistaking one
+document for another. Now each `with_dom` scope has its own lifetime, so a view
+from one cannot be passed into another's closure at all. A test that compared
+views across two nested scopes stopped compiling, which is the better outcome.
 
-**No per-slot memory cost**, which is the one thing A is better at: the views
-shrink from 32 bytes to 8 and nothing new is allocated. ADR 026's style-data
-table remains the only per-slot table.
+**A per-slot record table, 24 bytes each, built once per pass.** The second such
+table after ADR 026's style data, built at the same moment and for the same
+reason: stylo's traits want things the DOM does not store. They should be
+measured together.
+
+**The entry point is a scope, not a constructor.** `with_dom(arena, root, f)`,
+because the context and the records reference each other and neither can outlive
+the call. Callers cannot hold a `Dom` across passes, which is a constraint the
+old design did not have.
 
 **The size requirement needs a permanent test.** It is invisible in the type
 system and enforced at runtime in a dependency, so a future field added to the
@@ -189,13 +210,17 @@ sufficient — if the sharing cache's alignment assertion or some other erased
 type imposes a further constraint. Cheap to detect: the same panic, one
 assertion later.
 
-This ADR already recorded one thing wrong with itself: design B was the
-recommendation and does not work, for the self-referential reason given above.
-That was found by working the design through rather than by compiling it, which
-is the weaker kind of evidence — if `unsafe`-free two-phase construction turns out
-to be possible after all, B is better than A and should replace it.
+This ADR was wrong about its own decision twice — first recommending B without
+checking it, then rejecting B on reasoning that was itself unchecked. Both are
+recorded above rather than tidied away, because the pattern is the point: the
+step that settled it was compiling a thirty-line probe, and that step was
+available on the first day.
 
-Wrong about A if the thread-local turns out to be reachable from a context where
-no pass is active — a `Debug` impl called from a logger, say — in which case the
-accessor has to answer `None` rather than panic, and the `Option`-returning shape
-§4.1 already requires is what absorbs it.
+Wrong now if a later phase needs a view to outlive a pass — a cached reference to
+a styled element held across restyles, say. `with_dom`'s scope forbids it by
+construction, and the fix would be to key such a cache by `NodeId` and re-resolve,
+which is what §4.1 would want anyway.
+
+Wrong if the per-slot record table shows up in a memory profile on a real page.
+Cheap to measure and it shares its shape with ADR 026's table, so the two would be
+fixed together.
