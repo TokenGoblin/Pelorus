@@ -87,9 +87,32 @@ what it does today. The table is built once at the start of a pass, when the
 whole arena is in hand, which is the same moment and the same justification as
 ADR 026's style-data table; it can be built alongside it.
 
-**Recommended: B.** It costs 24 bytes per slot and keeps the property the whole
-design was chosen for. A is smaller to write and gives up the compiler's
-guarantee, which is the one thing this project has consistently refused to trade.
+**B does not work, and the reason is worth writing down.** It was the
+recommendation when this ADR was drafted, on the strength of costing 24 bytes per
+slot and keeping the compile-time guarantee. Working through it kills it:
+`TNode::parent_node` and the sibling accessors have only `&self`, so an entry must
+be able to reach the *table* to turn a neighbour's `NodeId` back into a
+`&'a NodeEntry`. That makes `NodeEntry` hold a reference to the collection it
+lives in — `Table<'a>` containing `Vec<NodeEntry<'a>>` containing
+`&'a Table<'a>` — which is a self-referential structure. The two-phase
+construction that usually rescues this (`OnceCell` entries filled in through
+shared access after the table exists) still requires the table to outlive a
+lifetime that borrows it, so it is not expressible without `unsafe` — and ADR 024
+forbids `unsafe` in this crate.
+
+**So the decision is A, with the lost guarantee replaced rather than written
+off.** `StyleNode` becomes the `NodeId` alone and the arena is read from a
+thread-local established for the duration of `resolve()`. What the borrow checker
+was providing — no `&mut Arena` can exist while a view does — becomes a
+convention, so it gets a check: the thread-local stores the arena pointer a pass
+was entered with, and every view records nothing but the handle, so a debug
+assertion can confirm a view is being resolved against the arena it came from.
+That is weaker than a type error and it is what is available.
+
+The day ADR 023's `pool: None` becomes `Some`, the thread-local needs per-thread
+establishment, and stylo's traversal already hands each worker its own
+`ThreadLocalStyleContext` — so the seam exists, but it is work that has to be
+done deliberately rather than inherited.
 
 ## Alternatives rejected
 
@@ -159,8 +182,13 @@ sufficient — if the sharing cache's alignment assertion or some other erased
 type imposes a further constraint. Cheap to detect: the same panic, one
 assertion later.
 
-Wrong about design B if the per-slot record cannot be built without a
-self-referential borrow, in which case A is the fallback and the lost compile-time
-guarantee has to be replaced with something — most plausibly a debug assertion
-that the arena pointer in the thread-local matches the one a view was created
-from.
+This ADR already recorded one thing wrong with itself: design B was the
+recommendation and does not work, for the self-referential reason given above.
+That was found by working the design through rather than by compiling it, which
+is the weaker kind of evidence — if `unsafe`-free two-phase construction turns out
+to be possible after all, B is better than A and should replace it.
+
+Wrong about A if the thread-local turns out to be reachable from a context where
+no pass is active — a `Debug` impl called from a logger, say — in which case the
+accessor has to answer `None` rather than panic, and the `Option`-returning shape
+§4.1 already requires is what absorbs it.
