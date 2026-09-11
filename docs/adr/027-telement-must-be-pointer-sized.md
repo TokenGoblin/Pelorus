@@ -138,13 +138,20 @@ unblock this phase.
 `stylo-requirements.md` §3.2's resolution — resolve once at the boundary, borrow
 thereafter — is still right, and is still what makes §4.1's generational handles
 coexist with an infallible traversal. What was wrong was assuming the borrow
-could be carried *inline in the view*. Under design B it is carried one
-indirection away and everything else stands.
+could be carried *inline in the view*. It moves to a pass-scoped thread-local and
+everything else stands.
 
-**A 24-byte-per-slot cost, on top of ADR 026's table.** Both are per-slot,
-both are built at the start of a pass, and both exist because stylo's traits
-want things the DOM does not store. They should be built together and measured
-together.
+**The guarantee moves from the compiler to a convention, and that is the real
+cost.** Today no `&mut Arena` can exist while a view does, because the view holds
+`&'a Arena` and the borrow checker says so. Under A the view holds a handle and
+nothing else, so the rule becomes "do not mutate the arena during a pass" plus a
+debug assertion. Every other safety property survives — the generation check
+still happens, the accessors still return `Option` — but this one is downgraded,
+and it was the property that made the borrowed-view design attractive.
+
+**No per-slot memory cost**, which is the one thing A is better at: the views
+shrink from 32 bytes to 8 and nothing new is allocated. ADR 026's style-data
+table remains the only per-slot table.
 
 **The size requirement needs a permanent test.** It is invisible in the type
 system and enforced at runtime in a dependency, so a future field added to the
