@@ -431,7 +431,7 @@ impl<'a> StyleElement<'a> {
     }
 
     /// The style data table this element's flags and computed style live in.
-    pub(crate) fn data(self) -> &'a crate::data::StyleData {
+    pub fn data(self) -> &'a crate::data::StyleData {
         self.node.dom().root().data()
     }
 }

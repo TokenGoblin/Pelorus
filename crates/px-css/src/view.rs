@@ -62,11 +62,22 @@ pub struct StyleRoot {
 }
 
 impl StyleRoot {
-    /// Prepare a style root for `arena`.
+    /// Prepare a style root for `arena`, using `shared_lock`.
+    ///
+    /// The lock must be the one the stylesheets were wrapped with — in practice
+    /// `StyleEngine::shared_lock()`. stylo reads declarations through a guard
+    /// derived from `TDocument::shared_lock`, and a guard from a *different* lock
+    /// does not grant access to those sheets. The failure is not a panic: the
+    /// cascade simply finds no declarations and every element computes to its
+    /// initial values, which looks like a stylesheet that did not load.
+    ///
+    /// Taking the lock as an argument rather than creating one is the whole point
+    /// of this signature. An earlier version called `SharedRwLock::new()` here,
+    /// which compiles, runs, and silently styles nothing.
     #[must_use]
-    pub fn new(arena: &Arena, quirks_mode: QuirksMode) -> Self {
+    pub fn new(arena: &Arena, shared_lock: SharedRwLock, quirks_mode: QuirksMode) -> Self {
         Self {
-            shared_lock: SharedRwLock::new(),
+            shared_lock,
             quirks_mode,
             data: StyleData::for_arena(arena),
         }
@@ -283,7 +294,7 @@ mod tests {
 
     /// Every test needs a StyleRoot now, and none of them care what is in it.
     fn root(arena: &Arena) -> StyleRoot {
-        StyleRoot::new(arena, QuirksMode::NoQuirks)
+        StyleRoot::new(arena, SharedRwLock::new(), QuirksMode::NoQuirks)
     }
 
     fn text(arena: &mut Arena, s: &str) -> NodeId {

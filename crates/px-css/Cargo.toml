@@ -41,4 +41,6 @@ web_atoms = "0.2.6"
 stylo_dom = "0.21.0"
 euclid = "0.22.14"
 app_units = "0.7.8"
+# UrlExtraData wraps a url::Url; same version stylo resolves to.
+url = "2.5.8"
 px-dom = { path = "../px-dom", version = "0.0.0" }

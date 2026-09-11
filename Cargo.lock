@@ -811,6 +811,7 @@ dependencies = [
  "selectors",
  "stylo",
  "stylo_dom",
+ "url",
  "web_atoms",
 ]
 
