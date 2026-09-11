@@ -804,8 +804,14 @@ dependencies = [
 name = "px-css"
 version = "0.0.0"
 dependencies = [
+ "app_units",
+ "euclid",
+ "html5ever",
  "px-dom",
+ "selectors",
  "stylo",
+ "stylo_dom",
+ "web_atoms",
 ]
 
 [[package]]

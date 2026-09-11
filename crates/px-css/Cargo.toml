@@ -16,4 +16,29 @@ publish.workspace = true
 # surface as the crate allows. Which features that actually needs is what the
 # spike below determines; this is the starting point, not the answer.
 stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
+# Not a new supply-chain decision, and pinned so it cannot become one.
+#
+# `TElement` has `selectors::Element` as a supertrait, and stylo does not
+# re-export the `selectors` crate -- so the trait cannot be named, let alone
+# implemented, without depending on it directly. This adds **zero** crates to the
+# closure: selectors 0.40.0 is already there, pulled in by stylo itself.
+#
+# The version must stay exactly stylo's. Two `selectors` in the tree would not be
+# a duplicate-dependency warning, it would be a type error at every `TElement`
+# method -- the trait from one copy cannot be satisfied by the impl from the
+# other. `cargo deny`'s multiple-versions rule catches it, and so does the build.
+selectors = "0.40.0"
+# Named directly for `QualName`, which px-dom returns but does not re-export.
+# Same version px-dom uses; a second html5ever would mean two QualName types.
+html5ever = "0.39.0"
+# The atom static sets html5ever and stylo share. Named so the wrapper cast in
+# src/dom.rs can be written; adds nothing -- already in the closure twice over.
+web_atoms = "0.2.6"
+# Named in TElement's signatures, all already in stylo's closure at these exact
+# versions. Adding them as direct deps adds no crate to the tree; it only lets
+# the trait methods be spelled. A version drift here is a type error, not a
+# duplicate-dependency warning.
+stylo_dom = "0.21.0"
+euclid = "0.22.14"
+app_units = "0.7.8"
 px-dom = { path = "../px-dom", version = "0.0.0" }

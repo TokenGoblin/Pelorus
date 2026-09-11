@@ -63,6 +63,7 @@ use std::cell::Cell;
 
 use px_dom::{Arena, NodeId};
 use style::data::{ElementDataMut, ElementDataRef, ElementDataWrapper};
+use style::values::AtomIdent;
 
 /// One element's style data, plus the bit that says whether stylo considers it
 /// to exist.
@@ -76,6 +77,92 @@ use style::data::{ElementDataMut, ElementDataRef, ElementDataWrapper};
 struct Slot {
     present: Cell<bool>,
     data: ElementDataWrapper,
+    /// stylo's per-element traversal bits, which it sets through `&self`.
+    ///
+    /// These live here rather than on the node for the same reason
+    /// `ElementData` does (ADR 026): putting them on `px_dom::Node` would make
+    /// the DOM crate depend on the CSS engine and would change the arena's slot
+    /// layout, which is ADR 021's tripwire.
+    ///
+    /// `Cell`, not `AtomicBool`, because ADR 023 runs stylo's traversal
+    /// sequentially -- `traverse_dom` is passed `pool: None`. The day the pool
+    /// is turned on these have to become atomics, and they are grouped here so
+    /// that change is one struct rather than a search. Servo gets this wrong in
+    /// the other direction today: `stylo-requirements.md` notes a live FIXME
+    /// admitting a non-atomic `Cell` read-modify-write from parallel style
+    /// threads. Sequential-first is what makes `Cell` honest here.
+    flags: Flags,
+    /// The interned `id` attribute, and the interned `class` list.
+    ///
+    /// Here rather than computed on demand because `TElement::id` returns
+    /// `Option<&AtomIdent>` — a *reference* to an interned atom. html5ever stores
+    /// attribute values as string tendrils, not atoms, so answering that question
+    /// means interning, and interning on demand behind `&self` would need the
+    /// same stable-address machinery `ElementData` needed.
+    ///
+    /// Populated when the table is built, which is the one moment the whole arena
+    /// is in hand and nothing is mid-traversal. The cost is one pass over the
+    /// nodes at the start of a style pass, and it replaces re-interning the same
+    /// class list once per selector that mentions it.
+    names: Names,
+}
+
+/// The interned identity attributes of one element.
+#[derive(Debug, Default)]
+struct Names {
+    id: Option<AtomIdent>,
+    classes: Vec<AtomIdent>,
+}
+
+/// The traversal bits stylo keeps per element.
+///
+/// Hand-written `Debug` and `Default` rather than derived: selectors'
+/// `ElementSelectorFlags` implements neither in 0.40, so a derive on this struct
+/// does not compile. Both are written in terms of `empty()`, which is the right
+/// default anyway -- an element starts with no selector flags set.
+struct Flags {
+    /// `has_dirty_descendants` / `set_dirty_descendants`.
+    dirty_descendants: Cell<bool>,
+    /// `handled_snapshot` / `set_handled_snapshot`.
+    handled_snapshot: Cell<bool>,
+    /// `store_children_to_process` / `did_process_child`.
+    ///
+    /// stylo's parallel traversal uses this as a countdown: a parent stores the
+    /// number of children, each child decrements it, and the one that reaches
+    /// zero owns the parent's post-order work. Sequential traversal still drives
+    /// it, so it is implemented rather than stubbed.
+    children_to_process: Cell<isize>,
+    /// `selectors::Element::apply_selector_flags`.
+    ///
+    /// The selector engine sets these on an element's *parent* or *siblings* as
+    /// a side effect of matching -- "this element's children are order-sensitive,
+    /// so invalidate them all if one moves". Losing them does not produce a wrong
+    /// first paint; it produces a wrong *incremental* restyle later, which is
+    /// much harder to trace back. So they are stored from the start rather than
+    /// when incremental restyle arrives.
+    selector_flags: Cell<selectors::matching::ElementSelectorFlags>,
+}
+
+impl Default for Flags {
+    fn default() -> Self {
+        Self {
+            dirty_descendants: Cell::new(false),
+            handled_snapshot: Cell::new(false),
+            children_to_process: Cell::new(0),
+            selector_flags: Cell::new(selectors::matching::ElementSelectorFlags::empty()),
+        }
+    }
+}
+
+impl core::fmt::Debug for Flags {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Flags")
+            .field("dirty_descendants", &self.dirty_descendants.get())
+            .field("handled_snapshot", &self.handled_snapshot.get())
+            .field("children_to_process", &self.children_to_process.get())
+            .field("selector_flags", &self.selector_flags.get().bits())
+            .finish()
+    }
 }
 
 /// Per-element style data for one arena, sized once before the style pass.
@@ -106,7 +193,56 @@ impl StyleData {
         // traversal rather than anything legible.
         let mut slots = Vec::new();
         slots.resize_with(arena.slot_count(), Slot::default);
-        Self { slots }
+        let mut table = Self { slots };
+        table.intern_names(arena);
+        table
+    }
+
+    /// Intern every element's `id` and `class` once, before the pass.
+    ///
+    /// Walks the arena from the document rather than scanning slots, so a retired
+    /// slot's leftover contents cannot be read as a live element's names.
+    fn intern_names(&mut self, arena: &Arena) {
+        let document = arena.document();
+        let ids: Vec<NodeId> = core::iter::once(document)
+            .chain(arena.descendants(document))
+            .collect();
+        for id in ids {
+            let Some(node) = arena.get(id) else { continue };
+            if node.element_name().is_none() {
+                continue;
+            }
+            let Some(attrs) = node.attrs() else { continue };
+            let Some(slot) = self.slots.get_mut(id.index() as usize) else {
+                continue;
+            };
+            for attr in attrs {
+                if attr.name.ns != html5ever::ns!() {
+                    continue;
+                }
+                if attr.name.local == html5ever::local_name!("id") {
+                    slot.names.id = Some(AtomIdent::from(&*attr.value));
+                } else if attr.name.local == html5ever::local_name!("class") {
+                    slot.names.classes = attr
+                        .value
+                        .split_ascii_whitespace()
+                        .map(AtomIdent::from)
+                        .collect();
+                }
+            }
+        }
+    }
+
+    /// `TElement::id`.
+    #[must_use]
+    pub fn id_of(&self, id: NodeId) -> Option<&AtomIdent> {
+        self.slot(id)?.names.id.as_ref()
+    }
+
+    /// `TElement::each_class`.
+    #[must_use]
+    pub fn classes_of(&self, id: NodeId) -> &[AtomIdent] {
+        self.slot(id).map_or(&[], |s| s.names.classes.as_slice())
     }
 
     /// How many slots this table can address.
@@ -163,6 +299,79 @@ impl StyleData {
         slot.present.get().then(|| slot.data.borrow_mut())
     }
 
+    /// `TElement::has_dirty_descendants`.
+    #[must_use]
+    pub fn has_dirty_descendants(&self, id: NodeId) -> bool {
+        self.slot(id)
+            .is_some_and(|s| s.flags.dirty_descendants.get())
+    }
+
+    /// `TElement::set_dirty_descendants` / `unset_dirty_descendants`.
+    pub fn set_dirty_descendants(&self, id: NodeId, dirty: bool) {
+        if let Some(slot) = self.slot(id) {
+            slot.flags.dirty_descendants.set(dirty);
+        }
+    }
+
+    /// `TElement::handled_snapshot`.
+    #[must_use]
+    pub fn handled_snapshot(&self, id: NodeId) -> bool {
+        self.slot(id)
+            .is_some_and(|s| s.flags.handled_snapshot.get())
+    }
+
+    /// `TElement::set_handled_snapshot`.
+    pub fn set_handled_snapshot(&self, id: NodeId) {
+        if let Some(slot) = self.slot(id) {
+            slot.flags.handled_snapshot.set(true);
+        }
+    }
+
+    /// `selectors::Element::apply_selector_flags`, which only ever adds bits.
+    pub fn insert_selector_flags(
+        &self,
+        id: NodeId,
+        flags: selectors::matching::ElementSelectorFlags,
+    ) {
+        if let Some(slot) = self.slot(id) {
+            slot.flags
+                .selector_flags
+                .set(slot.flags.selector_flags.get() | flags);
+        }
+    }
+
+    /// `TElement::has_selector_flags`.
+    #[must_use]
+    pub fn has_selector_flags(
+        &self,
+        id: NodeId,
+        flags: selectors::matching::ElementSelectorFlags,
+    ) -> bool {
+        self.slot(id)
+            .is_some_and(|s| s.flags.selector_flags.get().contains(flags))
+    }
+
+    /// `TElement::store_children_to_process`.
+    pub fn store_children_to_process(&self, id: NodeId, n: isize) {
+        if let Some(slot) = self.slot(id) {
+            slot.flags.children_to_process.set(n);
+        }
+    }
+
+    /// `TElement::did_process_child`, returning the count that remains.
+    ///
+    /// Returns -1 for a stale table rather than 0. Zero is the value stylo reads
+    /// as "you are the last child, do the parent's work", and inventing it for a
+    /// node the table does not cover would hand out that responsibility twice.
+    pub fn did_process_child(&self, id: NodeId) -> isize {
+        let Some(slot) = self.slot(id) else {
+            return -1;
+        };
+        let remaining = slot.flags.children_to_process.get() - 1;
+        slot.flags.children_to_process.set(remaining);
+        remaining
+    }
+
     /// Discard this element's data.
     ///
     /// Resets the stored `ElementData` as well as clearing the bit. Leaving a
@@ -175,6 +384,15 @@ impl StyleData {
                 *slot.data.borrow_mut() = Default::default();
             }
             slot.present.set(false);
+            // The traversal bits go too. A cleared element that kept
+            // `dirty_descendants` would have the next pass walk into a subtree
+            // whose style it just threw away.
+            slot.flags.dirty_descendants.set(false);
+            slot.flags.handled_snapshot.set(false);
+            slot.flags.children_to_process.set(0);
+            slot.flags
+                .selector_flags
+                .set(selectors::matching::ElementSelectorFlags::empty());
         }
     }
 }

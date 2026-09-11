@@ -804,3 +804,50 @@ Format: one entry per defect.
 - **Not done in Phase 5 because** auditing 76 crates is a project, and the two
   real options are a trust-root ADR and a prioritised read — neither of which
   belongs inside the phase that happened to add the dependency.
+
+## Three TElement methods answer "nothing" where a browser answers something
+
+- **Found in:** phase 5, implementing `TElement`
+- **Belongs to:** phase 5 for the first, later phases for the others
+- **What:** three methods return an empty answer that is not the same as the
+  right answer. Each is documented at its own definition in
+  `crates/px-css/src/element.rs`; collected here because they are easy to miss
+  one at a time.
+  1. **`style_attribute` returns `None`** — inline `style="..."` does not
+     participate in the cascade. Author stylesheets do. The return type is a
+     borrow of a parsed, lock-wrapped `PropertyDeclarationBlock`, so producing
+     one means parsing with a `ParserContext` and storing the result at a stable
+     address: ADR 026's problem again with a parser attached.
+  2. **`synthesize_presentational_hints_for_legacy_attributes` does nothing** —
+     `<table border="1">`, `width="100"`, `bgcolor` and the rest map to nothing.
+     Dozens of small mappings at the user-agent origin, mattering mostly to old
+     markup.
+  3. **`state()` is always empty** — `:hover`, `:focus`, `:active`, `:checked`
+     never match, because there is no input before Phase 13. The computed style
+     is the one a user sees before touching the page, which is right until there
+     is a pointer.
+- **Why it matters:** the first is a real cascade gap that the computed-style
+  fixtures will notice, and it should close inside Phase 5. The other two are
+  correct-for-now and would be wrong to leave undocumented at Phase 20.
+- **What to do:** implement (1) before the phase closes; carry (2) and (3) to
+  the phases that give them meaning.
+
+## The selector bloom filter is disabled, and turning it on needs shared hashing
+
+- **Found in:** phase 5, `selectors::Element::add_element_unique_hashes`
+- **Belongs to:** unassigned; a performance item, not a correctness one
+- **What:** the method returns `false`, so the selector engine's ancestor bloom
+  filter is skipped for every element.
+- **Why it matters:** the filter is how the engine rejects `.a .b` without
+  walking ancestors, so every descendant selector costs a full walk. On a large
+  document with a big stylesheet this is the difference the filter exists to
+  make.
+- **Why it is off:** the hashes inserted here must be computed exactly the way
+  the engine hashes the corresponding selector components, and that hashing is
+  not public API. Guessing it does not fail loudly — it produces **false
+  negatives**, and a false negative in a negative cache is a rule that silently
+  stops applying. That is the "passes your tests, fails real sites" failure
+  `/CLAUDE.md` warns about, bought for a speed-up.
+- **What to do:** find whether selectors exposes the component hashing (or can
+  be asked to), and only then enable it. Measure before and after on a real
+  page, because the cost being avoided is currently unmeasured too.

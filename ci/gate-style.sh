@@ -314,8 +314,8 @@ if [ -d "$css_src" ]; then
     # the zero-unsafe case -- the one that is true today and the one this check
     # exists to confirm -- would skip both assertions silently. Found by running
     # it: the two ok lines were simply absent from the output.
-    blocks="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]*\{' "$css_src" || true; } | { grep -vE '^[[:space:]]*//|///' || true; } | wc -l)"
-    impls="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]+impl' "$css_src" || true; } | { grep -vE '^[[:space:]]*//|///' || true; } | wc -l)"
+    blocks="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]*\{' "$css_src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | wc -l)"
+    impls="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]+impl' "$css_src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | wc -l)"
     if [ "$blocks" -eq 0 ]; then
         ok "px-css contains no unsafe block"
     else

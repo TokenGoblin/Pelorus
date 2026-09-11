@@ -45,9 +45,15 @@ for dir in "${crates[@]}"; do
     # crate root, and forbid(unsafe_code) in lib.rs does not cover it. The
     # gate used to look at exactly two paths and never at that file.
     entries=("$dir"src/lib.rs "$dir"src/main.rs "$dir"src/bin/*.rs)
+    # Only `path = "src/..."` lines, not any `src/*.rs` the file happens to
+    # mention. The looser pattern scraped a path out of a *comment* in px-css's
+    # Cargo.toml and reported src/dom.rs as a crate root that had "dropped
+    # forbid" -- a file that is not a crate root and never carried the attribute.
+    # Harmless here because it printed an ok line, which is exactly why it would
+    # have gone unnoticed: a check that invents a subject can also invent a pass.
     while IFS= read -r extra; do
         [ -n "$extra" ] && entries+=("$dir$extra")
-    done < <(grep -oE 'src/[A-Za-z0-9_/.-]+[.]rs' "$dir/Cargo.toml" 2>/dev/null | sort -u)
+    done < <(grep -oE '^[[:space:]]*path[[:space:]]*=[[:space:]]*"src/[A-Za-z0-9_/.-]+[.]rs"' "$dir/Cargo.toml" 2>/dev/null              | grep -oE 'src/[A-Za-z0-9_/.-]+[.]rs' | sort -u)
     found=0
     for entry in "${entries[@]}"; do
         [ -f "$entry" ] || continue
@@ -136,8 +142,8 @@ fi
 # nothing exits 1 and takes the script with it — which would skip both
 # assertions in exactly the zero-unsafe case they exist to confirm.
 if [ -d "crates/$STYLO_CRATE/src" ]; then
-css_blocks="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]*\{' "crates/$STYLO_CRATE/src" || true; } | { grep -vE '^[[:space:]]*//|///' || true; } | wc -l)"
-css_impls="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]+impl' "crates/$STYLO_CRATE/src" || true; } | { grep -vE '^[[:space:]]*//|///' || true; } | wc -l)"
+css_blocks="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]*\{' "crates/$STYLO_CRATE/src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | wc -l)"
+css_impls="$( { grep -rnE '(^|[^a-zA-Z_])unsafe[[:space:]]+impl' "crates/$STYLO_CRATE/src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | wc -l)"
 if [ "$css_blocks" -eq 0 ]; then
     ok "$STYLO_CRATE contains no unsafe block (ADR 024)"
 else

@@ -40,6 +40,151 @@
 //! (`owner_doc`, `is_in_document`) are infallible about things that cannot fail.
 
 use px_dom::{Arena, NodeId};
+use style::context::QuirksMode;
+use style::shared_lock::SharedRwLock;
+
+use crate::data::StyleData;
+
+/// Everything a style pass needs that is not the DOM itself.
+///
+/// Owned by the caller and borrowed by every view, because stylo reaches for all
+/// three through `TDocument` and `TElement`: the shared lock guards stylesheet
+/// contents, the quirks mode changes cascade behaviour, and the style data is
+/// where computed style is written back (ADR 026).
+///
+/// Built before the pass and not mutated during it, which is the same condition
+/// that makes [`StyleData`]'s table safe to index without growing.
+#[derive(Debug)]
+pub struct StyleRoot {
+    shared_lock: SharedRwLock,
+    quirks_mode: QuirksMode,
+    data: StyleData,
+}
+
+impl StyleRoot {
+    /// Prepare a style root for `arena`.
+    #[must_use]
+    pub fn new(arena: &Arena, quirks_mode: QuirksMode) -> Self {
+        Self {
+            shared_lock: SharedRwLock::new(),
+            quirks_mode,
+            data: StyleData::for_arena(arena),
+        }
+    }
+
+    /// The lock guarding stylesheet contents. `TDocument::shared_lock`.
+    #[must_use]
+    pub fn shared_lock(&self) -> &SharedRwLock {
+        &self.shared_lock
+    }
+
+    /// `TDocument::quirks_mode`.
+    #[must_use]
+    pub fn quirks_mode(&self) -> QuirksMode {
+        self.quirks_mode
+    }
+
+    /// Per-element style data (ADR 026).
+    #[must_use]
+    pub fn data(&self) -> &StyleData {
+        &self.data
+    }
+}
+
+/// The arena and the style root, borrowed together.
+///
+/// Exists so the views below carry one `Copy` field instead of two, and so that
+/// "a DOM plus the state a style pass keeps beside it" has a name. Both
+/// references share a lifetime deliberately: the pass borrows them together and
+/// neither may be mutated while it runs.
+#[derive(Clone, Copy)]
+pub struct Dom<'a> {
+    arena: &'a Arena,
+    root: &'a StyleRoot,
+    /// The document handle, resolved once when this `Dom` was built.
+    document: NodeId,
+}
+
+impl PartialEq for Dom<'_> {
+    /// Two `Dom`s are the same DOM when they borrow the same arena and the same
+    /// style root.
+    ///
+    /// Pointer identity, for the reason `StyleNode`'s `PartialEq` gives: two
+    /// arenas hand out overlapping `NodeId`s, so an equality that ignored which
+    /// arena a view came from would let a traversal confuse one document for
+    /// another. The style root is compared too because a single arena styled
+    /// under two different quirks modes is two different style passes.
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(self.arena, other.arena) && core::ptr::eq(self.root, other.root)
+    }
+}
+
+impl Eq for Dom<'_> {}
+
+impl core::fmt::Debug for Dom<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Dom").finish_non_exhaustive()
+    }
+}
+
+impl<'a> Dom<'a> {
+    /// Borrow an arena and its style root for the duration of a pass.
+    ///
+    /// Fallible, and this is the boundary §4.1 asks for: the document handle is
+    /// resolved here, once, and every later use of it is a borrow rather than a
+    /// lookup. `None` means the arena's own document handle did not resolve,
+    /// which should be impossible and is reported rather than assumed.
+    #[must_use]
+    pub fn new(arena: &'a Arena, root: &'a StyleRoot) -> Option<Self> {
+        let document = arena.document();
+        arena.get(document)?;
+        Some(Self {
+            arena,
+            root,
+            document,
+        })
+    }
+
+    /// The arena.
+    #[must_use]
+    pub fn arena(self) -> &'a Arena {
+        self.arena
+    }
+
+    /// The style root.
+    #[must_use]
+    pub fn root(self) -> &'a StyleRoot {
+        self.root
+    }
+
+    /// Resolve a handle into a node view, or `None` if it is stale.
+    #[must_use]
+    pub fn node(self, id: NodeId) -> Option<StyleNode<'a>> {
+        StyleNode::new(self, id)
+    }
+
+    /// The document node, without a second generation check.
+    ///
+    /// The one infallible node constructor in this crate, and the justification
+    /// is the same one the whole design rests on: [`Dom::new`] resolved this
+    /// exact handle, and the `&'a Arena` held since then forbids the mutation
+    /// that could invalidate it. `px-dom` also refuses to remove the document —
+    /// `remove_subtree` returns `Immovable` for it — so there is no sequence of
+    /// operations that makes this handle stale while a `Dom` exists.
+    ///
+    /// It is `pub(crate)` and exists for exactly one caller: `TNode::owner_doc`,
+    /// which stylo declares infallible. Without it that method would have to
+    /// invent a document or panic. This is not a general-purpose escape hatch,
+    /// and §4.1's rule about not adding an infallible *index* API is intact —
+    /// this resolves one specific handle that was already checked, not an
+    /// arbitrary one.
+    pub(crate) fn document_node(self) -> StyleNode<'a> {
+        StyleNode {
+            dom: self,
+            id: self.document,
+        }
+    }
+}
 
 /// A node, resolved once against the arena and borrowed thereafter.
 ///
@@ -54,7 +199,7 @@ use px_dom::{Arena, NodeId};
 /// siblings and children without rechecking.
 #[derive(Clone, Copy)]
 pub struct StyleNode<'a> {
-    arena: &'a Arena,
+    dom: Dom<'a>,
     id: NodeId,
 }
 
@@ -65,10 +210,10 @@ impl<'a> StyleNode<'a> {
     /// deliberately no `new_unchecked`: the rule is not "check somewhere", it is
     /// that no infallible path exists.
     #[must_use]
-    pub fn new(arena: &'a Arena, id: NodeId) -> Option<Self> {
+    pub fn new(dom: Dom<'a>, id: NodeId) -> Option<Self> {
         // The generation check, exactly once. `get` returning Some is what makes
         // every later hop sound.
-        arena.get(id).map(|_| Self { arena, id })
+        dom.arena().get(id).map(|_| Self { dom, id })
     }
 
     /// The handle this view was resolved from.
@@ -80,7 +225,13 @@ impl<'a> StyleNode<'a> {
     /// The arena this view borrows.
     #[must_use]
     pub fn arena(self) -> &'a Arena {
-        self.arena
+        self.dom.arena()
+    }
+
+    /// The arena and style root this view borrows.
+    #[must_use]
+    pub fn dom(self) -> Dom<'a> {
+        self.dom
     }
 
     /// Resolve another handle against the same arena this view borrows.
@@ -97,7 +248,7 @@ impl<'a> StyleNode<'a> {
     /// refactors after the person who knew why it was safe has moved on.
     #[must_use]
     pub fn resolve(self, id: NodeId) -> Option<Self> {
-        Self::new(self.arena, id)
+        Self::new(self.dom, id)
     }
 }
 
@@ -119,7 +270,7 @@ impl PartialEq for StyleNode<'_> {
     /// px-dom exists because that is real — and a traversal that mistook one for
     /// the other would terminate early or not at all.
     fn eq(&self, other: &Self) -> bool {
-        core::ptr::eq(self.arena, other.arena) && self.id == other.id
+        core::ptr::eq(self.dom.arena(), other.dom.arena()) && self.id == other.id
     }
 }
 
@@ -129,6 +280,11 @@ impl Eq for StyleNode<'_> {}
 mod tests {
     use super::*;
     use px_dom::NodeData;
+
+    /// Every test needs a StyleRoot now, and none of them care what is in it.
+    fn root(arena: &Arena) -> StyleRoot {
+        StyleRoot::new(arena, QuirksMode::NoQuirks)
+    }
 
     fn text(arena: &mut Arena, s: &str) -> NodeId {
         arena
@@ -145,11 +301,19 @@ mod tests {
         let child = text(&mut arena, "a");
         arena.append_child(doc, child).expect("append");
 
-        assert!(StyleNode::new(&arena, child).is_some());
+        let r = root(&arena);
+        let dom = Dom::new(&arena, &r).expect("the document resolves");
+        assert!(StyleNode::new(dom, child).is_some());
 
+        // No explicit drop: `Dom` is `Copy`, so `drop` would be a no-op, and
+        // the borrow ends at its last use anyway. Re-resolving below is what
+        // proves the point -- the same handle, against the same arena, after
+        // the node it named is gone.
         arena.remove_subtree(child).expect("remove");
+        let r = root(&arena);
+        let dom = Dom::new(&arena, &r).expect("the document resolves");
         assert!(
-            StyleNode::new(&arena, child).is_none(),
+            StyleNode::new(dom, child).is_none(),
             "a stale handle must not resolve into a view; this is §4.1's whole point"
         );
     }
@@ -163,7 +327,9 @@ mod tests {
         assert_copy::<StyleNode<'_>>();
 
         let arena = Arena::new();
-        let view = StyleNode::new(&arena, arena.document()).expect("document resolves");
+        let r = root(&arena);
+        let dom = Dom::new(&arena, &r).expect("the document resolves");
+        let view = StyleNode::new(dom, arena.document()).expect("document resolves");
         let copied = view;
         assert_eq!(view, copied, "a copy must compare equal to its source");
     }
@@ -172,8 +338,11 @@ mod tests {
     fn views_from_different_arenas_are_never_equal() {
         let a = Arena::new();
         let b = Arena::new();
-        let va = StyleNode::new(&a, a.document()).expect("resolves");
-        let vb = StyleNode::new(&b, b.document()).expect("resolves");
+        let (ra, rb) = (root(&a), root(&b));
+        let va =
+            StyleNode::new(Dom::new(&a, &ra).expect("resolves"), a.document()).expect("resolves");
+        let vb =
+            StyleNode::new(Dom::new(&b, &rb).expect("resolves"), b.document()).expect("resolves");
         // Both are the document node, so the NodeIds are equal. Only the arena
         // identity distinguishes them, and a traversal comparing against its
         // scope node depends on that.
