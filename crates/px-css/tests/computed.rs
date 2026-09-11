@@ -12,7 +12,6 @@
 
 use px_css::engine::StyleEngine;
 use px_css::view::StyleRoot;
-use style::context::QuirksMode;
 
 /// Parse `html`, apply `css`, resolve, and hand back everything the caller needs
 /// to inspect computed values.
