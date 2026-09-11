@@ -16,4 +16,4 @@ publish.workspace = true
 # surface as the crate allows. Which features that actually needs is what the
 # spike below determines; this is the starting point, not the answer.
 stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
-px-dom = { path = "../px-dom" }
+px-dom = { path = "../px-dom", version = "0.0.0" }

@@ -64,6 +64,23 @@ skip = [
     # generated FFI declarations, and both publishers are the same trusted
     # one. Revisit when getrandom or ring moves.
     { name = "windows-sys" },
+    # ADR 023, the stylo closure. Two syn: 2.0 is what most proc-macro crates
+    # still build against, and 3.0 arrives through a newer one in stylo's own
+    # dependency graph.
+    #
+    # Accepted on a narrower ground than the windows-sys skip above, and worth
+    # distinguishing: syn is a **build-dependency**. Neither copy is linked into
+    # any shipping binary, so "two audit surfaces and two crates to patch at a
+    # CVE" -- the cost that makes this list uncomfortable -- applies to the build
+    # host rather than to the product. It is still not nothing: a compromised
+    # proc-macro runs arbitrary code at compile time, which is why this is a skip
+    # with a reason and not a relaxation of `multiple-versions`.
+    #
+    # It is also not ours to unify: both pins are inside dependencies of
+    # dependencies. Revisit when the 2.x holdouts in the stylo graph move, which
+    # costs nothing to check at each stylo bump -- and ADR 023 already requires a
+    # TElement review at every bump, so there is a natural place to look.
+    { name = "syn" },
 ]
 
 [sources]

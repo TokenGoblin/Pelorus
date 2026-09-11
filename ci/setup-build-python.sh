@@ -23,10 +23,37 @@
 # runs in front of every reproducible build and creating a venv twice per CI job
 # is pure latency.
 
-. "$(dirname "$0")/lib.sh"
+# Deliberately does NOT source ci/lib.sh, and that is a bug fix rather than a
+# style choice.
+#
+# ci/build-and-hash.sh builds a `git archive` extract of the tree in a scratch
+# directory, and that directory has no `.git`. lib.sh opens with
+# `REPO_ROOT="$(git rev-parse --show-toplevel)"` under `set -e`, so sourcing it
+# from in there exits immediately and silently -- which is exactly what happened:
+# the reproducible job on both platforms reported only "could not build the
+# pinned Python environment" with no diagnostics from this script at all,
+# because this script never reached its first line of output.
+#
+# So this file stands alone. It needs one thing from lib.sh, the interpreter
+# discovery, and that is fifteen lines. Not sourcing lib.sh also removes the
+# recursion between the two files that needed a guard when it did.
+set -euo pipefail
 
 VENV=".build-python-venv"
 REQUIREMENTS="build-python/requirements.txt"
+
+# python3 is the name on Linux; on Windows the same interpreter is usually
+# `python`, and a bare `python3` resolves to a Microsoft Store stub that exits
+# without running anything. Same resolution as ci/lib.sh, duplicated because
+# this file must work where lib.sh cannot run.
+export PYTHONIOENCODING=utf-8
+PY_BIN=""
+for _c in python3 python; do
+    if command -v "$_c" >/dev/null 2>&1        && "$_c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
+        PY_BIN="$_c"
+        break
+    fi
+done
 
 # Everything this script says goes to stderr. Stdout carries exactly one thing —
 # the interpreter path — because the caller substitutes it into PYTHON3, and a

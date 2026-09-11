@@ -777,3 +777,30 @@ Format: one entry per defect.
 - **Not done in Phase 5 because** a half-enumerated hash list is worse than an
   honest version pin: it breaks one platform's CI and reads as stronger than it
   is. The gap is stated in the requirements file itself rather than implied.
+
+## 76 cargo-vet exemptions arrived with stylo, and nobody read those crates
+
+- **Found in:** phase 5, ADR 023
+- **Belongs to:** unassigned; before Phase 20 ships anything
+- **What:** adding `stylo` took `supply-chain/config.toml` from **1 exemption to
+  77**. `cargo vet` reports "92 fully audited, 3 partially audited, 76
+  exempted". An exemption records a crate trusted without anybody here having
+  read it.
+- **Why it matters:** the single pre-existing exemption carried a paragraph of
+  justification, which is what an exemption should cost. Seventy-six
+  undistinguished entries is the same policy in name only. `supply-chain/README.md`
+  now states the number, because `cargo vet fmt` strips comments from the TOML.
+- **What to do, in this order:**
+  1. **Decide on importing the `zcash` audit set.** `cargo vet` suggests it and
+     it would cut the remainder substantially. This needs an ADR — adding a
+     trust root is the same class of decision as adding a dependency, and doing
+     it inside Phase 5 to make a number smaller is the wrong reason.
+  2. **Audit by unsafe weight, not alphabetically.** `zerovec` (253 unsafe
+     lines), `crossbeam-epoch` (195), `thin-vec` (88) and `atomic_refcell` are
+     where the risk is; a derive macro is not.
+  3. Consider whether `safe-to-run` is the right criteria for the build-only
+     crates (`syn`, the derive macros, `walkdir`), which would shrink the
+     `safe-to-deploy` list to the ones actually linked into a product.
+- **Not done in Phase 5 because** auditing 76 crates is a project, and the two
+  real options are a trust-root ADR and a prioritised read — neither of which
+  belongs inside the phase that happened to add the dependency.

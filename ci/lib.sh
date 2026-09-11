@@ -38,30 +38,34 @@ done
 #   - ci/gate-structure.sh and the other source-only gates compile nothing and
 #     currently run with no network at all. Making them depend on reaching PyPI
 #     to check a shebang would be a worse gate, not a stricter one.
-#   - A gate that does compile fails on its own when stylo's build.rs cannot
-#     find Mako, and says so in stylo's own words. There is no silent-success
-#     path to close here.
+#   - A gate that does compile fails on its own when stylo's build.rs cannot find
+#     Mako, and says so in stylo's own words. There is no silent-success path to
+#     close here.
 #
 # The claim that *does* need closing is the reproducibility one, because that is
 # the check which would otherwise print two matching hashes from an unpinned
 # generator. ci/build-and-hash.sh refuses to build without the pin, explicitly.
-PYTHON3="${PYTHON3:-}"
 #
-# The guard is not decoration. ci/setup-build-python.sh sources this file (it
-# wants PY_BIN and REPO_ROOT), so without it lib.sh calls that script, which
-# sources lib.sh, which calls that script. The first version of this block hung
-# forever on a bare `. ci/lib.sh` and had to be killed.
-if [ -z "${PX_RESOLVING_BUILD_PYTHON:-}" ] && [ -f build-python/requirements.txt ] && [ -x ci/setup-build-python.sh ]; then
-    export PX_RESOLVING_BUILD_PYTHON=1
-    if _pinned_python="$(ci/setup-build-python.sh 2>/dev/null)"; then
+# The setup script's stderr is shown rather than discarded. The first version of
+# this block sent it to /dev/null, and when the reproducible job failed on both
+# platforms the log said only "could not build the pinned Python environment"
+# with no reason -- the reason being that the script sourced this file from a
+# `git archive` extract with no .git, where `git rev-parse` exits under `set -e`.
+# A diagnostic nobody can see costs more than the noise it saves.
+PYTHON3="${PYTHON3:-}"
+if [ -f build-python/requirements.txt ] && [ -x ci/setup-build-python.sh ]; then
+    _python_log="$(mktemp)"
+    if _pinned_python="$(ci/setup-build-python.sh 2>"$_python_log")"; then
         PYTHON3="$REPO_ROOT/$_pinned_python"
     else
-        printf '  note: the pinned Python environment could not be built;' >&2
-        printf '  a gate that compiles px-css will fail in stylo build.rs%s' '' >&2
-        echo >&2
+        printf '  note: the pinned Python environment could not be built, so a
+' >&2
+        printf '  note: gate that compiles px-css will fail in stylo build.rs:
+' >&2
+        sed 's/^/  note:   /' "$_python_log" >&2 || true
     fi
+    rm -f "$_python_log"
 fi
-unset PX_RESOLVING_BUILD_PYTHON 2>/dev/null || true
 export PYTHON3
 
 info() { printf '  %s\n' "$*"; }

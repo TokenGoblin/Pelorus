@@ -178,6 +178,9 @@ mod tests {
         // identity distinguishes them, and a traversal comparing against its
         // scope node depends on that.
         assert_eq!(va.id(), vb.id(), "the precondition this test exists for");
-        assert_ne!(va, vb, "equal ids in different arenas must not compare equal");
+        assert_ne!(
+            va, vb,
+            "equal ids in different arenas must not compare equal"
+        );
     }
 }
