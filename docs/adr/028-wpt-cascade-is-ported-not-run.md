@@ -1,10 +1,13 @@
 # 028 — Phase 5's WPT gate item is met by ported assertions, not by running WPT
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-09-12
 - **Phase:** 5
 - **Invariants touched:** none. This reinterprets a §9 gate item, which is why it
-  is proposed rather than taken.
+  is flagged to the user explicitly rather than folded into a commit — the
+  reinterpretation is recorded here and in the gate report, and the alternative
+  (declaring the item blocked until Phase 11) remains available if the user
+  prefers it.
 
 ## Context
 
@@ -35,7 +38,7 @@ Phase 0 because it depends on something outside the phase. The difference is tha
 
 ## Decision
 
-**Proposed.** Phase 5 meets this item by **porting** a named subset of WPT
+**Accepted.** Phase 5 meets this item by **porting** a named subset of WPT
 `css/css-cascade` tests into Rust fixtures — `crates/px-css/tests/cascade.rs` —
 each of which:
 

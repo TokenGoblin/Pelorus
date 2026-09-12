@@ -217,7 +217,12 @@ if [ ! -f "$SURVIVAL_ADR" ]; then
     fail "$SURVIVAL_ADR does not exist"
     fail "  §9 Phase 5's third gate item is a documented decision, not an outcome"
 else
-    if grep -qiE '^\s*(##\s*)?Status:?\s*(Accepted|Rejected|Superseded)' "$SURVIVAL_ADR"; then
+    # The pattern has to match how this project actually writes an ADR header,
+    # which is `- **Status:** accepted` -- a list item with bold markup. The first
+    # version anchored on `Status:` at the start of a line and rejected a
+    # correctly-written ADR 025, which is the worst kind of gate bug: it blocks
+    # the right answer and the fix looks like weakening the check.
+    if grep -qiE '^[-*[:space:]]*(\*\*)?Status(\*\*)?:?[[:space:]]*(\*\*)?[[:space:]]*(Accepted|Rejected|Superseded)' "$SURVIVAL_ADR"; then
         ok "the stylo decision ADR is in a decided state"
     else
         fail "$SURVIVAL_ADR is not in a decided state (Status must be Accepted,"

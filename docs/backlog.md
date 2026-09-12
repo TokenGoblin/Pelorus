@@ -851,3 +851,42 @@ Format: one entry per defect.
 - **What to do:** find whether selectors exposes the component hashing (or can
   be asked to), and only then enable it. Measure before and after on a real
   page, because the cost being avoided is currently unmeasured too.
+
+## §5.3's signal 4 was never measured: no stylo bump was attempted in Phase 5
+
+- **Found in:** phase 5, ADR 025
+- **Belongs to:** unassigned; before Phase 20
+- **What:** `stylo-requirements.md` §5.3 named "a stylo minor bump breaking the
+  impl more than once during Phase 5" as a signal that stylo is the wrong bet,
+  and said *"Measure it; do not estimate it."* Phase 5 pinned 0.21.0 and never
+  bumped, so the projection has no data behind it.
+- **Why it matters:** it is the most load-bearing number ADR 025 does not have.
+  The cadence is 24 published versions in ~28 months with breaking trait changes
+  in most, and `style/dom.rs` gained a supertrait three months before Phase 5. If
+  a single bump breaks the `TElement` impl badly, the permanent maintenance tax
+  for a solo maintainer is the thing §5.3 was worried about, and ADR 025 was
+  decided without testing for it.
+- **What to do:** bump to the next published `stylo`, count what breaks, and
+  record it. Cheap — the impl is one crate and the gate runs in minutes. Do it
+  once deliberately rather than discovering it during a security update.
+- **Not done in Phase 5 because** the phase's job was to find out whether the
+  integration works at all, and a version bump measures a different thing. That
+  is a reason for sequencing, not for skipping it.
+
+## No computed-value fixture resolves a font-relative unit against real metrics
+
+- **Found in:** phase 5
+- **Belongs to:** phase 9, with px-text
+- **What:** `InitialFontMetrics` answers `query_font_metrics` with all-`None` and
+  `base_size_for_generic` with 16px for every family. So `ex`, `ch`, `ic` and
+  `cap` compute against a stub, and `monospace` gets 16px where a real browser
+  uses 13px.
+- **Why it matters:** `em` and `rem` are unaffected — they resolve against
+  `font-size`, which is a computed value this engine has — so the property set can
+  be checked honestly today. But four length units currently compute to numbers
+  nothing stands behind, and a fixture written against them now would bake the
+  stub into the expected values.
+- **What to do:** when `px-text` exists, replace the provider (one trait, two
+  methods) and add fixtures for the four units. Until then, fixtures must use
+  `em`, `rem`, percentages and absolute units, which
+  `crates/px-css/tests/properties.rs` documents at its fixture table.
