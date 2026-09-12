@@ -19,11 +19,11 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 
 ## Status
 
-**Phases 0 through 4 are merged. Phase 5 — style — passes its gate on
-`phase/05-style`.** All three of its items are green in CI on Windows and Linux:
-computed style across a defined 64-property set, the CSS cascade (ported from WPT
-rather than run — see `docs/adr/028`), and the decision §9 asks for, which is that
-stylo survived contact.
+**Phases 0 through 5 are merged. Phase 6 — block and inline layout — is next.**
+Phase 5's three gate items are green in CI on Windows and Linux: computed style
+across a defined 64-property set, the CSS cascade (ported from WPT rather than
+run — see `docs/adr/028`), and the decision §9 asks for, which is that stylo
+survived contact.
 
 What works: a sandboxed process launcher on both platforms, typed IPC with a
 capability broker, an HTTP/1.1 and TLS stack with partitioned pools, a

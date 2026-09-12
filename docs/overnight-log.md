@@ -444,3 +444,27 @@ with `compat-list` red as it has been since Phase 0. Phase 5 is next, and §9
 calls it the highest-risk phase in the project. Two things were banked for it
 ahead of time and both are worth re-reading before any code is written —
 `docs/research/stylo-requirements.md`, and ADR 021's tripwire.
+
+## 2026-09-12 — Phase 5 merged
+
+`a858953`. All three gate items green in CI on both platforms with the `style` job
+required; `compat-list` is the standing red and is the forty-site list.
+
+stylo survived contact — ADR 025. The phase's most useful finding is not the
+verdict but that **three of its requirements were found by running something and
+reading a panic**, not by reading a trait: `TElement` must be exactly
+pointer-sized, the thread must be registered as `LAYOUT`, and `grid-*` and
+`writing-mode` are behind prefs that silently do nothing when off. None is in a
+signature, a doc comment, or the 869-line research note that was assembled from
+real source. A trait's contract includes what its dependencies assert about the
+types you hand it, and that is not enumerable by reading the trait.
+
+Phase 6 is block and inline layout. Two things to read first: this phase's gate
+report on what the computed-style tick does and does not cover, and the note in
+the backlog that no fixture resolves a font-relative unit against real metrics —
+`ex`, `ch`, `ic` and `cap` currently compute against a 16px stub, so layout must
+not be tuned against them.
+
+One thing this phase did not do and should have: it never bumped stylo. §5.3
+named that as the signal to measure and said not to estimate it. Due before
+Phase 20, in the backlog.
