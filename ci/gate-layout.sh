@@ -150,6 +150,43 @@ if [ -d "$layout_src" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Nothing constructs `Au` through its tuple field.
+#
+# `app_units::Au` is `pub struct Au(pub i32)`, and its saturating `Add` is only
+# sound while every value is inside ±(2^30 - 1): two such values sum to at most
+# 2^31 - 2, which is why the raw `i32` addition inside `Add` cannot overflow.
+# `Au(i32::MAX)` is constructible, costs nothing, reads fine, and turns the next
+# addition into the panic-or-wrap §4.2 forbids. app_units says so itself: "It is
+# safe to construct invalid Au values, but it may lead to panics and overflows."
+#
+# `Au::new`, `Au::from_px` and this crate's `geom::px` / `geom::au` all clamp.
+# `Au(0)` is exempt: it is unambiguously in range and a `const fn` cannot call
+# `Au::new`, which is what the zero constants need.
+#
+# A test can show today's arithmetic saturates. Only a scan says no out-of-range
+# value was constructed next to it.
+#
+# The character class is `[^A-Za-z0-9_]` and not `[^a-zA-Z_:]`. The first version
+# excluded `:`, which excludes `::Au(` -- the fully-qualified form, and the one
+# most likely to be written. Probed with a real `app_units::Au(i32::MAX)` and the
+# scan reported ok, which is how it was found. A check that cannot fail is worse
+# than no check, because it reads as a guarantee.
+# ---------------------------------------------------------------------------
+
+if [ -d "$layout_src" ]; then
+    raw_au="$( { grep -rnE '(^|[^A-Za-z0-9_])Au\(' "$layout_src" || true; }                | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; }                | { grep -vE 'Au\(0\)' || true; } | wc -l)"
+    if [ "$raw_au" -eq 0 ]; then
+        ok "px-layout constructs no Au through its tuple field"
+    else
+        fail "px-layout constructs Au(...) directly in $raw_au place(s)."
+        fail "  Use geom::px, geom::au, or Au::from_px -- all of which clamp."
+        fail "  An out-of-range Au makes the next addition overflow, which is the"
+        fail "  panic-or-wrap §4.2 exists to prevent."
+        { grep -rnE '(^|[^A-Za-z0-9_])Au\(' "$layout_src" || true; }             | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; }             | { grep -vE 'Au\(0\)' || true; } | head -n 5 | sed 's/^/       /' >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # No recursion over tree depth.
 #
 # The scan ci/gate-dom.sh runs, for the same reason and against the same failure.

@@ -839,6 +839,9 @@ dependencies = [
 [[package]]
 name = "px-layout"
 version = "0.0.0"
+dependencies = [
+ "app_units",
+]
 
 [[package]]
 name = "px-mcp"
