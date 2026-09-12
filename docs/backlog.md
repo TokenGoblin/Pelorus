@@ -890,3 +890,19 @@ Format: one entry per defect.
   methods) and add fixtures for the four units. Until then, fixtures must use
   `em`, `rem`, percentages and absolute units, which
   `crates/px-css/tests/properties.rs` documents at its fixture table.
+
+## The network job still carries continue-on-error, and Phase 3 has merged
+
+- **Found in:** phase 5, removing the same line from the style job
+- **Belongs to:** phase 3's job; a one-line change
+- **What:** `.github/workflows/gate.yml`'s `network` job still sets
+  `continue-on-error: true`, with a comment explaining it is red until Phase 3
+  closes. Phase 3 closed and merged, and the job passes.
+- **Why it matters:** the line's own comment, on the `dom` job that removed it,
+  says why — *"a job that is allowed to fail and does not is telling you nothing
+  at all."* A green `network` that is permitted to go red silently is a regression
+  nobody would see.
+- **What to do:** delete the line and the stale comment above it.
+- **Not done in Phase 5 because** phase discipline puts out-of-phase defects here
+  rather than in this phase's diff, and this is Phase 3's job. It is a one-line
+  change whenever somebody is in that file for another reason.

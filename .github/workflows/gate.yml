@@ -248,22 +248,20 @@ jobs:
         shell: bash
         run: ci/gate-dom.sh
 
-  # Phase 5, and red on purpose until the phase closes.
+  # Phase 5. Required, as of the phase's last commit.
   #
-  # `continue-on-error: true` while the phase is open, for the reason Phase 4
-  # removed it at the end: a job that is allowed to fail and does is telling you
-  # the phase is in progress, and a job that is allowed to fail and does not is
-  # telling you nothing at all. The last commit of Phase 5 deletes this line,
-  # and ci/gate-style.sh checks nothing about that -- reviewers do.
+  # `continue-on-error: true` was set from the phase's first commit and removed
+  # here, which is the whole lifecycle of that line: a job allowed to fail while
+  # the phase is open tells you the phase is in progress, and one still allowed to
+  # fail after it closes tells you nothing at all.
   #
-  # It is here from the first commit of the phase rather than added at the end
-  # because Phase 4's gate spent five commits red in CI while three commit
-  # messages said it was green. A gate that is not wired to CI on day one is a
-  # gate whose CI behaviour is discovered on the last day.
+  # Wired to CI from day one rather than added at the end, because Phase 4's gate
+  # spent five commits red in CI while three commit messages said it was green. A
+  # gate whose CI behaviour is first exercised on the last day is a gate that
+  # fails on the last day.
   style:
     name: style (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
