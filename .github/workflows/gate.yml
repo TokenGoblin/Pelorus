@@ -248,6 +248,34 @@ jobs:
         shell: bash
         run: ci/gate-dom.sh
 
+  # Phase 5. Required, as of the phase's last commit.
+  #
+  # `continue-on-error: true` was set from the phase's first commit and removed
+  # here, which is the whole lifecycle of that line: a job allowed to fail while
+  # the phase is open tells you the phase is in progress, and one still allowed to
+  # fail after it closes tells you nothing at all.
+  #
+  # Wired to CI from day one rather than added at the end, because Phase 4's gate
+  # spent five commits red in CI while three commit messages said it was green. A
+  # gate whose CI behaviour is first exercised on the last day is a gate that
+  # fails on the last day.
+  style:
+    name: style (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      # fetch-depth matters: ci/gate-style.sh resolves ADR 021's tripwire by
+      # comparing two px-dom test files against pinned blob hashes through
+      # `git rev-parse HEAD:<path>`, which needs the objects present. A shallow
+      # checkout of one commit still has them, but a sparse one would not.
+      - name: Phase 5 gate
+        shell: bash
+        run: ci/gate-style.sh
+
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
   # explicitly rather than by directory override, so the fence assertion in

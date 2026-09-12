@@ -26,8 +26,41 @@ kind of movement worth seeing in a diff.
 
 ## What a pass means today
 
-Nothing yet. Phase 0 has zero third-party dependencies, and `cargo vet` says so
-in those words: "Vetting Succeeded (because you have no third-party
-dependencies)." The store is wired now so that Phase 3 — the first real
-dependency — lands against a policy that already exists rather than one written
-under pressure to get a build green.
+**"Vetting Succeeded (92 fully audited, 3 partially audited, 76 exempted)"** —
+and the third number is the one to read.
+
+Phase 0 had zero third-party dependencies and this section used to say so. Phase
+5 added `stylo` (ADR 023): **+108 crates** in `Cargo.lock`. The five audit sets
+imported above cover all but 76 of them, and refreshing those sets closed 30 on
+its own, because Mozilla audits much of its own CSS engine's graph.
+
+### An exemption is not an audit
+
+Before Phase 5 this store held **one** exemption, `redox_syscall`, with a
+paragraph in `config.toml` arguing why it was an exemption rather than a trust
+entry. It now holds **77**, and 76 arrived in a single commit.
+
+That difference is not cosmetic. An exemption records a crate trusted *without
+anybody here having read it*. One, carefully argued, is a considered risk.
+Seventy-six is a statement about how much of this tree is vouched for by nobody,
+and the number belongs somewhere a person will see it rather than spread across
+230 lines of generated TOML. `cargo vet fmt` strips comments from `config.toml`,
+which is why it is here.
+
+### What would actually reduce it
+
+Two things, both in `docs/backlog.md`:
+
+- **Import another trusted audit set.** `cargo vet` suggests `zcash`, which
+  would cut the remaining diff substantially. Not done in Phase 5 on purpose:
+  adding a trust root is a supply-chain decision of the same kind as adding a
+  dependency, and this project requires an ADR for those. It should be a
+  deliberate choice rather than a side effect of a phase that wanted a number to
+  go down.
+- **Audit the crates that carry the risk.** The 76 are not equal. `zerovec`
+  (253 unsafe lines), `crossbeam-epoch` (195), `thin-vec` (88) and
+  `atomic_refcell` exist to do things the borrow checker cannot express, and are
+  worth reading in a way that a derive macro is not.
+
+The failure mode to avoid is adding to the exemption list to make a gate pass.
+Each entry is a crate nobody read, and the count is the point.

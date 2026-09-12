@@ -19,22 +19,25 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 
 ## Status
 
-**Phases 0 through 4 are merged. Phase 5 — style resolution — is next.** All
-four of Phase 4's gate items pass in CI on Windows and Linux, including the
-mutation fuzz campaign: 19 shards, 28.2 billion executions, clean, with 24
-CPU-hours on `dom_mutation` itself rather than on the campaign total.
+**Phases 0 through 4 are merged. Phase 5 — style — passes its gate on
+`phase/05-style`.** All three of its items are green in CI on Windows and Linux:
+computed style across a defined 64-property set, the CSS cascade (ported from WPT
+rather than run — see `docs/adr/028`), and the decision §9 asks for, which is that
+stylo survived contact.
 
 What works: a sandboxed process launcher on both platforms, typed IPC with a
-capability broker, an HTTP/1.1 and TLS stack with partitioned pools, and a
+capability broker, an HTTP/1.1 and TLS stack with partitioned pools, a
 generational-arena DOM driving `html5ever` at 99.43% on the tree-construction
 conformance corpus (94.62% unadjusted — see ADR 019 for what is set aside and
-why both numbers are printed).
+why both numbers are printed), and `stylo` resolving computed style over that DOM
+with the cascade, specificity, `@layer`, inline `style` and the CSS-wide keywords
+all working.
 
-**Nothing renders a page.** There is no style resolution (Phase 5), no layout
-(6–7), no paint (8), no text shaping (9) and no JavaScript (10–11). First
+**Nothing renders a page.** Style resolution now works, but there is no layout
+(Phases 6–7), no paint (8), no text shaping (9) and no JavaScript (10–11). First
 pixels are around Phase 8; a browser you could use is Phase 23. This has never
-been pointed at a website, because there is nothing yet that could load one
-end to end.
+been pointed at a website, because there is nothing yet that could load one end
+to end.
 
 Nothing is distributed to anyone before Phase 20 completes (invariant 10) — the
 update channel and signed release pipeline must exist before a build leaves

@@ -753,3 +753,156 @@ Format: one entry per defect.
   both names from `corpus_empty`; the gate already fails if the list and the
   index disagree in that direction.
 - **Not done here because** they are Phase 3 targets and this is Phase 4.
+
+## build-python/requirements.txt pins versions, not hashes
+
+- **Found in:** phase 5, ADR 023
+- **Belongs to:** unassigned; before Phase 20 ships anything
+- **What:** `Mako==1.4.1` and `MarkupSafe==3.0.3` are exact version pins. They
+  are not hash pins, so `pip install` trusts whatever the index serves under
+  those version numbers.
+- **Why it matters:** ADR 023 made a Python interpreter and a Mako version into
+  build inputs for the release binary. `Cargo.lock` records a checksum for every
+  crate; this file records none for either package. A compromised or
+  impersonated index is inside the trust boundary of the shipped artifact, which
+  is the same class of exposure `cargo-vet` and `cargo-deny` exist to close on
+  the Rust side.
+- **What to do:** `pip install --require-hashes`, which needs every artifact
+  enumerated per version — MarkupSafe ships compiled wheels, so that is a Linux
+  wheel, a Windows wheel and an sdist, and a partial list breaks CI on whichever
+  platform it missed. Generate with `pip download --no-deps` followed by
+  `pip hash`, for both platforms, and have `ci/check_build_python_pin.py` assert
+  the requirements file carries hashes at all so the pin cannot silently regress
+  to version-only.
+- **Not done in Phase 5 because** a half-enumerated hash list is worse than an
+  honest version pin: it breaks one platform's CI and reads as stronger than it
+  is. The gap is stated in the requirements file itself rather than implied.
+
+## 76 cargo-vet exemptions arrived with stylo, and nobody read those crates
+
+- **Found in:** phase 5, ADR 023
+- **Belongs to:** unassigned; before Phase 20 ships anything
+- **What:** adding `stylo` took `supply-chain/config.toml` from **1 exemption to
+  77**. `cargo vet` reports "92 fully audited, 3 partially audited, 76
+  exempted". An exemption records a crate trusted without anybody here having
+  read it.
+- **Why it matters:** the single pre-existing exemption carried a paragraph of
+  justification, which is what an exemption should cost. Seventy-six
+  undistinguished entries is the same policy in name only. `supply-chain/README.md`
+  now states the number, because `cargo vet fmt` strips comments from the TOML.
+- **What to do, in this order:**
+  1. **Decide on importing the `zcash` audit set.** `cargo vet` suggests it and
+     it would cut the remainder substantially. This needs an ADR — adding a
+     trust root is the same class of decision as adding a dependency, and doing
+     it inside Phase 5 to make a number smaller is the wrong reason.
+  2. **Audit by unsafe weight, not alphabetically.** `zerovec` (253 unsafe
+     lines), `crossbeam-epoch` (195), `thin-vec` (88) and `atomic_refcell` are
+     where the risk is; a derive macro is not.
+  3. Consider whether `safe-to-run` is the right criteria for the build-only
+     crates (`syn`, the derive macros, `walkdir`), which would shrink the
+     `safe-to-deploy` list to the ones actually linked into a product.
+- **Not done in Phase 5 because** auditing 76 crates is a project, and the two
+  real options are a trust-root ADR and a prioritised read — neither of which
+  belongs inside the phase that happened to add the dependency.
+
+## Three TElement methods answer "nothing" where a browser answers something
+
+- **Found in:** phase 5, implementing `TElement`
+- **Belongs to:** phase 5 for the first, later phases for the others
+- **What:** three methods return an empty answer that is not the same as the
+  right answer. Each is documented at its own definition in
+  `crates/px-css/src/element.rs`; collected here because they are easy to miss
+  one at a time.
+  1. **`style_attribute` returns `None`** — inline `style="..."` does not
+     participate in the cascade. Author stylesheets do. The return type is a
+     borrow of a parsed, lock-wrapped `PropertyDeclarationBlock`, so producing
+     one means parsing with a `ParserContext` and storing the result at a stable
+     address: ADR 026's problem again with a parser attached.
+  2. **`synthesize_presentational_hints_for_legacy_attributes` does nothing** —
+     `<table border="1">`, `width="100"`, `bgcolor` and the rest map to nothing.
+     Dozens of small mappings at the user-agent origin, mattering mostly to old
+     markup.
+  3. **`state()` is always empty** — `:hover`, `:focus`, `:active`, `:checked`
+     never match, because there is no input before Phase 13. The computed style
+     is the one a user sees before touching the page, which is right until there
+     is a pointer.
+- **Why it matters:** the first is a real cascade gap that the computed-style
+  fixtures will notice, and it should close inside Phase 5. The other two are
+  correct-for-now and would be wrong to leave undocumented at Phase 20.
+- **What to do:** implement (1) before the phase closes; carry (2) and (3) to
+  the phases that give them meaning.
+
+## The selector bloom filter is disabled, and turning it on needs shared hashing
+
+- **Found in:** phase 5, `selectors::Element::add_element_unique_hashes`
+- **Belongs to:** unassigned; a performance item, not a correctness one
+- **What:** the method returns `false`, so the selector engine's ancestor bloom
+  filter is skipped for every element.
+- **Why it matters:** the filter is how the engine rejects `.a .b` without
+  walking ancestors, so every descendant selector costs a full walk. On a large
+  document with a big stylesheet this is the difference the filter exists to
+  make.
+- **Why it is off:** the hashes inserted here must be computed exactly the way
+  the engine hashes the corresponding selector components, and that hashing is
+  not public API. Guessing it does not fail loudly — it produces **false
+  negatives**, and a false negative in a negative cache is a rule that silently
+  stops applying. That is the "passes your tests, fails real sites" failure
+  `/CLAUDE.md` warns about, bought for a speed-up.
+- **What to do:** find whether selectors exposes the component hashing (or can
+  be asked to), and only then enable it. Measure before and after on a real
+  page, because the cost being avoided is currently unmeasured too.
+
+## §5.3's signal 4 was never measured: no stylo bump was attempted in Phase 5
+
+- **Found in:** phase 5, ADR 025
+- **Belongs to:** unassigned; before Phase 20
+- **What:** `stylo-requirements.md` §5.3 named "a stylo minor bump breaking the
+  impl more than once during Phase 5" as a signal that stylo is the wrong bet,
+  and said *"Measure it; do not estimate it."* Phase 5 pinned 0.21.0 and never
+  bumped, so the projection has no data behind it.
+- **Why it matters:** it is the most load-bearing number ADR 025 does not have.
+  The cadence is 24 published versions in ~28 months with breaking trait changes
+  in most, and `style/dom.rs` gained a supertrait three months before Phase 5. If
+  a single bump breaks the `TElement` impl badly, the permanent maintenance tax
+  for a solo maintainer is the thing §5.3 was worried about, and ADR 025 was
+  decided without testing for it.
+- **What to do:** bump to the next published `stylo`, count what breaks, and
+  record it. Cheap — the impl is one crate and the gate runs in minutes. Do it
+  once deliberately rather than discovering it during a security update.
+- **Not done in Phase 5 because** the phase's job was to find out whether the
+  integration works at all, and a version bump measures a different thing. That
+  is a reason for sequencing, not for skipping it.
+
+## No computed-value fixture resolves a font-relative unit against real metrics
+
+- **Found in:** phase 5
+- **Belongs to:** phase 9, with px-text
+- **What:** `InitialFontMetrics` answers `query_font_metrics` with all-`None` and
+  `base_size_for_generic` with 16px for every family. So `ex`, `ch`, `ic` and
+  `cap` compute against a stub, and `monospace` gets 16px where a real browser
+  uses 13px.
+- **Why it matters:** `em` and `rem` are unaffected — they resolve against
+  `font-size`, which is a computed value this engine has — so the property set can
+  be checked honestly today. But four length units currently compute to numbers
+  nothing stands behind, and a fixture written against them now would bake the
+  stub into the expected values.
+- **What to do:** when `px-text` exists, replace the provider (one trait, two
+  methods) and add fixtures for the four units. Until then, fixtures must use
+  `em`, `rem`, percentages and absolute units, which
+  `crates/px-css/tests/properties.rs` documents at its fixture table.
+
+## The network job still carries continue-on-error, and Phase 3 has merged
+
+- **Found in:** phase 5, removing the same line from the style job
+- **Belongs to:** phase 3's job; a one-line change
+- **What:** `.github/workflows/gate.yml`'s `network` job still sets
+  `continue-on-error: true`, with a comment explaining it is red until Phase 3
+  closes. Phase 3 closed and merged, and the job passes.
+- **Why it matters:** the line's own comment, on the `dom` job that removed it,
+  says why — *"a job that is allowed to fail and does not is telling you nothing
+  at all."* A green `network` that is permitted to go red silently is a regression
+  nobody would see.
+- **What to do:** delete the line and the stale comment above it.
+- **Not done in Phase 5 because** phase discipline puts out-of-phase defects here
+  rather than in this phase's diff, and this is Phase 3's job. It is a one-line
+  change whenever somebody is in that file for another reason.

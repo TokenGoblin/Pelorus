@@ -4,9 +4,18 @@ Full specification: docs/build-spec.md. Read §9 for the current phase at the
 start of a phase. Do not load the whole spec every session.
 
 ## Hard rules
-- Every crate begins with `#![forbid(unsafe_code)]`. The sole exception is
-  `px-sandbox`: `#![deny(unsafe_op_in_unsafe_fn)]`, a `// SAFETY:` comment on
-  every unsafe block, reviewed against the OS documentation.
+- Every crate begins with `#![forbid(unsafe_code)]`. Two crates are excepted,
+  with different rules — read the difference, it is the point:
+  - `px-sandbox` (ADR 008): `#![deny(unsafe_op_in_unsafe_fn)]`, a `// SAFETY:`
+    comment on every unsafe block, reviewed against the OS documentation.
+  - `px-css` (ADR 024): may declare `unsafe fn` where a `stylo` trait signature
+    requires it — `forbid` rejects *implementing* an unsafe method, which is
+    why the lint cannot stay. It contains **zero** `unsafe` blocks and **zero**
+    `unsafe impl`. An `unsafe fn` body needs neither, so nothing in the crate
+    does anything the compiler is not checking. `ci/gate-style.sh` enforces
+    both halves. This is narrower than an exemption; do not read it as one, and
+    do not quote it as precedent for anything broader than a trait signature we
+    do not control.
 - Authority comes from the channel, never from the message. The broker
   identifies callers by connection. No process sends its own identity,
   origin, partition key, or TabId and expects it to be trusted.

@@ -1,0 +1,24 @@
+# stylo's build-time code generator, pinned.
+#
+# ADR 023: stylo's `build.rs` shells out to Python 3 and runs
+# `properties/build.py` through Mako to generate its property definitions. That
+# makes the interpreter and this package build inputs, which is why invariant 7
+# now reads "same source + same toolchain + same pinned build-time generators".
+#
+# Exact versions, not ranges. A range here would reintroduce exactly what the
+# ADR was written to close: a release binary whose contents depend on what
+# happened to be installed on the machine that built it.
+#
+# What this pin does NOT do, stated because the file would otherwise imply it:
+# these are version pins, not hash pins. They defend against a newer Mako
+# changing the generated output; they do not defend against a compromised
+# package index serving different bytes under the same version. `--require-hashes`
+# would, and needs every platform wheel enumerated because MarkupSafe ships
+# compiled ones -- a Linux wheel, a Windows wheel and an sdist per version, so
+# a partial list breaks CI on whichever platform it missed. Filed in
+# docs/backlog.md rather than half-done here.
+#
+# Raise these the way rust-toolchain.toml is raised: a deliberate commit that
+# says the output was rechecked, not drift.
+Mako==1.4.1
+MarkupSafe==3.0.3

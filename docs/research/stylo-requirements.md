@@ -867,3 +867,86 @@ and `servo/servo` @ `main`, both fetched 2026-09-08. crates.io metadata for
 `stylo` 0.21.0 fetched the same day. The `forbid(unsafe_code)` behaviour in §3.6
 was verified by compiling a probe with the repository's pinned toolchain,
 rustc 1.98.1 (48a229cea 2026-09-01).*
+
+---
+
+## 7. Checked against `stylo 0.21.0` in Phase 5 — three corrections
+
+Sections 1–6 were written against `servo/stylo` HEAD `e81a3d9` on 2026-09-08.
+ADR 023 takes the **published 0.21.0**, and Phase 5 compiled against it. Three
+things this note got wrong, recorded here rather than in a commit message
+because this is the document people will read first.
+
+**The integration surface, measured.** Nobody had this number. Required methods
+an implementor must write, counted from the published crate:
+
+| trait | required fn | of which `unsafe fn` | provided fn |
+|---|---:|---:|---:|
+| `TNode` | 13 | 0 | 7 |
+| `TElement` | 35 | 5 | 43 |
+| `TDocument` | 4 | 0 | 1 |
+| `TShadowRoot` | 2 | 0 | 4 |
+| `selectors::Element` (0.40.0) | 20 | 0 | 10 |
+| **total** | **74** | **5** | **65** |
+
+**§3.1's collision is narrower than stated, and for `TNode` it does not exist.**
+The note says §4.1's `Option`-returning accessors "genuinely cannot implement
+`TNode` — dozens of its methods are infallible". In 0.21.0 every one of
+`TNode`'s tree accessors — `parent_node`, `first_child`, `last_child`,
+`prev_sibling`, `next_sibling` — **returns `Option<Self>` already**. They line up
+with §4.1 with no adaptation at all. The two infallible ones, `owner_doc` and
+`is_in_document`, are infallible about things that cannot fail. The `Copy`
+requirement is the real constraint, and a shared reference plus an 8-byte
+`NodeId` satisfies it.
+
+**§3.6 said six `unsafe fn`; there are eight, five required.** `TElement`
+declares `set_handled_snapshot`, `set_dirty_descendants`,
+`unset_dirty_descendants`, `ensure_data` and `clear_data` without bodies, and
+`set_animation_only_dirty_descendants`, its `unset_` partner and
+`clear_descendant_bits` with them. The conclusion is unaffected — one required
+`unsafe fn` is enough to make `#![forbid(unsafe_code)]` impossible, which is
+ADR 024 — but the count in the note was not the count in the crate.
+
+**What §3.2's design cost in practice: nothing yet.** `crates/px-css/src/view.rs`
+implements the borrowed view and compiles against `px-dom` **unchanged** — no
+edit to the slot layout, to `NodeId`'s representation, or to the opaque packing.
+That is ADR 021's tripwire, and so far it has not fired. `ci/gate-style.sh`
+asserts it mechanically by pinning the blob hashes of `px-dom`'s `tests/layout.rs`
+and `tests/opaque.rs`, so the claim is checked on every push rather than
+remembered.
+
+### 7.1 The requirement this note missed entirely
+
+**`TElement` must be exactly pointer-sized.** Nothing in §1.1's trait stack says
+so, nothing in `TElement`'s declared bounds says so, and this note did not find
+it. It is enforced by an `assert_eq!` in `StyleSharingCache::new`, at runtime, on
+the first style pass:
+
+```rust
+struct FakeCandidate { _element: usize, _validation_data: ValidationData, _may_contain_scoped_style: bool }
+type TypelessSharingCache = SharingCacheBase<FakeCandidate>;
+assert_eq!(size_of::<SharingCache<E>>(), size_of::<TypelessSharingCache>());
+```
+
+The style-sharing cache is kept in a thread-local with the element type erased to
+`usize` and `transmute`d back, and that assertion is what keeps the transmute
+honest.
+
+Found by running the cascade, which panicked with `left: 10256, right: 9488`
+before doing any work. The measured view was 32 bytes against a required 8; 24
+bytes of excess across 32 cache entries is the 768 difference.
+
+**§3.2's design survives; its representation does not.** "Resolve once at the
+boundary, borrow thereafter" is still the right answer to §3.1's collision. What
+was wrong was the assumption that the borrow could be carried *inline in the
+view*. `NodeId` is already exactly one word — ADR 018 chose 32/32 for unrelated
+reasons and landed on the right width by luck — so a view that carries only the
+handle is the right size, and the arena has to be reached one indirection away.
+ADR 027 records the two ways to do that and recommends one.
+
+**The lesson for §5.3's "signals that stylo is the wrong bet".** This is not one
+of them: the requirement is satisfiable and the fix is local. But it is a signal
+about *this note*. Every requirement in §§1–4 was found by reading source, and
+this one is not in the source anybody would read — it is in an assertion in a
+cache constructor. A trait's real contract includes what its dependencies assert
+about the types you pass it, and that is not enumerable by reading the trait.

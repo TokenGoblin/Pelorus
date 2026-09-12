@@ -1,0 +1,178 @@
+# The defined property set for Phase 5's computed-style gate item.
+#
+# build-spec §9 Phase 5: "computed-style fixtures match across a defined
+# property set". §9 does not say which properties, so this file is the
+# definition, and `ci/gate-style.sh` reads it with a pinned floor so it cannot
+# shrink to fit an implementation that is struggling.
+#
+# # How the set was chosen
+#
+# Not by picking properties that are easy to compute, and not by taking the
+# whole CSS surface. **Every property here is one that Phases 6, 7 or 8 will
+# read.** That is the only principle that makes the set defensible: a
+# computed-style gate exists so the next phase can trust what it reads, so the
+# set is exactly what the next phase reads, and a property nothing consumes
+# proves nothing by matching.
+#
+# The consequence is worth stating plainly: this set is deliberately narrow
+# against real CSS. It is not a claim that the engine supports CSS. It is a
+# claim that the properties layout is about to depend on compute correctly.
+#
+# # What a fixture has to check
+#
+# Parsing is not the subject. The *computed* value is: relative units resolved
+# against the right base, inheritance applied, `initial`/`inherit`/`unset`
+# honoured, keywords resolved to the computed form the spec names. A fixture
+# that asserts `font-size: 2em` parses has tested nothing this gate is for; one
+# that asserts it computes to `32px` against a 16px parent has.
+#
+# Each group below records what reads it, so that a property cannot sit here
+# unexplained.
+
+[meta]
+floor = 40
+# The floor lives in ci/gate-style.sh as well, deliberately duplicated, and the
+# gate fails if the two disagree. A gate that read its own threshold from the
+# file it is policing could be lowered in one edit.
+
+# ---------------------------------------------------------------------------
+# Box model and box generation. Read by Phase 6 (block and inline layout).
+#
+# `display` first because it decides whether there is a box at all, and the
+# computed value is not the specified one -- a floated `display: inline`
+# blockifies. Getting that wrong makes every later fixture wrong in a way that
+# looks like a layout bug.
+# ---------------------------------------------------------------------------
+[groups.box]
+read_by = "phase 6"
+properties = [
+  "display",
+  "position",
+  "box-sizing",
+  "width",
+  "height",
+  "min-width",
+  "min-height",
+  "max-width",
+  "max-height",
+  "margin-top",
+  "margin-right",
+  "margin-bottom",
+  "margin-left",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  "border-top-width",
+  "border-right-width",
+  "border-bottom-width",
+  "border-left-width",
+  "border-top-style",
+  "border-top-color",
+  "top",
+  "right",
+  "bottom",
+  "left",
+  "float",
+  "clear",
+  "overflow-x",
+  "overflow-y",
+]
+
+# ---------------------------------------------------------------------------
+# Inline and text. Read by Phase 6 for inline layout and Phase 9 for shaping.
+#
+# `font-size` is the load-bearing one: it is the base every `em` in the set
+# resolves against, it inherits, and a percentage resolves against the parent's
+# computed value rather than its own. If one property in this file is going to
+# be wrong, it is this one, and every relative length in every other group
+# inherits the error.
+# ---------------------------------------------------------------------------
+[groups.text]
+read_by = "phases 6, 9"
+properties = [
+  "font-family",
+  "font-size",
+  "font-style",
+  "font-weight",
+  "line-height",
+  "color",
+  "text-align",
+  "text-decoration-line",
+  "text-indent",
+  "white-space",
+  "letter-spacing",
+  "word-spacing",
+  "vertical-align",
+  "direction",
+  "writing-mode",
+]
+
+# ---------------------------------------------------------------------------
+# Flex and grid. Read by Phase 7.
+#
+# Included at Phase 5 rather than deferred to Phase 7 because computed-value
+# rules here are unobvious -- `flex-basis: auto` and `align-self: auto` both
+# resolve against something other than themselves -- and discovering that
+# during a layout phase means debugging two things at once.
+# ---------------------------------------------------------------------------
+[groups.flex_grid]
+read_by = "phase 7"
+properties = [
+  "flex-direction",
+  "flex-wrap",
+  "flex-grow",
+  "flex-shrink",
+  "flex-basis",
+  "justify-content",
+  "align-items",
+  "align-self",
+  "align-content",
+  "row-gap",
+  "column-gap",
+  "grid-template-columns",
+  "grid-template-rows",
+  "grid-auto-flow",
+]
+
+# ---------------------------------------------------------------------------
+# Paint and visibility. Read by Phase 8.
+# ---------------------------------------------------------------------------
+[groups.paint]
+read_by = "phase 8"
+properties = [
+  "background-color",
+  "opacity",
+  "visibility",
+  "z-index",
+]
+
+# ---------------------------------------------------------------------------
+# Cascade and computed-value mechanics, which are not properties but are what
+# the fixtures are actually testing.
+#
+# These are named here so the fixture suite has to cover them and so a reader
+# can tell that the gate is about the cascade rather than about a property
+# checklist. `ci/gate-style.sh` parses this file and counts only the `properties`
+# arrays against its floor -- these cases are reported separately and are
+# asserted by name in crates/px-css/tests/computed.rs.
+# ---------------------------------------------------------------------------
+[mechanics]
+cases = [
+  "inheritance: an inherited property with no declaration takes the parent's computed value",
+  "non-inheritance: a non-inherited property with no declaration takes its initial value",
+  "explicit inherit: `inherit` on a non-inherited property",
+  "explicit initial: `initial` on an inherited property",
+  "unset: behaves as inherit on inherited properties and initial otherwise",
+  "revert: rolls back to the previous cascade origin, not to initial",
+  "em resolution: against the element's own font-size, except on font-size itself",
+  "rem resolution: against the root element's font-size, not the parent's",
+  "percentage on font-size: against the parent's computed font-size",
+  "percentage on line-height: computed value stays a number-or-percentage per spec",
+  "currentColor: resolves to the element's computed color, and to the parent's on color itself",
+  "custom properties: substitution, and an invalid-at-computed-value-time fallback",
+  "specificity ordering: id over class over type, and !important over both",
+  "origin ordering: author over user over user-agent, and important reversing it",
+  "shorthand expansion: a shorthand sets every longhand, including the ones not written",
+  "logical properties: margin-inline-start maps per writing-mode and direction",
+]

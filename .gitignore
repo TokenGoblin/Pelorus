@@ -26,3 +26,9 @@ target/auditable/
 /fuzz/artifacts/
 /fuzz/target/
 /fuzz/Cargo.lock
+
+# ADR 023: stylo's build.rs generates its property definitions through Python 3
+# and Mako, so the build needs an interpreter with Mako installed. The venv is
+# built from build-python/requirements.txt, which IS committed -- the pin is the
+# reproducibility claim, the venv is just a materialisation of it.
+/.build-python-venv/

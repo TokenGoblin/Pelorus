@@ -6,5 +6,55 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# ADR 023. stylo's build.rs generates its property definitions through Python 3
+# and Mako, which is why build-python/requirements.txt exists and why invariant
+# 7 now names its build-time generators.
+#
+# default-features off deliberately: ADR 023 takes rayon's parallel traversal
+# "available but unused" -- traverse_dom accepts pool: Option<&ThreadPool> and
+# Phase 5 passes None -- so the goal is to pull in as little of the threading
+# surface as the crate allows. Which features that actually needs is what the
+# spike below determines; this is the starting point, not the answer.
+stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
+# Not a new supply-chain decision, and pinned so it cannot become one.
+#
+# `TElement` has `selectors::Element` as a supertrait, and stylo does not
+# re-export the `selectors` crate -- so the trait cannot be named, let alone
+# implemented, without depending on it directly. This adds **zero** crates to the
+# closure: selectors 0.40.0 is already there, pulled in by stylo itself.
+#
+# The version must stay exactly stylo's. Two `selectors` in the tree would not be
+# a duplicate-dependency warning, it would be a type error at every `TElement`
+# method -- the trait from one copy cannot be satisfied by the impl from the
+# other. `cargo deny`'s multiple-versions rule catches it, and so does the build.
+selectors = "0.40.0"
+# Named directly for `QualName`, which px-dom returns but does not re-export.
+# Same version px-dom uses; a second html5ever would mean two QualName types.
+html5ever = "0.39.0"
+# The atom static sets html5ever and stylo share. Named so the wrapper cast in
+# src/dom.rs can be written; adds nothing -- already in the closure twice over.
+web_atoms = "0.2.6"
+# Named in TElement's signatures, all already in stylo's closure at these exact
+# versions. Adding them as direct deps adds no crate to the tree; it only lets
+# the trait methods be spelled. A version drift here is a type error, not a
+# duplicate-dependency warning.
+stylo_dom = "0.21.0"
+euclid = "0.22.14"
+app_units = "0.7.8"
+# UrlExtraData wraps a url::Url; same version stylo resolves to.
+url = "2.5.8"
+# Several CSS properties are pref'd off in stylo's servo build with no signal when
+# they are -- see enable_the_css_this_engine_claims_to_support in src/engine.rs.
+# Already in the closure; named here so the prefs can be set.
+stylo_static_prefs = "0.21.0"
+px-dom = { path = "../px-dom", version = "0.0.0" }
+
+[dev-dependencies]
+# Reading tests/properties.toml, so the fixture table and the manifest the gate
+# checks cannot drift apart. Dev-only: nothing in the shipping crate parses TOML.
+#
+# Pinned to the version already in the closure, not the newest. `toml = "0.9"`
+# resolved a *second* copy alongside stylo's 1.1, which added three crates and 55
+# unsafe lines to the audit surface for a test helper. Matching the existing
+# version adds nothing at all.
+toml = "1.1"
