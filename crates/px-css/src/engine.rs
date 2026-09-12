@@ -79,6 +79,12 @@ impl style::context::RegisteredSpeculativePainters for NoPainters {
 pub struct StyleEngine {
     stylist: Stylist,
     shared_lock: style::shared_lock::SharedRwLock,
+    /// The document's base URL, for resolving `url()` in inline `style`.
+    ///
+    /// `about:blank` until a document is loaded against a real URL. Relative
+    /// references in an inline style resolve against it, so it is the document's
+    /// URL rather than a stylesheet's.
+    url_data: style::stylesheets::UrlExtraData,
     snapshots: style::selector_parser::SnapshotMap,
     painters: NoPainters,
 }
@@ -112,6 +118,9 @@ impl StyleEngine {
         Self {
             stylist: Stylist::new(device, quirks_mode),
             shared_lock: style::shared_lock::SharedRwLock::new(),
+            url_data: style::stylesheets::UrlExtraData(style::servo_arc::Arc::new(
+                url::Url::parse("about:blank").expect("a valid literal"),
+            )),
             snapshots: style::selector_parser::SnapshotMap::new(),
             painters: NoPainters,
         }
@@ -174,6 +183,38 @@ impl StyleEngine {
         // arguments Servo's older call sites pass are gone.
         self.stylist
             .flush(&style::shared_lock::StylesheetGuards::same(&guard));
+    }
+
+    /// A parser for inline `style` attributes, bound to this engine's lock.
+    ///
+    /// Hand this to `StyleData::for_arena_with_style_attributes` — or use
+    /// [`Self::style_root_for`], which does it for you — so inline declarations
+    /// are wrapped in the lock the cascade reads through.
+    #[must_use]
+    pub fn style_attribute_parser(&self) -> crate::data::StyleAttributeParser<'_> {
+        crate::data::StyleAttributeParser::new(
+            &self.url_data,
+            &self.shared_lock,
+            self.stylist.quirks_mode(),
+        )
+    }
+
+    /// Build a `StyleRoot` for `arena` wired to this engine.
+    ///
+    /// The one call that gets every coupling right: the engine's shared lock, its
+    /// quirks mode, and inline `style` attributes parsed against its base URL.
+    /// Assembling a `StyleRoot` by hand is possible and is how the two silent
+    /// failures documented on `StyleRoot::new` and `StyleAttributeParser` happen.
+    #[must_use]
+    pub fn style_root_for(&self, arena: &Arena) -> crate::view::StyleRoot {
+        crate::view::StyleRoot::with_data(
+            self.shared_lock.clone(),
+            self.stylist.quirks_mode(),
+            crate::data::StyleData::for_arena_with_style_attributes(
+                arena,
+                &self.style_attribute_parser(),
+            ),
+        )
     }
 
     /// The stylist, for callers that need to resolve style themselves.

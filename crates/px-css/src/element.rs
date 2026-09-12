@@ -73,16 +73,15 @@ impl<'a> style::dom::TElement for StyleElement<'a> {
 
     /// The `style` attribute, parsed.
     ///
-    /// **`None` in Phase 5, and this is the phase's largest honest gap.** The
-    /// return type is a borrow of a parsed, lock-wrapped `PropertyDeclarationBlock`
-    /// that must already exist somewhere, so producing one means parsing the
-    /// attribute with a `ParserContext` and storing the result at a stable
-    /// address — the `ElementData` problem of ADR 026 again, with a parser
-    /// attached.
+    /// Parsed once when ADR 026's table was built, not here: the return type is an
+    /// `ArcBorrow`, so the block has to already exist at a stable address. See
+    /// [`crate::data::StyleAttributeParser`].
     ///
-    /// The consequence is specific and testable: inline `style="..."` does not
-    /// participate in the cascade, while author stylesheets do. Named in the
-    /// backlog and in the phase report rather than left for a fixture to find.
+    /// `None` for an element with no `style` attribute, and also for every element
+    /// if the table was built by `StyleData::for_arena` rather than
+    /// `for_arena_with_style_attributes` — the second needs a base URL, a quirks
+    /// mode and the engine's shared lock, which this crate's unit tests have no
+    /// opinion about.
     fn style_attribute(
         &self,
     ) -> Option<
@@ -91,7 +90,7 @@ impl<'a> style::dom::TElement for StyleElement<'a> {
             style::shared_lock::Locked<style::properties::PropertyDeclarationBlock>,
         >,
     > {
-        None
+        self.data().style_attribute_of(self.node().id())
     }
 
     /// No animations before there is a timeline.

@@ -92,6 +92,20 @@ impl StyleRoot {
         }
     }
 
+    /// Assemble a style root from a table built elsewhere.
+    ///
+    /// Used by `StyleEngine::style_root_for`, which is how callers should get one:
+    /// it wires the lock, the quirks mode and the inline-style parser to the same
+    /// engine, and each of those is a silent failure when they disagree.
+    #[must_use]
+    pub fn with_data(shared_lock: SharedRwLock, quirks_mode: QuirksMode, data: StyleData) -> Self {
+        Self {
+            shared_lock,
+            quirks_mode,
+            data,
+        }
+    }
+
     /// The lock guarding stylesheet contents. `TDocument::shared_lock`.
     #[must_use]
     pub fn shared_lock(&self) -> &SharedRwLock {

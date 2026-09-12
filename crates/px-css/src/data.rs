@@ -63,6 +63,8 @@ use std::cell::Cell;
 
 use px_dom::{Arena, NodeId};
 use style::data::{ElementDataMut, ElementDataRef, ElementDataWrapper};
+use style::properties::PropertyDeclarationBlock;
+use style::shared_lock::Locked;
 use style::values::AtomIdent;
 
 /// One element's style data, plus the bit that says whether stylo considers it
@@ -112,6 +114,14 @@ struct Slot {
 struct Names {
     id: Option<AtomIdent>,
     classes: Vec<AtomIdent>,
+    /// The parsed `style` attribute.
+    ///
+    /// Here for the same reason `id` is: `TElement::style_attribute` returns an
+    /// `ArcBorrow`, so the parsed block must already exist somewhere with a
+    /// stable address. Parsed once when the table is built rather than on every
+    /// cascade, which also means a malformed attribute is reported once instead
+    /// of re-parsed per pass.
+    style_attribute: Option<style::servo_arc::Arc<Locked<PropertyDeclarationBlock>>>,
 }
 
 /// The traversal bits stylo keeps per element.
@@ -194,15 +204,45 @@ impl StyleData {
         let mut slots = Vec::new();
         slots.resize_with(arena.slot_count(), Slot::default);
         let mut table = Self { slots };
-        table.intern_names(arena);
+        table.intern_names(arena, None);
         table
+    }
+
+    /// Size a table for `arena`, parsing inline `style` attributes as well.
+    ///
+    /// Separate from [`Self::for_arena`] because parsing needs a base URL, a
+    /// quirks mode and the shared lock — the caller's, not ours — and most of this
+    /// crate's own tests have no opinion about any of them.
+    #[must_use]
+    pub fn for_arena_with_style_attributes(
+        arena: &Arena,
+        parser: &StyleAttributeParser<'_>,
+    ) -> Self {
+        let mut slots = Vec::new();
+        slots.resize_with(arena.slot_count(), Slot::default);
+        let mut table = Self { slots };
+        table.intern_names(arena, Some(parser));
+        table
+    }
+
+    /// `TElement::style_attribute`.
+    #[must_use]
+    pub fn style_attribute_of(
+        &self,
+        id: NodeId,
+    ) -> Option<style::servo_arc::ArcBorrow<'_, Locked<PropertyDeclarationBlock>>> {
+        self.slot(id)?
+            .names
+            .style_attribute
+            .as_ref()
+            .map(style::servo_arc::Arc::borrow_arc)
     }
 
     /// Intern every element's `id` and `class` once, before the pass.
     ///
     /// Walks the arena from the document rather than scanning slots, so a retired
     /// slot's leftover contents cannot be read as a live element's names.
-    fn intern_names(&mut self, arena: &Arena) {
+    fn intern_names(&mut self, arena: &Arena, style_attrs: Option<&StyleAttributeParser<'_>>) {
         let document = arena.document();
         let ids: Vec<NodeId> = core::iter::once(document)
             .chain(arena.descendants(document))
@@ -228,6 +268,14 @@ impl StyleData {
                         .split_ascii_whitespace()
                         .map(AtomIdent::from)
                         .collect();
+                } else if attr.name.local == html5ever::local_name!("style") {
+                    // Parsed only if the caller supplied a parser. A table built
+                    // without one simply has no inline style, which is what
+                    // `StyleData::for_arena` produces for the unit tests that do
+                    // not care about the cascade.
+                    if let Some(parser) = style_attrs {
+                        slot.names.style_attribute = Some(parser.parse(&attr.value));
+                    }
                 }
             }
         }
@@ -394,6 +442,55 @@ impl StyleData {
                 .selector_flags
                 .set(selectors::matching::ElementSelectorFlags::empty());
         }
+    }
+}
+
+/// What parsing an inline `style` attribute needs, collected so the table does
+/// not have to know about URLs or locks.
+///
+/// The lock must be the engine's: stylo reads the resulting declarations through
+/// a guard derived from `TDocument::shared_lock`, and a block wrapped in a
+/// different lock is a block the cascade cannot read. That is the same trap
+/// `StyleRoot::new` documents, one level down.
+pub struct StyleAttributeParser<'a> {
+    url_data: &'a style::stylesheets::UrlExtraData,
+    shared_lock: &'a style::shared_lock::SharedRwLock,
+    quirks_mode: style::context::QuirksMode,
+}
+
+impl<'a> StyleAttributeParser<'a> {
+    /// Collect what parsing needs.
+    #[must_use]
+    pub fn new(
+        url_data: &'a style::stylesheets::UrlExtraData,
+        shared_lock: &'a style::shared_lock::SharedRwLock,
+        quirks_mode: style::context::QuirksMode,
+    ) -> Self {
+        Self {
+            url_data,
+            shared_lock,
+            quirks_mode,
+        }
+    }
+
+    /// Parse one attribute value into a lock-wrapped declaration block.
+    ///
+    /// No error path. A malformed declaration inside a `style` attribute is
+    /// discarded and the rest applies, which is what CSS Syntax requires — an
+    /// attribute that failed as a unit would drop working declarations because of
+    /// a neighbour using a property this engine has not implemented.
+    fn parse(&self, value: &str) -> style::servo_arc::Arc<Locked<PropertyDeclarationBlock>> {
+        let block = style::properties::declaration_block::parse_style_attribute(
+            value,
+            self.url_data,
+            // No error reporter: parse errors in a page's markup are the page's
+            // business, and a browser that logged every one would be unusable on
+            // the real web.
+            None,
+            self.quirks_mode,
+            style::stylesheets::CssRuleType::Style,
+        );
+        style::servo_arc::Arc::new(self.shared_lock.wrap(block))
     }
 }
 
