@@ -52,4 +52,9 @@ px-dom = { path = "../px-dom", version = "0.0.0" }
 [dev-dependencies]
 # Reading tests/properties.toml, so the fixture table and the manifest the gate
 # checks cannot drift apart. Dev-only: nothing in the shipping crate parses TOML.
-toml = "0.9"
+#
+# Pinned to the version already in the closure, not the newest. `toml = "0.9"`
+# resolved a *second* copy alongside stylo's 1.1, which added three crates and 55
+# unsafe lines to the audit surface for a test helper. Matching the existing
+# version adds nothing at all.
+toml = "1.1"
