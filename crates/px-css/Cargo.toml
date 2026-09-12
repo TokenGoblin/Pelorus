@@ -43,4 +43,13 @@ euclid = "0.22.14"
 app_units = "0.7.8"
 # UrlExtraData wraps a url::Url; same version stylo resolves to.
 url = "2.5.8"
+# Several CSS properties are pref'd off in stylo's servo build with no signal when
+# they are -- see enable_the_css_this_engine_claims_to_support in src/engine.rs.
+# Already in the closure; named here so the prefs can be set.
+stylo_static_prefs = "0.21.0"
 px-dom = { path = "../px-dom", version = "0.0.0" }
+
+[dev-dependencies]
+# Reading tests/properties.toml, so the fixture table and the manifest the gate
+# checks cannot drift apart. Dev-only: nothing in the shipping crate parses TOML.
+toml = "0.9"

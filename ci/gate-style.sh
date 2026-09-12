@@ -60,9 +60,20 @@ fi
 # anything going red.
 # ---------------------------------------------------------------------------
 
+# `property-sweep` is not a §9 gate item. It is here because without it the
+# property-set floor below is satisfiable by a manifest full of properties
+# nothing exercises -- and this gate's own comment calls that worse than not
+# listing them, because it reads as coverage.
+#
+# It earned its place on the first run: eight of the sixty-four properties did
+# not cascade. Four were a fixture error (CSS computes border-*-width to zero
+# while border-*-style is none) and four were stylo prefs -- grid and
+# writing-mode are off by default in the servo build, and a declaration for a
+# pref'd-off property parses, cascades nothing, and reports nothing.
 SUITES="
 computed-style::computed_::crates/px-css/tests/computed.rs
 css-cascade::cascade_::crates/px-css/tests/cascade.rs
+property-sweep::properties_::crates/px-css/tests/properties.rs
 "
 
 ignored_tests="$(cargo test --workspace --locked -- --list --ignored 2>/dev/null \

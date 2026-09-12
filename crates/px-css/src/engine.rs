@@ -93,6 +93,8 @@ impl StyleEngine {
     /// A style engine for a viewport of `width` × `height` CSS pixels.
     #[must_use]
     pub fn new(width: f32, height: f32, quirks_mode: QuirksMode) -> Self {
+        enable_the_css_this_engine_claims_to_support();
+
         let viewport = euclid::Size2D::new(width, height);
         let device = style::device::Device::new(
             MediaType::screen(),
@@ -487,4 +489,34 @@ fn mark_thread_as_layout() {
             style::thread_state::initialize(style::thread_state::ThreadState::LAYOUT);
         });
     });
+}
+
+/// Turn on the stylo features this engine's property set depends on.
+///
+/// **Several CSS properties are pref'd off in stylo's servo build and there is no
+/// signal when one is.** A declaration for a disabled property parses without
+/// complaint, cascades nothing, and leaves the initial value in place — which on
+/// a page looks like a layout bug rather than a missing feature, and in a test
+/// looks like a pass.
+///
+/// Found by the sweep in `crates/px-css/tests/properties.rs`, which declares a
+/// value for every property in the defined set and asserts the computed value
+/// moved. Eight of sixty-four did not. Four were a fixture error of mine — CSS
+/// computes `border-*-width` to zero while `border-*-style` is `none`. The other
+/// four were these prefs:
+///
+/// - `layout.grid.enabled` gates every `grid-*` property, and the manifest names
+///   four because Phase 7 is grid.
+/// - `layout.writing-mode.enabled` gates `writing-mode`, which Phase 6 needs for
+///   logical properties and which `px-dom` already produces documents requiring.
+///
+/// Read from `properties/longhands.toml`, where each carries
+/// `servo_pref = "..."`, rather than guessed from the symptom.
+///
+/// Process-global atomics, so setting them repeatedly is harmless and there is no
+/// ordering hazard — but they are set here, in the constructor, because an engine
+/// that has been built is an engine whose property set should work.
+fn enable_the_css_this_engine_claims_to_support() {
+    stylo_static_prefs::set_pref!("layout.grid.enabled", true);
+    stylo_static_prefs::set_pref!("layout.writing-mode.enabled", true);
 }
