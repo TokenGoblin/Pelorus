@@ -305,6 +305,92 @@ fn layout_reftest_the_subset_is_present_and_paired() {
 
 /// The corpus matches at or above the pinned floor, and no excluded pair fails
 /// for a reason the exclusion does not name.
+/// Every failing pair, ordered by how close it is to matching.
+///
+/// `cargo test -p px-layout --test reftest -- --ignored --nocapture layout_reftest_report`
+///
+/// Ignored because it is an instrument, not an assertion: it always "passes", and
+/// running it on every build would print a hundred lines nobody asked for.
+///
+/// It exists because the alternative is writing it again. This diagnostic has been
+/// hand-written and deleted twice — once to find that all of a container's inline
+/// text was being laid out before all of its block children, and once to find that
+/// `display: flow-root` was being thrown away. Both times the finding was in the
+/// first three lines of its output. A tool worth writing twice is worth committing.
+///
+/// `DIAG=<test filename>` dumps one pair's two fragment trees instead, which is
+/// the second thing wanted every time: the count says which pair to look at and
+/// the trees say what is wrong with it.
+#[test]
+#[ignore = "a diagnostic, not an assertion -- run it with --ignored"]
+fn layout_reftest_report() {
+    if let Ok(name) = std::env::var("DIAG") {
+        report_one(&name);
+        return;
+    }
+
+    let mut failing = Vec::new();
+    for pair in pairs() {
+        let (Some(test), Some(reference)) = (layout_file(&pair.test), layout_file(&pair.reference))
+        else {
+            println!("no layout: {}", pair.name);
+            continue;
+        };
+        if test == reference {
+            continue;
+        }
+        // How many rectangles one side has that the other does not, both ways.
+        // A near-zero difference is a pair that needs one thing fixed; a large one
+        // is a pair that needs a feature.
+        let differing = test.iter().filter(|r| !reference.contains(r)).count()
+            + reference.iter().filter(|r| !test.contains(r)).count();
+        failing.push((differing, test.len(), reference.len(), pair.name));
+    }
+    failing.sort();
+
+    println!("{} pairs do not match:", failing.len());
+    for (differing, test, reference, name) in &failing {
+        println!("  off-by {differing:<3} ({test} vs {reference} boxes)  {name}");
+    }
+}
+
+/// Dump both fragment trees of one pair, with the source that produced them.
+fn report_one(name: &str) {
+    for pair in pairs() {
+        if pair.name != name {
+            continue;
+        }
+        for (label, path) in [("TEST", &pair.test), ("REFERENCE", &pair.reference)] {
+            println!("===== {label}: {}", path.display());
+            println!("{}", std::fs::read_to_string(path).unwrap_or_default());
+            let Some(rects) = layout_file(path) else {
+                println!("(did not lay out)");
+                continue;
+            };
+            for (inline, block, width, height) in rects {
+                println!(
+                    "  {:>8} {:>8} {:>8} {:>8}",
+                    px_of(inline),
+                    px_of(block),
+                    px_of(width),
+                    px_of(height)
+                );
+            }
+        }
+        return;
+    }
+    println!("no pair named {name}");
+}
+
+/// An `Au` as CSS pixels, for reading.
+///
+/// Integer division, so a fractional position reads as its whole part. That is
+/// enough for a diagnostic and keeps `f32` out of a crate whose gate forbids it —
+/// this file is a test rather than the library, but the habit is the point.
+fn px_of(value: Au) -> String {
+    format!("{}px", value.0 / 60)
+}
+
 /// The match rate per corpus directory, as printable lines.
 ///
 /// Not asserted on — `MATCH_FLOOR` is the ratchet and a per-directory floor would
