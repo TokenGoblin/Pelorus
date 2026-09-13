@@ -164,7 +164,7 @@ fn run(url: &str, find: Option<&str>, show_tree: bool) -> Result<(), String> {
         println!("title   {title}");
     }
 
-    let text = visible_text(&arena);
+    let text = visible_text(&arena, &style_root);
     println!("text    {} characters", text.len());
 
     if let Some(needle) = find {
@@ -341,36 +341,111 @@ fn document_title(arena: &px_dom::Arena) -> Option<String> {
     None
 }
 
-/// The document's visible text, with `<script>` and `<style>` contents removed.
+/// The document's visible text.
 ///
-/// Without the exclusion a page's JavaScript is "text on the page", which makes
-/// every search match its own source and every character count meaningless.
-fn visible_text(arena: &px_dom::Arena) -> String {
-    let document = arena.document();
+/// "Visible" means what a reader would see, which is a question about computed
+/// style and not about tag names. An earlier version asked about tag names only —
+/// it skipped `<script>`, `<style>` and `<head>` — and that is not the same claim.
+/// `apple.com` reported **103,514 characters** of visible text on its home page,
+/// most of it inside `display: none` subtrees: hidden localisations, collapsed
+/// menus, and markup a reader never meets. `search` below promises that a match is
+/// "something a reader would see", and that promise was false.
+///
+/// So the filter is `display: none` on the node or any ancestor, read from the
+/// computed style Phase 5 resolves and Phase 6 now depends on. The tag-name check
+/// stays for `<head>`, whose children a user-agent stylesheet would hide but this
+/// one only mostly does.
+///
+/// It is still not the *rendered* text: `visibility: hidden`, zero-size boxes and
+/// content clipped by `overflow` all count here, and the real answer comes from
+/// walking the fragment tree once fragments carry their text, which is Phase 9's.
+/// This is the closest approximation available to a box tree that does not yet
+/// know what is written in it.
+fn visible_text(arena: &px_dom::Arena, root: &px_css::view::StyleRoot) -> String {
+    let Some(display_longhand) = style::properties::PropertyId::parse_unchecked("display", None)
+        .ok()
+        .and_then(|id| id.longhand_id())
+    else {
+        return String::new();
+    };
+
     let mut out = String::new();
+    px_css::view::with_dom(arena, root, |dom| {
+        for id in core::iter::once(arena.document()).chain(arena.descendants(arena.document())) {
+            let Some(node) = arena.get(id) else { continue };
+            let Some(text) = node.text() else { continue };
 
-    for id in core::iter::once(document).chain(arena.descendants(document)) {
-        let Some(node) = arena.get(id) else { continue };
-        let Some(text) = node.text() else { continue };
+            let hidden = core::iter::once(id)
+                .chain(arena.ancestors(id))
+                .any(|ancestor| is_hidden(dom, arena, ancestor, display_longhand));
+            if hidden {
+                continue;
+            }
 
-        let inside_invisible = arena.ancestors(id).any(|ancestor| {
-            arena.get(ancestor).is_some_and(|n| {
-                n.element_name().is_some_and(|q| {
-                    q.local == html5ever::local_name!("script")
-                        || q.local == html5ever::local_name!("style")
-                        || q.local == html5ever::local_name!("head")
-                })
-            })
-        });
-        if inside_invisible {
-            continue;
+            out.push_str(text);
+            out.push(' ');
         }
-
-        out.push_str(text);
-        out.push(' ');
-    }
+    });
 
     px_layout::inline::collapse_whitespace(&out)
+}
+
+/// Whether this node hides its subtree from a reader.
+///
+/// Three elements by name and everything else by computed `display`, which is the
+/// property that actually decides. The three are explained at the check itself.
+fn is_hidden(
+    dom: px_css::view::Dom<'_>,
+    arena: &px_dom::Arena,
+    id: px_dom::NodeId,
+    display_longhand: style::properties::LonghandId,
+) -> bool {
+    let Some(node) = arena.get(id) else {
+        return false;
+    };
+    let Some(name) = node.element_name() else {
+        return false;
+    };
+    // Three by name, because none of them is hidden by `display` and all three
+    // are invisible to a reader for reasons the box tree cannot express.
+    //
+    // `<head>`'s contents are hidden by a user-agent stylesheet rather than by
+    // anything in the document, and this tool's stylesheet names only some of
+    // them.
+    //
+    // `<noscript>` is the interesting one, and it was found by pointing this at
+    // apple.com. When scripting is *enabled* -- which is what html5ever assumes,
+    // and what any browser a reader uses does -- a `<noscript>` element's contents
+    // are parsed as **raw text**, not as markup. So its 49 `<noscript>` blocks
+    // became 49 text nodes each holding the source of a `<picture>` element, and
+    // `<pictur` turned up in the middle of this tool's "visible text". It is not
+    // text, it is not visible, and it is not even content: it is the fallback for
+    // a reader this page does not have.
+    //
+    // `<template>` is inert for the same kind of reason -- its contents are a
+    // document fragment that nothing renders until script clones it.
+    if name.local == html5ever::local_name!("head")
+        || name.local == html5ever::local_name!("noscript")
+        || name.local == html5ever::local_name!("template")
+    {
+        return true;
+    }
+
+    let Some(view) = dom.node(id) else {
+        return false;
+    };
+    let Some(element) = px_css::dom::StyleElement::new(view) else {
+        return false;
+    };
+    let Some(data) = style::dom::TElement::borrow_data(&element) else {
+        return false;
+    };
+    // Serialised rather than compared against a constant, for the reason
+    // `report_display_values` gives: stylo's `Display` is a bitfield whose `Debug`
+    // is a number.
+    data.styles.primary().computed_value_to_string(
+        style::properties::PropertyDeclarationId::Longhand(display_longhand),
+    ) == "none"
 }
 
 /// Count the computed `display` of every element and print the distribution.
