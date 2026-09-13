@@ -55,19 +55,25 @@ const VIEWPORT_PX: i32 = 800;
 /// the engine doing anything, and a reference that reaches the same rendering
 /// through deliberately different geometry, which fails while being correct.
 ///
-/// Two entries, both the second of ADR 029's named cases and both of the same
-/// shape — which is the useful thing about them, because that shape is how every
-/// out-of-flow reftest in the suite is written. A test puts a box out of flow and
-/// its reference puts the same box *in* flow at the position the test should have
-/// produced. The box under test then matches exactly while every ancestor's height
-/// differs, because an out-of-flow box contributes nothing to its parent's
-/// `height: auto` and an in-flow one does. Both were read line by line and both
-/// were confirmed to match on the box the test is about.
+/// Three entries, all the second of ADR 029's named cases and all one shape: the
+/// reference draws the same picture with fewer boxes, so every rectangle it draws
+/// is present in the test and the test draws more. The engine can be exactly right
+/// and the comparison still fail.
 ///
-/// This is a limit on ADR 029's oracle rather than a gap in the engine, and it is
-/// worth writing down because it is systematic: absolute positioning cost three
-/// matching pairs and gained none, and two of the three are this. The ADR's
-/// Verification section should say so.
+/// It arrives two ways. A CSS 2.1 reference is very often "one green box of the
+/// right size" where the test builds the same rendering out of a parent, a child
+/// and a footer that happen to be contiguous. And for any out-of-flow feature it is
+/// unavoidable rather than stylistic: a reftest for `float` or `position: absolute`
+/// puts the same box *in* flow in the reference, so the reference's ancestors
+/// contain it and the test's do not.
+///
+/// All three were read rectangle by rectangle, and each entry says which ones
+/// agree. The harness marks the shape `SUPERSET` in its report, but the mark is
+/// triage rather than grounds for an entry: a test that draws boxes the reference
+/// does not may equally be one where the engine drew a box it should not have.
+///
+/// If this grows past a small fraction of the corpus, ADR 029's central bet is
+/// wrong and its Verification section says so.
 const EXPECTED_FAILURES: &[(&str, &str)] = &[
     (
         "positioning/absolute-non-replaced-min-max-001.html",
@@ -75,6 +81,16 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[
          max-width and all. The reference's square is in flow, so its body is 51 \
          tall against the test's 19 and its html 75 against 51. Whole-geometry \
          comparison cannot equate the two, and the rendering is identical.",
+    ),
+    (
+        "normal-flow/margin-collapse-min-height-001.html",
+        "Read rectangle by rectangle: the five the reference draws are all present \
+         and identical, and the three extra ones are the test's own parent, child \
+         and footer where the reference draws a single 150px div covering them. \
+         They are contiguous -- parent (8, 51, 100, 100) then footer \
+         (8, 151, 100, 50) against the reference's (8, 51, 100, 150) -- which is \
+         the whole of what the test asserts, that min-height stops a 550px bottom \
+         margin reaching the footer.",
     ),
     (
         "floats/float-with-absolutely-positioned-child-with-static-inset.html",
@@ -494,13 +510,25 @@ fn report() {
         // is a pair that needs a feature.
         let differing = test.iter().filter(|r| !reference.contains(r)).count()
             + reference.iter().filter(|r| !test.contains(r)).count();
-        failing.push((differing, test.len(), reference.len(), pair.name));
+        // Every rectangle the reference draws is present in the test, and the
+        // test draws more. That is the signature of a reference that renders the
+        // same picture with fewer boxes -- "one green box of the right size" is
+        // how a great many CSS 2.1 references are written -- and it is the shape
+        // whole-geometry comparison cannot equate however correct the engine is.
+        let superset = reference.iter().all(|r| test.contains(r));
+        failing.push((
+            differing,
+            test.len(),
+            reference.len(),
+            if superset { "SUPERSET" } else { "        " },
+            pair.name,
+        ));
     }
     failing.sort();
 
     println!("{} pairs do not match:", failing.len());
-    for (differing, test, reference, name) in &failing {
-        println!("  off-by {differing:<3} ({test} vs {reference} boxes)  {name}");
+    for (differing, test, reference, mark, name) in &failing {
+        println!("  off-by {differing:<3} ({test} vs {reference} boxes) {mark} {name}");
     }
 }
 

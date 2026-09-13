@@ -118,12 +118,41 @@ that is when a `-ref` comparison becomes a real reftest.
 since WPT moved away from `.xht`, which skews towards recently-specified
 behaviour and away from the CSS2.1 core the `.xht` bulk covers.
 
+## What Phase 6 found, and what it costs
+
+This ADR named two kinds of pair the comparison method would get wrong: a
+paint-only difference that passes without the engine doing anything, and a
+reference that reaches the same rendering through deliberately different geometry.
+The second turned out to have a **shape**, and the shape is common enough to be
+worth writing down rather than meeting one pair at a time.
+
+A CSS 2.1 reference is very often "one green box of the right size". Where the
+test builds its rendering out of several boxes — a parent, a child and a footer
+that happen to be contiguous — the reference draws one box covering all three. Every
+rectangle the reference draws is then present in the test, and the test draws more.
+The engine can be exactly right and the comparison still fails.
+
+The same shape arises for every out-of-flow feature, and there it is unavoidable
+rather than stylistic: a reftest for `float` or `position: absolute` is written by
+putting the same box *in* flow in the reference, so that the reference's ancestors
+contain it and the test's do not. Absolute positioning cost three matching pairs
+and gained none for this reason, with the box under test matching exactly in each.
+
+The reftest harness marks these `SUPERSET` in its report, which is a triage aid
+rather than an exclusion: a test that draws boxes the reference does not may also
+be a test whose engine drew a box it should not have. Eight of the subset's
+failures carried the mark when Phase 6 closed its box-generation work; two are in
+`EXPECTED_FAILURES` with the specific rectangles that agree written down, and the
+rest are unread.
+
 ## Verification
 
 Wrong if the exclusion list grows past a small fraction of the subset, which
 would mean geometry comparison is not a good proxy for the reftest assertion
 after all rather than that a few tests are unusual. The pinned count is what makes
-that visible.
+that visible. **Three of 105 at the end of Phase 6.** The paragraph above is the
+early warning: if the `SUPERSET` count keeps climbing while the engine is getting
+more correct, this decision is the thing that is wrong.
 
 Wrong if a test passes here and fails a real reftest run at Phase 8 for a reason
 other than paint. That is the check this decision is ultimately betting on, and it

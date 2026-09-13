@@ -166,6 +166,15 @@ struct Tables {
     /// the width is resolved. The block axis is resolved on the way up, so the
     /// bounds have to wait there with everything else.
     block_bounds: Vec<Bounds>,
+    /// Whether this box's own two margins are adjoining to **each other**.
+    ///
+    /// §8.3.1's third case: a box with no border, no padding, no line boxes and no
+    /// content height has nothing between its top margin and its bottom one, so
+    /// the two are one margin — and that one goes on collapsing with the box's
+    /// neighbours in both directions. An empty `<div>` between two paragraphs is
+    /// the everyday case, and without this it separates them by two collapsed
+    /// margins instead of one.
+    self_collapsing: Vec<bool>,
     /// This box's outer margins *after* collapsing with its own children.
     ///
     /// §8.3.1: a box with no border or padding between it and its first in-flow
@@ -211,6 +220,7 @@ impl Tables {
             padding_box_inline: vec![viewport_inline_size],
             absolute: vec![None],
             block_bounds: vec![Bounds::NONE],
+            self_collapsing: vec![false],
             collapsed_margins: vec![(Au(0), Au(0))],
             clear_sides: vec![None],
             float_sides: vec![None],
@@ -229,6 +239,7 @@ impl Tables {
             self.padding_box_inline.push(Au(0));
             self.absolute.push(None);
             self.block_bounds.push(Bounds::NONE);
+            self.self_collapsing.push(false);
             self.collapsed_margins.push((Au(0), Au(0)));
             self.clear_sides.push(None);
             self.float_sides.push(None);
@@ -735,6 +746,23 @@ pub fn layout_document(
                         && own_edges.is_some_and(|e| {
                             e.border.block_start == Au(0) && e.padding.block_start == Au(0)
                         });
+                    // CSS 2.2 §8.3.1, quoted because the `min-height` half of it
+                    // is easy to over-apply:
+                    //
+                    // > The bottom margin of an in-flow block box with a 'height'
+                    // > of 'auto' collapses with its last in-flow block-level
+                    // > child's bottom margin, if: the box has no bottom padding,
+                    // > and the box has no bottom border, and the child's bottom
+                    // > margin neither collapses with a top margin that has
+                    // > clearance, nor (if the box's min-height is non-zero) with
+                    // > the box's top margin.
+                    //
+                    // So a non-zero `min-height` does *not* on its own stop the
+                    // bottom margin collapsing out. It stops it only when the
+                    // child's bottom margin would also reach this box's top margin
+                    // -- when the content collapses straight through -- and that
+                    // is not known until the children have been stacked. The two
+                    // conditions that are knowable now are here; the rest is below.
                     let bottom_adjoining = !is_context_root
                         && tables
                             .specified_block_sizes
@@ -745,6 +773,12 @@ pub fn layout_document(
                         && own_edges.is_some_and(|e| {
                             e.border.block_end == Au(0) && e.padding.block_end == Au(0)
                         });
+
+                    let bounds = tables
+                        .block_bounds
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(Bounds::NONE);
 
                     // The child margins hoisted out of this box and into its own.
                     let mut hoisted_top = Au(0);
@@ -888,6 +922,44 @@ pub fn layout_document(
                             .copied()
                             .unwrap_or((kid_margin.block_start, kid_margin.block_end));
 
+                        // §8.3.1's third case. A self-collapsing box has its own
+                        // two margins adjoining each other, so it contributes one
+                        // margin rather than two and no height at all -- the
+                        // collapse runs straight through it to the next sibling.
+                        //
+                        // Its top border edge goes where it would have been if the
+                        // box had a non-zero bottom border, which the spec says in
+                        // as many words: the margin *before* it still applies, and
+                        // only the one after it is absorbed.
+                        if tables
+                            .self_collapsing
+                            .get(kid.index())
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            let (position, carried) = if first_in_flow && top_adjoining {
+                                // Adjoining this box's own top margin as well, so
+                                // the whole thing leaves the box: nothing of it
+                                // remains inside to push the next sibling down.
+                                hoisted_top = collapse(kid_top, kid_bottom);
+                                (Au(0), Au(0))
+                            } else if first_in_flow {
+                                (kid_top, collapse(kid_top, kid_bottom))
+                            } else {
+                                let before = collapse(pending_margin, kid_top);
+                                (before, collapse(before, kid_bottom))
+                            };
+                            first_in_flow = false;
+                            if let Some(kid_fragment) = tree.get_mut(kid) {
+                                kid_fragment.block_offset = content_block_start + cursor + position;
+                                kid_fragment.inline_offset =
+                                    content_inline_start + kid_margin.inline_start;
+                            }
+                            pending_margin = carried;
+                            kids.push(kid);
+                            continue;
+                        }
+
                         // Margin collapsing between siblings, per CSS 2.1 §8.3.1.
                         // Two adjoining vertical margins collapse into one whose
                         // size is the larger of the two -- or, when they have
@@ -935,13 +1007,33 @@ pub fn layout_document(
                     // The last in-flow child's bottom margin, which is either
                     // inside this box's content height or adjoining this box's own
                     // bottom margin and therefore outside it.
-                    let hoisted_bottom = if bottom_adjoining {
+                    let mut hoisted_bottom = if bottom_adjoining {
                         pending_margin
                     } else {
                         cursor += pending_margin;
                         Au(0)
                     };
 
+                    // §8.3.1's third condition, now that the children have been
+                    // stacked: the content collapsed straight through, so the last
+                    // child's bottom margin has reached this box's *top* margin,
+                    // and a non-zero `min-height` stops it collapsing out.
+                    let collapsed_through = top_adjoining && cursor == Au(0);
+                    if collapsed_through && bounds.min != Au(0) {
+                        cursor += hoisted_bottom;
+                        hoisted_bottom = Au(0);
+                    }
+
+                    // §8.3.1: this box's own two margins are adjoining when
+                    // nothing at all separates them -- no border, no padding, and
+                    // no content with height, which covers "no line boxes" and
+                    // "height is 0 or auto" together because either would have put
+                    // something in `cursor`. A formatting context root is excluded
+                    // for the same reason it does not collapse with its children.
+                    //
+                    // `content` below is the clamped height, so a `min-height` that
+                    // raises the box above zero disqualifies it, which §8.3.1 also
+                    // requires and which reading `cursor` alone would miss.
                     let own_margin = own_edges.map_or(LogicalEdges::ZERO, |e| e.margin);
                     // What this box looks like to *its* parent. A box whose margins
                     // collapse straight through -- no border, no padding, no
@@ -951,48 +1043,86 @@ pub fn layout_document(
                     // paragraphs therefore separates them by the sum of two
                     // collapsed margins rather than by one. Named rather than
                     // silent, and in docs/backlog.md.
-                    if let Some(slot) = tables.collapsed_margins.get_mut(fragment.index()) {
-                        *slot = (
-                            collapse(own_margin.block_start, hoisted_top),
-                            collapse(own_margin.block_end, hoisted_bottom),
-                        );
-                    }
-
+                    let specified = tables
+                        .specified_block_sizes
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(None);
                     // §10.6.7: a box that establishes a block formatting context
                     // and has `height: auto` stretches to contain its own floats.
                     // A box that does *not* establish one leaves them to overflow,
                     // which looks like a bug in every rendering and is the rule --
                     // it is why `display: flow-root` exists, and why the clearfix
                     // hack existed before it did.
-                    if tables
-                        .formatting_context_roots
-                        .get(fragment.index())
-                        .copied()
-                        .unwrap_or(false)
-                    {
+                    //
+                    // Before the height is resolved, because a float is content:
+                    // a box stretched to contain one is not zero-high and so is not
+                    // self-collapsing.
+                    if is_context_root {
                         cursor = cursor.max(floats.lowest_edge(None));
                     }
 
+                    // §10.7, after §10.6: the content height is resolved first and
+                    // bounded second.
+                    let auto_height = specified.unwrap_or(cursor);
+                    let content = bounds.clamp(auto_height);
+
+                    // §10.7's re-run rule, and the whole of what
+                    // `margin-collapse-min-height-001` is about:
+                    //
+                    // > if the resulting height is smaller than 'min-height', the
+                    // > rules above are applied again, but this time using the
+                    // > value of 'min-height' as the computed value for 'height'
+                    //
+                    // Applied again means `height` is no longer `auto`, and
+                    // §8.3.1's first condition is exactly that -- so the bottom
+                    // margin does not collapse out after all. It stays inside a box
+                    // whose height is now fixed, which means it overflows and
+                    // reaches nothing: a 30px child with a 550px bottom margin in a
+                    // `min-height: 100px` parent puts the next sibling at 100, not
+                    // at 580 and not at 650.
+                    if content != auto_height {
+                        hoisted_bottom = Au(0);
+                    }
+
+                    // §8.3.1's third case: this box's own two margins are adjoining
+                    // when nothing at all separates them -- no border, no padding,
+                    // and no content height, which covers "no line boxes" and
+                    // "height is 0 or auto" together because either would have put
+                    // something in `content`. A formatting context root is excluded
+                    // for the same reason it does not collapse with its children.
+                    //
+                    // `content` is the *clamped* height, so a `min-height` that
+                    // raises the box above zero disqualifies it -- which §8.3.1
+                    // also requires, and which reading `cursor` would have missed.
+                    let self_collapsing = !is_context_root && content == Au(0) && surround == Au(0);
+                    if let Some(slot) = tables.self_collapsing.get_mut(fragment.index()) {
+                        *slot = self_collapsing;
+                    }
+
+                    let (top, bottom) = (
+                        collapse(own_margin.block_start, hoisted_top),
+                        collapse(own_margin.block_end, hoisted_bottom),
+                    );
+                    if let Some(slot) = tables.collapsed_margins.get_mut(fragment.index()) {
+                        // A self-collapsing box reports one margin twice rather
+                        // than two margins, because that is what it has: its parent
+                        // must not advance past it once for the top and again for
+                        // the bottom.
+                        *slot = if self_collapsing {
+                            let both = collapse(top, bottom);
+                            (both, both)
+                        } else {
+                            (top, bottom)
+                        };
+                    }
+
                     tree.set_children(fragment, &kids);
-                    let specified = tables
-                        .specified_block_sizes
-                        .get(fragment.index())
-                        .copied()
-                        .unwrap_or(None);
-                    let bounds = tables
-                        .block_bounds
-                        .get(fragment.index())
-                        .copied()
-                        .unwrap_or(Bounds::NONE);
                     if let Some(f) = tree.get_mut(fragment) {
                         // A specified `height` wins; `auto` takes the content's
                         // block size (§10.6.3). Either way the box's own border
                         // and padding are added, because the fragment records a
                         // border box.
-                        //
-                        // §10.7, after §10.6: the content height is resolved
-                        // first and bounded second.
-                        let content = bounds.clamp(specified.unwrap_or(cursor));
                         f.size.block = content + surround;
                     }
                 }
@@ -2443,6 +2573,63 @@ mod tests {
         assert!(
             blocks.contains(&(px(0), px(0), px(800), px(30))),
             "the initial containing block stops the collapse: {blocks:?}"
+        );
+    }
+
+    /// §8.3.1's third case: an empty box's own two margins are one margin.
+    ///
+    /// The everyday shape is an empty `<div>` between two paragraphs. Without this
+    /// it separates them by two collapsed margins instead of one, and the page is
+    /// visibly too tall in a way that is hard to attribute to the empty div.
+    #[test]
+    fn block_an_empty_box_collapses_its_own_margins_together() {
+        let (tree, _) = layout(
+            "<html><body><div id=a></div><div id=empty></div><div id=c></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 }              #a { height: 10px; margin-bottom: 20px }              #empty { margin: 30px 0 }              #c { margin-top: 10px; height: 10px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert!(
+            blocks.contains(&(px(0), px(40), px(800), px(10))),
+            "all four margins collapse to one 30: 10 of content then 30, not 70:              {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(40), px(800), px(0))),
+            "the empty box sits at the end of the margin before it (§8.3.1's              \"as if it had a non-zero bottom border\"): {blocks:?}"
+        );
+    }
+
+    /// A border stops it: the box is no longer self-collapsing (§8.3.1).
+    ///
+    /// The control. Treating every zero-height box as self-collapsing passes the
+    /// test above and fails this.
+    #[test]
+    fn block_a_border_stops_a_box_self_collapsing() {
+        let (tree, _) = layout(
+            "<html><body><div id=empty></div><div id=c></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 }              #empty { margin: 30px 0; border-top: 1px solid black }              #c { margin-top: 10px; height: 10px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert!(
+            blocks.contains(&(px(0), px(30), px(800), px(1))),
+            "the box is 1px tall and below its own top margin: {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(61), px(800), px(10))),
+            "30 + 1 + collapse(30, 10): the two margins no longer meet: {blocks:?}"
+        );
+    }
+
+    /// `min-height` stops it too, because the box is no longer zero-high.
+    #[test]
+    fn block_a_min_height_stops_a_box_self_collapsing() {
+        let (tree, _) = layout(
+            "<html><body><div id=empty></div><div id=c></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 }              #empty { margin: 30px 0; min-height: 5px }              #c { margin-top: 10px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(65), px(800), px(10))),
+            "30 + 5 + collapse(30, 10): {:?}",
+            rects_of(&tree, FragmentKind::Block)
         );
     }
 
