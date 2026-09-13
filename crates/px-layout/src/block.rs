@@ -60,13 +60,26 @@ enum Step {
         node: NodeId,
         parent: FragmentId,
         slot: usize,
+        /// The fragment this box resolves `position: absolute` against (§10.1).
+        ///
+        /// Threaded through the traversal rather than found by walking back up,
+        /// because there is no parent pointer to walk: the fragment tree stores
+        /// children, and the DOM's ancestors are not where the answer is either —
+        /// it is the nearest *positioned* ancestor, which is a fact about computed
+        /// style rather than about structure.
+        containing_block: FragmentId,
     },
     /// Partition this container's content and schedule it.
     ///
     /// Separate from `Enter` so the initial containing block can use it too: the
     /// ICB is a block container whose children come from the document, and
     /// without this it needed its own copy of the partitioning.
-    Children { fragment: FragmentId, node: NodeId },
+    Children {
+        fragment: FragmentId,
+        node: NodeId,
+        /// The containing block for absolutely positioned content inside this box.
+        containing_block: FragmentId,
+    },
     /// Resolve this box's block size from the fragments its children produced.
     Exit { fragment: FragmentId },
 }
@@ -87,6 +100,14 @@ enum Content {
     InlineRun(String),
     /// A block-level child, which becomes a box of its own.
     Block(NodeId),
+    /// An absolutely positioned child (§9.6), which is removed from the flow
+    /// entirely and attached to its *containing block* rather than to its parent.
+    ///
+    /// Like a float it does not end the run it appears in, and for the same
+    /// reason: §9.2.1.1's anonymous box rule is about in-flow block-level boxes.
+    /// Unlike a float it does not affect anything around it at all — it neither
+    /// shortens a line box nor contributes to any box's height.
+    Absolute(NodeId),
     /// A floated child (§9.5), which becomes a box of its own but stays *inside*
     /// the run it appears in.
     ///
@@ -128,6 +149,17 @@ struct Tables {
     /// Read on the way up, where it decides whether the box's `height: auto`
     /// stretches to contain its own floats (§10.6.7).
     formatting_context_roots: Vec<bool>,
+    /// The inline size of this box's **padding box**.
+    ///
+    /// §10.1: an absolutely positioned box resolves against its containing block's
+    /// padding box, not its content box — the one place in CSS 2.1 where padding
+    /// is inside the containing block rather than outside it, and the reason this
+    /// is a second number rather than `inline_sizes` reused.
+    padding_box_inline: Vec<Au>,
+    /// Where an absolutely positioned fragment goes, resolved after layout.
+    ///
+    /// `None` for every in-flow box. See [`place_absolute`] for why this waits.
+    absolute: Vec<Option<AbsolutePlacement>>,
     /// What `min-height` and `max-height` allow this box's content to be (§10.7).
     ///
     /// The inline axis needs no table: its bounds are applied at `Enter`, where
@@ -176,6 +208,8 @@ impl Tables {
             // The initial containing block is a formatting context root: there
             // is no outer context for a float in it to escape into.
             formatting_context_roots: vec![true],
+            padding_box_inline: vec![viewport_inline_size],
+            absolute: vec![None],
             block_bounds: vec![Bounds::NONE],
             collapsed_margins: vec![(Au(0), Au(0))],
             clear_sides: vec![None],
@@ -192,6 +226,8 @@ impl Tables {
             self.inline_sizes.push(Au(0));
             self.specified_block_sizes.push(None);
             self.formatting_context_roots.push(false);
+            self.padding_box_inline.push(Au(0));
+            self.absolute.push(None);
             self.block_bounds.push(Bounds::NONE);
             self.collapsed_margins.push((Au(0), Au(0)));
             self.clear_sides.push(None);
@@ -259,7 +295,31 @@ impl Bounds {
     }
 }
 
+/// An absolutely positioned box's containing block and its resolved insets.
+///
+/// §10.1 and §10.3.7. Kept until after layout because two of the four numbers it
+/// is resolved against — the containing block's position, and its size along the
+/// block axis — are not known while the box itself is being laid out.
+#[derive(Clone, Copy, Debug)]
+struct AbsolutePlacement {
+    /// The fragment whose padding box the insets are measured from.
+    containing_block: FragmentId,
+    /// `left`, resolved; `None` for `auto`.
+    inline_start: Option<Au>,
+    /// `right`, resolved; `None` for `auto`.
+    inline_end: Option<Au>,
+    /// `top`, resolved; `None` for `auto`.
+    block_start: Option<Au>,
+    /// `bottom`, resolved; `None` for `auto`.
+    block_end: Option<Au>,
+}
+
 /// The resolved box-model edges of one box, in app units.
+///
+/// `Copy`, like everything geometric in this crate: three [`LogicalEdges`], each
+/// four `Au`. Making it move would mean a `.clone()` at every point a box's edges
+/// are both stored and read, which is most of them.
+#[derive(Clone, Copy)]
 struct Edges {
     margin: LogicalEdges,
     border: LogicalEdges,
@@ -327,13 +387,22 @@ pub fn layout_document(
         Step::Children {
             fragment: icb,
             node: arena.document(),
+            // The initial containing block is the containing block of last resort
+            // (§10.1): an absolutely positioned box with no positioned ancestor
+            // resolves against it.
+            containing_block: icb,
         },
     ];
 
     px_css::view::with_dom(arena, root, |dom| {
         while let Some(step) = stack.pop() {
             match step {
-                Step::Enter { node, parent, slot } => {
+                Step::Enter {
+                    node,
+                    parent,
+                    slot,
+                    containing_block,
+                } => {
                     let Some(style) = computed_style(dom, node) else {
                         continue;
                     };
@@ -349,11 +418,25 @@ pub fn layout_document(
                         continue;
                     }
 
-                    let containing = tables
-                        .inline_sizes
-                        .get(parent.index())
-                        .copied()
-                        .unwrap_or(Au(0));
+                    let absolute = is_absolutely_positioned(&style);
+                    // §10.1: an absolutely positioned box resolves against its
+                    // containing block's *padding* box; everything else resolves
+                    // against its parent's content box. The two are the same
+                    // number only when the parent is the containing block and has
+                    // no padding, which is why they are separate tables.
+                    let containing = if absolute {
+                        tables
+                            .padding_box_inline
+                            .get(parent.index())
+                            .copied()
+                            .unwrap_or(Au(0))
+                    } else {
+                        tables
+                            .inline_sizes
+                            .get(parent.index())
+                            .copied()
+                            .unwrap_or(Au(0))
+                    };
                     let mut resolved = resolve_edges(&style, containing);
                     let side = float_side(&style);
 
@@ -364,6 +447,14 @@ pub fn layout_document(
                     // float the full width of the page — indistinguishable from
                     // "floats are not implemented" in a rendering.
                     let content_inline = match side {
+                        // §10.3.7. An absolutely positioned box is solved rather
+                        // than filled: its width comes from the equation relating
+                        // `left`, `width` and `right` to the containing block,
+                        // which is also where its inline position comes from.
+                        _ if absolute => {
+                            let intrinsic = intrinsic_inline_size(dom, arena, node);
+                            absolute_inline_size(&style, containing, &resolved, intrinsic)
+                        }
                         Some(_) if definite_inline_size(&style).is_none() => {
                             let available = containing - resolved.inline_surround();
                             let available = available.max(Au(0));
@@ -392,8 +483,10 @@ pub fn layout_document(
 
                     // §9.5.1 rule 9: `auto` margins on a float are zero, not
                     // centring. A float is shifted to an edge; there is nothing
-                    // for the leftover space to be shared between.
-                    if side.is_none() {
+                    // for the leftover space to be shared between. An absolutely
+                    // positioned box's auto margins are resolved by §10.3.7's own
+                    // equation, which `absolute_inline_size` has already done.
+                    if side.is_none() && !absolute {
                         centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
                     }
 
@@ -409,8 +502,18 @@ pub fn layout_document(
 
                     tables.grow_to(fragment.index());
                     tables.inline_sizes[fragment.index()] = content_inline;
-                    tables.edges[fragment.index()] = resolved;
                     tables.float_sides[fragment.index()] = side;
+                    tables.absolute[fragment.index()] = absolute.then(|| AbsolutePlacement {
+                        containing_block,
+                        inline_start: inline_inset(&style.clone_left(), containing),
+                        inline_end: inline_inset(&style.clone_right(), containing),
+                        block_start: block_inset(&style.clone_top()),
+                        block_end: block_inset(&style.clone_bottom()),
+                    });
+                    tables.padding_box_inline[fragment.index()] =
+                        content_inline + resolved.padding.inline_sum();
+
+                    tables.edges[fragment.index()] = resolved;
                     tables.clear_sides[fragment.index()] = clear_side(&style);
                     tables.formatting_context_roots[fragment.index()] =
                         establishes_formatting_context(&style);
@@ -427,10 +530,26 @@ pub fn layout_document(
                     // Popped in the reverse order: `Children` schedules the
                     // subtree, and `Exit` runs once all of it has.
                     stack.push(Step::Exit { fragment });
-                    stack.push(Step::Children { fragment, node });
+                    stack.push(Step::Children {
+                        fragment,
+                        node,
+                        // §10.1: a positioned box is the containing block for the
+                        // absolutely positioned content inside it. `relative` counts
+                        // -- which is the whole of why anyone writes
+                        // `position: relative` with no offsets.
+                        containing_block: if is_positioned(&style) {
+                            fragment
+                        } else {
+                            containing_block
+                        },
+                    });
                 }
 
-                Step::Children { fragment, node } => {
+                Step::Children {
+                    fragment,
+                    node,
+                    containing_block,
+                } => {
                     let items = partition_content(dom, arena, node);
                     // Only *in-flow* block-level content forces anonymous boxes
                     // (§9.2.1.1); a float is block-level and does not.
@@ -474,6 +593,26 @@ pub fn layout_document(
                                     node: child,
                                     parent: fragment,
                                     slot,
+                                    containing_block,
+                                });
+                            }
+                            Content::Absolute(child) => {
+                                // Kept in its parent's slot sequence rather than
+                                // hoisted to its containing block, because the slot
+                                // is where its **static position** is -- where the
+                                // box would have been in normal flow, which is what
+                                // §10.3.7 uses when `left` and `right` are both
+                                // `auto`. Hoisting lost it, and losing it cost
+                                // three reftest pairs that had been matching.
+                                //
+                                // The containing block is carried alongside instead
+                                // and applied by `place_absolute` once the whole
+                                // tree has coordinates.
+                                stack.push(Step::Enter {
+                                    node: child,
+                                    parent: fragment,
+                                    slot,
+                                    containing_block,
                                 });
                             }
                             Content::InlineRun(text) if !has_block => {
@@ -633,6 +772,47 @@ pub fn layout_document(
                         let Some(Some(kid)) = slots.get(slot).copied() else {
                             continue;
                         };
+
+                        // An absolutely positioned box takes no part in this
+                        // pass (§9.6): it does not move the cursor, does not
+                        // collapse a margin and does not shorten a line. It is
+                        // *placed* here all the same, at the cursor, because that
+                        // is its static position -- the place it would have gone
+                        // had it stayed in flow. `place_absolute` overrides that
+                        // later for whichever axes state an inset.
+                        if tables
+                            .absolute
+                            .get(kid.index())
+                            .copied()
+                            .flatten()
+                            .is_some()
+                        {
+                            let kid_margin = tables
+                                .edges
+                                .get(kid.index())
+                                .map_or(LogicalEdges::ZERO, |e| e.margin);
+                            // The static position is where the box would have been
+                            // as `position: static`, so the margin waiting from the
+                            // previous sibling is part of it -- it would have
+                            // collapsed with this box's own top margin and pushed
+                            // it down. Reading `cursor` alone leaves the box one
+                            // collapsed margin too high, which is how this was
+                            // found: a reference put its square at 51 and the test
+                            // put it at 35, the difference being a paragraph's
+                            // 16px bottom margin.
+                            let static_block = if first_in_flow {
+                                cursor + kid_margin.block_start
+                            } else {
+                                cursor + collapse(pending_margin, kid_margin.block_start)
+                            };
+                            if let Some(kid_fragment) = tree.get_mut(kid) {
+                                kid_fragment.inline_offset =
+                                    content_inline_start + kid_margin.inline_start;
+                                kid_fragment.block_offset = content_block_start + static_block;
+                            }
+                            kids.push(kid);
+                            continue;
+                        }
 
                         // A float is out of flow: it is positioned by the float
                         // context and does not move the cursor, so the in-flow
@@ -821,7 +1001,101 @@ pub fn layout_document(
     })?;
 
     make_offsets_absolute(&mut tree);
+    place_absolute(&mut tree, &tables);
     Some(tree)
+}
+
+/// Move each absolutely positioned box to the insets it asked for (§10.3.7).
+///
+/// # Why this is a pass of its own
+///
+/// An absolutely positioned box is measured from its containing block's padding
+/// box, and two of the four numbers that needs are not available while the box is
+/// being laid out. The containing block's *position* is set by its own parent's
+/// exit visit, which happens after every descendant's; and its block *size* is
+/// resolved from its content, which includes everything after the absolutely
+/// positioned box. So `right` and `bottom` in particular cannot be resolved in the
+/// main traversal at all.
+///
+/// Running after [`make_offsets_absolute`] gives both. Each box is moved by a
+/// delta rather than assigned a position, and the delta is applied to its whole
+/// subtree — the descendants were placed relative to a box that has now moved.
+///
+/// Pre-order, so a containing block is final before anything positioned against it
+/// is read: a containing block is always an ancestor, and an absolutely positioned
+/// box nested inside another is moved by its parent's delta first and then
+/// recomputed against its own containing block, which is the right answer either
+/// way round.
+///
+/// An axis whose insets are both `auto` is left alone, which leaves the box at the
+/// **static position** the stacking pass gave it.
+fn place_absolute(tree: &mut FragmentTree, tables: &Tables) {
+    for (_, id) in tree.in_layout_order() {
+        let Some(placement) = tables.absolute.get(id.index()).copied().flatten() else {
+            continue;
+        };
+        let Some(container) = tree.get(placement.containing_block) else {
+            continue;
+        };
+        let container_edges = tables
+            .edges
+            .get(placement.containing_block.index())
+            .copied()
+            .unwrap_or(Edges::ZERO);
+
+        // The containing block's padding box, in absolute coordinates (§10.1).
+        let origin_inline = container.inline_offset + container_edges.border.inline_start;
+        let origin_block = container.block_offset + container_edges.border.block_start;
+        let padding_inline = container.size.inline - container_edges.border.inline_sum();
+        let padding_block = container.size.block - container_edges.border.block_sum();
+
+        let margin = tables
+            .edges
+            .get(id.index())
+            .map_or(LogicalEdges::ZERO, |e| e.margin);
+        let Some(fragment) = tree.get(id) else {
+            continue;
+        };
+        let size = fragment.size;
+        let (current_inline, current_block) = (fragment.inline_offset, fragment.block_offset);
+
+        let target_inline = match (placement.inline_start, placement.inline_end) {
+            (Some(left), _) => origin_inline + left + margin.inline_start,
+            (None, Some(right)) => {
+                origin_inline + padding_inline - right - margin.inline_end - size.inline
+            }
+            (None, None) => current_inline,
+        };
+        let target_block = match (placement.block_start, placement.block_end) {
+            (Some(top), _) => origin_block + top + margin.block_start,
+            (None, Some(bottom)) => {
+                origin_block + padding_block - bottom - margin.block_end - size.block
+            }
+            (None, None) => current_block,
+        };
+
+        let (delta_inline, delta_block) =
+            (target_inline - current_inline, target_block - current_block);
+        if delta_inline == Au(0) && delta_block == Au(0) {
+            continue;
+        }
+        shift_subtree(tree, id, delta_inline, delta_block);
+    }
+}
+
+/// Move `root` and everything under it by a delta. Iterative, like every walk here.
+fn shift_subtree(tree: &mut FragmentTree, root: FragmentId, inline: Au, block: Au) {
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        // Children first: `get_mut` borrows the tree mutably, so the two cannot
+        // overlap, and copying the ids out is what keeps this from needing a
+        // second traversal.
+        stack.extend_from_slice(tree.children(id));
+        if let Some(fragment) = tree.get_mut(id) {
+            fragment.inline_offset += inline;
+            fragment.block_offset += block;
+        }
+    }
 }
 
 /// Turn parent-relative offsets into offsets from the fragment tree's origin.
@@ -915,6 +1189,112 @@ fn place_run(
     height
 }
 
+/// Whether this box is taken out of flow by `position` (§9.6).
+///
+/// `fixed` is here with `absolute` because the two differ only in which box is the
+/// containing block — the viewport rather than the nearest positioned ancestor —
+/// and this phase has no scrolling for that difference to be visible in. Naming it
+/// rather than leaving it to fall through `_` is the point: it is wrong for a
+/// scrolled page and right for an unscrolled one.
+fn is_absolutely_positioned(style: &ComputedValues) -> bool {
+    use style::computed_values::position::T as Position;
+    matches!(style.clone_position(), Position::Absolute | Position::Fixed)
+}
+
+/// Whether this box is a containing block for absolutely positioned descendants.
+///
+/// §10.1: anything but `static`. `position: relative` with no offsets does nothing
+/// visible and is written on a great many pages for exactly this effect — which is
+/// the whole of what `relative` does here, because §9.4.3's *offsets* are not
+/// implemented. They are two lines for a block box and not implementable at all
+/// for an inline one until there are inline boxes to shift, and shipping the
+/// block half alone made a reference whose `<div>` moved disagree with a test
+/// whose `<span>` did not. `docs/backlog.md` has it.
+fn is_positioned(style: &ComputedValues) -> bool {
+    use style::computed_values::position::T as Position;
+    !matches!(style.clone_position(), Position::Static)
+}
+
+/// §10.3.7's width for an absolutely positioned, non-replaced box.
+///
+/// The section is one equation:
+///
+/// > `left + margin-left + border-left + padding-left + width + padding-right +
+/// > border-right + margin-right + right = width of containing block`
+///
+/// with the rule that exactly one unknown can be solved for. Three cases matter:
+///
+/// - `width` stated — it is used, whatever `left` and `right` say. Over-constrained
+///   is resolved by ignoring `right` (§10.3.7's last rule, for `direction: ltr`).
+/// - `left` and `right` both stated, `width` auto — the equation gives the width,
+///   which is how a `left: 0; right: 0` box stretches.
+/// - otherwise — shrink-to-fit, §10.3.7's second rule, the same rule a float uses.
+fn absolute_inline_size(
+    style: &ComputedValues,
+    containing: Au,
+    edges: &Edges,
+    intrinsic: Intrinsic,
+) -> Au {
+    if let Some(width) = definite_inline_size(style) {
+        return width.max(Au(0));
+    }
+
+    let surround = edges.inline_surround();
+    let left = inline_inset(&style.clone_left(), containing);
+    let right = inline_inset(&style.clone_right(), containing);
+
+    if let (Some(left), Some(right)) = (left, right) {
+        return (containing - left - right - surround).max(Au(0));
+    }
+
+    // Shrink-to-fit against what is left after the stated offset, which is the
+    // available width §10.3.7 names.
+    let available =
+        (containing - left.unwrap_or(Au(0)) - right.unwrap_or(Au(0)) - surround).max(Au(0));
+    let inner = edges.border.inline_sum() + edges.padding.inline_sum();
+    shrink_to_fit(
+        Intrinsic {
+            min: (intrinsic.min - inner).max(Au(0)),
+            max: (intrinsic.max - inner).max(Au(0)),
+        },
+        available,
+    )
+}
+
+/// An inline-axis inset (`left`, `right`), resolved, or `None` for `auto`.
+///
+/// The `anchor()` forms return `None` too. They are css-anchor-position-1, they
+/// need a layout pass that resolves against another element's box, and treating
+/// one as `auto` puts the box at its static position rather than somewhere
+/// arbitrary — which is the least wrong of the available answers and is named
+/// rather than reached by a `_` arm.
+fn inline_inset(inset: &style::values::computed::Inset, containing: Au) -> Option<Au> {
+    use style::values::computed::Inset;
+    match inset {
+        Inset::LengthPercentage(lp) => Some(lp.to_used_value(containing)),
+        Inset::Auto
+        | Inset::AnchorFunction(_)
+        | Inset::AnchorSizeFunction(_)
+        | Inset::AnchorContainingCalcFunction(_) => None,
+    }
+}
+
+/// A block-axis inset (`top`, `bottom`), resolved, or `None`.
+///
+/// A percentage needs the containing block's *height*, which is `auto` while its
+/// content is being measured, so `maybe_to_used_value(None)` declines it — the
+/// same rule §10.7 applies to a percentage `min-height`.
+fn block_inset(inset: &style::values::computed::Inset) -> Option<Au> {
+    use style::values::computed::Inset;
+    match inset {
+        Inset::LengthPercentage(lp) => lp.maybe_to_used_value(None),
+        Inset::Auto
+        | Inset::AnchorFunction(_)
+        | Inset::AnchorSizeFunction(_)
+        | Inset::AnchorContainingCalcFunction(_) => None,
+    }
+}
+
 /// Which floats this box must clear, if any (§9.5.2).
 fn clear_side(style: &ComputedValues) -> Option<crate::float::ClearSide> {
     use style::computed_values::clear::T as Clear;
@@ -982,10 +1362,19 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
             if style.as_ref().is_some_and(|s| is_display_none(s)) {
                 continue;
             }
-            // A float is block-level (stylo blockifies it, §9.7) but out of
-            // flow, so it neither ends the run nor forces an anonymous box.
-            if let Some(style) = style.as_ref().filter(|s| float_side(s).is_some()) {
-                let _ = style;
+            // Out-of-flow boxes are block-level (stylo blockifies both, §9.7)
+            // but neither ends the run nor forces an anonymous box: §9.2.1.1 is
+            // about in-flow block-level content.
+            //
+            // Absolute is tested before float because `position: absolute` wins:
+            // §9.7 computes `float` to `none` on an absolutely positioned box, and
+            // relying on stylo having done that would make the order here look
+            // arbitrary when it is not.
+            if style.as_ref().is_some_and(|s| is_absolutely_positioned(s)) {
+                out.push(Content::Absolute(id));
+                continue;
+            }
+            if style.as_ref().is_some_and(|s| float_side(s).is_some()) {
                 out.push(Content::Float(id));
                 continue;
             }
@@ -1179,6 +1568,11 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
                         // overstates the preferred width of a container whose only
                         // wide thing is a float.
                         Content::Block(child) | Content::Float(child) => blocks.push(child),
+                        // An absolutely positioned box is out of flow and
+                        // contributes nothing to its container's intrinsic sizes
+                        // (§10.3.7 is solved against the containing block, not
+                        // against the content around it).
+                        Content::Absolute(_) => {}
                         Content::InlineRun(text) => {
                             frame.max = frame.max.max(crate::text::measure(&text, font_size));
                             frame.min = frame.min.max(widest_word(&text, font_size));
@@ -1637,6 +2031,164 @@ mod tests {
             .into_iter()
             .filter(|r| *r == rect)
             .count()
+    }
+
+    /// §9.6: an absolutely positioned box is out of flow.
+    ///
+    /// It neither moves its siblings nor contributes to its parent's height, which
+    /// is the whole of what "out of flow" buys and the half that a box laid out in
+    /// normal flow and then moved does not get.
+    #[test]
+    fn block_an_absolute_box_is_out_of_flow() {
+        let (tree, _) = layout(
+            "<html><body><div id=a></div><div id=b></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #a { position: absolute; width: 50px; height: 40px } \
+             #b { height: 30px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert!(
+            blocks.contains(&(px(0), px(0), px(800), px(30))),
+            "the in-flow sibling starts at the top: {blocks:?}"
+        );
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(30))),
+            4,
+            "the ICB, html and body are as tall as the in-flow box alone: {blocks:?}"
+        );
+    }
+
+    /// §10.1: the containing block is the nearest *positioned* ancestor's padding
+    /// box, not the parent's content box.
+    #[test]
+    fn block_an_absolute_box_resolves_against_its_positioned_ancestor() {
+        let (tree, _) = layout(
+            "<html><body><div id=rel><div id=mid><div id=abs></div></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #rel { position: relative; margin-top: 100px; padding: 5px; height: 200px } \
+             #mid { margin-top: 30px } \
+             #abs { position: absolute; left: 10px; top: 20px; width: 40px; height: 40px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        // #rel's border box starts at 100; its padding box starts there too
+        // (no border), so the inset is measured from 100 and 0.
+        assert!(
+            blocks.contains(&(px(10), px(120), px(40), px(40))),
+            "left/top are measured from the positioned ancestor, not from #mid: \
+             {blocks:?}"
+        );
+    }
+
+    /// With no positioned ancestor the containing block is the ICB (§10.1).
+    #[test]
+    fn block_an_absolute_box_falls_back_to_the_initial_containing_block() {
+        let (tree, _) = layout(
+            "<html><body><div id=abs></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             body { margin: 8px } \
+             #abs { position: absolute; left: 0; top: 0; width: 40px; height: 40px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(40), px(40))),
+            "at the viewport corner, not inside body's margin: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.3.7: `left` and `right` together resolve an `auto` width.
+    #[test]
+    fn block_left_and_right_together_stretch_an_auto_width() {
+        let (tree, _) = layout(
+            "<html><body><div id=abs></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #abs { position: absolute; left: 100px; right: 300px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(100), px(0), px(400), px(10))),
+            "800 - 100 - 300: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.3.7: `right` alone positions from the far edge.
+    ///
+    /// This is the half that cannot be resolved during layout at all — it needs
+    /// the containing block's own size, which is not known until after the box
+    /// inside it has been laid out. It is why `place_absolute` is a pass of its
+    /// own.
+    #[test]
+    fn block_right_alone_positions_from_the_end_edge() {
+        let (tree, _) = layout(
+            "<html><body><div id=abs></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #abs { position: absolute; right: 50px; width: 200px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(550), px(0), px(200), px(10))),
+            "800 - 50 - 200: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.3.7: with both insets `auto` the box takes its **static position**.
+    ///
+    /// Where it would have been in normal flow, margins included — the margin
+    /// waiting from the previous sibling would have collapsed with this box's own
+    /// and pushed it down, so reading the cursor alone leaves it one collapsed
+    /// margin too high. That is how this was found: a reference put its square at
+    /// 51 and the test put it at 35, the difference being a paragraph's 16px
+    /// bottom margin.
+    #[test]
+    fn block_an_absolute_box_with_no_insets_takes_its_static_position() {
+        let (tree, _) = layout(
+            "<html><body><div id=first></div><div id=abs></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #first { height: 20px; margin-bottom: 16px } \
+             #abs { position: absolute; width: 40px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(36), px(40), px(10))),
+            "20 of content plus 16 of collapsed margin: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.3.7: an `auto` width with one inset shrinks to fit.
+    #[test]
+    fn block_an_absolute_box_with_an_auto_width_shrinks_to_fit() {
+        let (tree, _) = layout(
+            "<html><body><div id=abs>abcd</div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #abs { position: absolute; left: 10px; font-size: 10px; line-height: 20px }",
+        );
+        // Four characters at 5px. An auto width that filled would be 790.
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(10), px(0), px(20), px(20))),
+            "{:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// An absolutely positioned box does not break the inline run it sits in.
+    ///
+    /// §9.2.1.1's anonymous box rule is about in-flow block-level content, and an
+    /// out-of-flow box is not that — the same rule a float gets.
+    #[test]
+    fn block_an_absolute_box_does_not_split_the_run_around_it() {
+        let (tree, _) = layout(
+            "<html><body><div>before<span id=a></span>after</div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             div { font-size: 10px; line-height: 20px } \
+             #a { position: absolute; width: 10px; height: 10px }",
+        );
+        assert!(
+            !boxes(&tree)
+                .iter()
+                .any(|b| b.0 == FragmentKind::AnonymousBlock),
+            "{:?}",
+            boxes(&tree)
+        );
+        assert_eq!(rects_of(&tree, FragmentKind::Line).len(), 1);
     }
 
     /// §10.4: `max-width` caps the used width.

@@ -987,3 +987,40 @@ Format: one entry per defect.
 - **Where:** the `Step::Exit` arm of `crates/px-layout/src/block.rs`, where
   `collapsed_margins` is written. The comment there says the same thing in three
   lines.
+
+## `position: relative`'s offsets (CSS 2.1 §9.4.3), deferred in Phase 6
+
+- **What works:** `position: relative` establishes a containing block for
+  absolutely positioned descendants, which is §10.1 and is most of why anyone
+  writes it. That half is in.
+- **What does not:** the `left`/`top`/`right`/`bottom` *offsets*. A relatively
+  positioned box should be laid out in normal flow and then shifted, leaving the
+  space it occupied where it was.
+- **Why it is not in the absolute-positioning commit:** for a **block** box it is
+  two lines and it was written and then taken out. For an **inline** box it is not
+  implementable at all yet — `partition_content` flattens an inline element into
+  the run around it, so there is no box to shift, and the lines it contributes are
+  not distinguishable from its siblings'. Shipping the block half alone is worse
+  than shipping neither: `visuren/float-inside-inline-between-blocks-1.html` is a
+  reftest whose test uses `<span style="position: relative; left: 100px">` and
+  whose reference uses `<div>` with the same rule, and it went from matching to
+  failing because one side moved and the other could not.
+- **What to do:** land it with inline boxes, in the same phase that gives an
+  inline element a fragment of its own. Until then it is one asymmetry rather than
+  two.
+- **Where:** `crates/px-layout/src/block.rs`, `is_positioned` — the doc comment
+  there says the same thing in four lines.
+
+## Absolute positioning's remaining gaps, found in Phase 6
+
+- **`height: auto` with both `top` and `bottom` stated** should resolve the height
+  from the equation the way the inline axis resolves the width from `left` and
+  `right`. It does not: the height comes from content or from `height`, and
+  `bottom` only positions. The containing block's block size is not known until
+  after the absolutely positioned box has been laid out, so this needs the box's
+  own size to be settled in `place_absolute` rather than during the traversal.
+- **Auto margins** on an absolutely positioned box should absorb the slack in
+  §10.3.7's equation and centre it. They are treated as zero.
+- **The static position's inline axis** is the containing block's content start
+  plus this box's start margin, which is right for a box that would have been at
+  the start of its line and wrong for one that would not. The block axis is exact.

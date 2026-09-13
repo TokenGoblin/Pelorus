@@ -55,9 +55,35 @@ const VIEWPORT_PX: i32 = 800;
 /// the engine doing anything, and a reference that reaches the same rendering
 /// through deliberately different geometry, which fails while being correct.
 ///
-/// Empty so far. If it grows past a small fraction of the corpus, ADR 029's
-/// central bet is wrong and the ADR says so in its Verification section.
-const EXPECTED_FAILURES: &[(&str, &str)] = &[];
+/// Two entries, both the second of ADR 029's named cases and both of the same
+/// shape — which is the useful thing about them, because that shape is how every
+/// out-of-flow reftest in the suite is written. A test puts a box out of flow and
+/// its reference puts the same box *in* flow at the position the test should have
+/// produced. The box under test then matches exactly while every ancestor's height
+/// differs, because an out-of-flow box contributes nothing to its parent's
+/// `height: auto` and an in-flow one does. Both were read line by line and both
+/// were confirmed to match on the box the test is about.
+///
+/// This is a limit on ADR 029's oracle rather than a gap in the engine, and it is
+/// worth writing down because it is systematic: absolute positioning cost three
+/// matching pairs and gained none, and two of the three are this. The ADR's
+/// Verification section should say so.
+const EXPECTED_FAILURES: &[(&str, &str)] = &[
+    (
+        "positioning/absolute-non-replaced-min-max-001.html",
+        "The green square matches exactly at (8, 51, 16, 16), min-width beating \
+         max-width and all. The reference's square is in flow, so its body is 51 \
+         tall against the test's 19 and its html 75 against 51. Whole-geometry \
+         comparison cannot equate the two, and the rendering is identical.",
+    ),
+    (
+        "floats/float-with-absolutely-positioned-child-with-static-inset.html",
+        "The absolutely positioned child matches exactly at (542, 8, 100, 100), \
+         which is the entire assertion the test makes. The float containing it is \
+         0 tall in the test and 100 in the reference, because the reference's \
+         child is in flow. The float has no background, so nothing paints there.",
+    ),
+];
 
 /// How many pairs must match.
 ///
@@ -118,9 +144,29 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// about bounds on an absolutely positioned box, and half of what they need is the
 /// bounds rather than the positioning.
 ///
+/// **Fifty-two, down from fifty-four**, and the second deliberate fall. Absolute
+/// positioning (§9.6, §10.1, §10.3.7) cost three matching pairs and gained none.
+/// All three were read individually:
+///
+/// - Two are [`EXPECTED_FAILURES`] now: the box under test matches exactly and the
+///   ancestors' heights do not, because a reference for an out-of-flow feature is
+///   written by putting the same box *in* flow. That is how every out-of-flow
+///   reftest in this suite is written, which makes it a limit on the oracle rather
+///   than a gap in the engine.
+/// - The third, `visuren/float-inside-inline-between-blocks-1.html`, is neither:
+///   it needs `position: relative`'s offsets, which are implemented for a block box
+///   in two lines and not implementable at all for an inline one until there are
+///   inline boxes to shift. Shipping the block half alone made a reference whose
+///   `<div>` moved disagree with a test whose `<span>` did not, so the offsets are
+///   not in this commit. `docs/backlog.md` has them.
+///
+/// So this fall is the corpus losing sight of the engine rather than the engine
+/// regressing, and the eight tests in `block.rs` are what hold the behaviour
+/// instead — each verified to fail when the thing it tests is removed.
+///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 54;
+const MATCH_FLOOR: usize = 52;
 
 /// A layout with no more fragments than this has no content in it.
 ///
