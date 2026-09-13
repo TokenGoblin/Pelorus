@@ -291,6 +291,37 @@ fn layout_reftest_the_subset_is_present_and_paired() {
 
 /// The corpus matches at or above the pinned floor, and no excluded pair fails
 /// for a reason the exclusion does not name.
+/// The match rate per corpus directory, as printable lines.
+///
+/// Not asserted on — `MATCH_FLOOR` is the ratchet and a per-directory floor would
+/// be five ratchets that each have to be argued about. This is the instrument
+/// that says *where* to work next, and it exists because the alternative was a
+/// throwaway diagnostic written and deleted once per session. The directories are
+/// WPT's own chapter split, so "floats is 6/38" names a feature rather than a
+/// filename pattern.
+fn breakdown() -> Vec<String> {
+    let mut tally: std::collections::BTreeMap<String, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for pair in pairs() {
+        let chapter = pair
+            .test
+            .parent()
+            .and_then(|d| d.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_owned();
+        let entry = tally.entry(chapter).or_insert((0, 0));
+        entry.1 += 1;
+        if matches(&pair) {
+            entry.0 += 1;
+        }
+    }
+    tally
+        .into_iter()
+        .map(|(chapter, (ok, all))| format!("{chapter}: {ok}/{all}"))
+        .collect()
+}
+
 #[test]
 fn layout_reftest_matches_at_or_above_the_pinned_floor() {
     let excluded: std::collections::BTreeSet<&str> =
@@ -312,6 +343,9 @@ fn layout_reftest_matches_at_or_above_the_pinned_floor() {
         "css2 reftests: {passed}/{total} matched (floor {MATCH_FLOOR}),          {} method exclusions",
         EXPECTED_FAILURES.len()
     );
+    for line in breakdown() {
+        println!("  {line}");
+    }
 
     assert!(
         total >= 40,
