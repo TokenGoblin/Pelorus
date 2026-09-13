@@ -936,3 +936,30 @@ Format: one entry per defect.
   the condition have to agree.
 - **Not done in Phase 6 because** it is Phase 2's test and phase discipline puts
   out-of-phase defects here. Worth doing before anybody trusts that job again.
+
+## Sending no User-Agent is a privacy position that real sites refuse
+
+- **Found in:** phase 6, the first time anything here was pointed at a live site
+- **Belongs to:** phase 19 (privacy) to decide, phase 23 (daily driver) to pay for
+- **What:** `px-net`'s `build_request` sends no `User-Agent`, no `Accept-Language`
+  and no `Accept-Encoding`, deliberately and with the reason written down: *"Every
+  header sent is a bit of entropy, and invariant 4's 'no identifiers' is easier to
+  keep by not adding them in the first place."*
+- **What that costs, measured:** `https://en.wikipedia.org/wiki/Web_browser`
+  returns **403** with a 126-byte body. `example.com` and `rust-lang.org` serve
+  normally. So the position is not theoretical and not uniform — a meaningful
+  slice of the web refuses a client with no User-Agent, and Wikipedia is not an
+  edge case.
+- **Why it matters:** Phase 23's gate is "compat suite green on all forty sites;
+  thirty consecutive days of self-hosted use with no fallback". A browser that
+  403s on Wikipedia cannot pass that, so the privacy position and the daily-driver
+  gate are in direct tension and one of them has to move.
+- **What to do:** this is a decision, not a defect, and it wants an ADR. The
+  options are a fixed generic User-Agent shared by every install (entropy of zero
+  across the user base, which is the anti-fingerprinting answer rather than a
+  concession), sending nothing and accepting the failures, or a per-site
+  exception list, which is the worst of the three because it is a fingerprint that
+  varies by browsing history.
+- **Not decided here because** it is a product-level privacy decision, Phase 19
+  owns it, and Phase 6 has no standing to settle it — but it should be settled
+  well before Phase 23 discovers it.

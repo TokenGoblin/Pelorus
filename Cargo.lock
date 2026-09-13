@@ -787,8 +787,16 @@ version = "0.0.0"
 name = "px-broker"
 version = "0.0.0"
 dependencies = [
+ "app_units",
+ "html5ever",
+ "px-css",
+ "px-dom",
  "px-ipc",
+ "px-layout",
+ "px-net",
  "px-sandbox",
+ "stylo",
+ "url",
 ]
 
 [[package]]
