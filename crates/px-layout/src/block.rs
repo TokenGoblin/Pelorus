@@ -118,6 +118,13 @@ struct Tables {
     /// Separate from the children cursor because line fragments are positioned by
     /// [`crate::inline::layout_lines`] rather than by the block stacking pass.
     inline_content_heights: Vec<Au>,
+    /// The inline content a box holds directly, waiting to be laid out.
+    ///
+    /// Recorded when the container is partitioned and used on the way *up*.
+    /// A container has at most one of these: `partition_content` ends a run only
+    /// at a block-level sibling, and a container with one of those wraps its runs
+    /// in anonymous blocks that each hold exactly one.
+    inline_runs: Vec<Option<PendingRun>>,
     /// Resolved margins, borders and padding.
     edges: Vec<Edges>,
 }
@@ -130,6 +137,7 @@ impl Tables {
             inline_sizes: vec![viewport_inline_size],
             specified_block_sizes: vec![None],
             inline_content_heights: vec![Au(0)],
+            inline_runs: vec![None],
             edges: vec![Edges::ZERO],
         }
     }
@@ -141,9 +149,31 @@ impl Tables {
             self.inline_sizes.push(Au(0));
             self.specified_block_sizes.push(None);
             self.inline_content_heights.push(Au(0));
+            self.inline_runs.push(None);
             self.edges.push(Edges::ZERO);
         }
     }
+}
+
+/// Inline content recorded on the way down and laid out on the way up.
+///
+/// # Why the deferral
+///
+/// Inline layout needs two things: the container's content inline size, known on
+/// the way *down*, and the floats that shorten its line boxes, known on the way
+/// *up* — a float's own size is resolved at its `Exit`, which happens after its
+/// container's `Children`. Laying the lines out at `Children` meant they were
+/// measured against a container that had not yet met its own floats.
+///
+/// So the text and the metrics it will be measured with are recorded here and the
+/// lines are built at `Exit`, once every float in the container has been placed.
+/// Nothing else about the result changes, which is the point: this deferral landed
+/// on its own, with the reftest count held fixed, so that the float work after it
+/// could not hide a regression inside a restructure.
+struct PendingRun {
+    text: String,
+    font_size: Au,
+    line_height: Au,
 }
 
 /// The resolved box-model edges of one box, in app units.
@@ -305,19 +335,16 @@ pub fn layout_document(
                         // §9.2.1.1 wraps inline content only when it has
                         // block-level *siblings* to be separated from. The lines
                         // hang directly off this container.
+                        tables.grow_to(fragment.index());
                         for item in items {
                             let Content::InlineRun(text) = item else {
                                 continue;
                             };
-                            layout_inline_run(
-                                &mut tree,
-                                &mut tables,
-                                fragment,
-                                &text,
+                            tables.inline_runs[fragment.index()] = Some(PendingRun {
+                                text,
                                 font_size,
                                 line_height,
-                                available,
-                            );
+                            });
                         }
                         continue;
                     }
@@ -350,19 +377,16 @@ pub fn layout_document(
                                 {
                                     *reserved = Some(anonymous);
                                 }
-                                layout_inline_run(
-                                    &mut tree,
-                                    &mut tables,
-                                    anonymous,
-                                    &text,
+                                tables.inline_runs[anonymous.index()] = Some(PendingRun {
+                                    text,
                                     font_size,
                                     line_height,
-                                    available,
-                                );
+                                });
                                 // An anonymous block has no children of its own
-                                // beyond those lines, so it needs no `Children`
-                                // step -- but it does need `Exit`, which is what
-                                // gives it a block size and positions its lines.
+                                // beyond that run, so it needs no `Children` step
+                                // -- but it does need `Exit`, which is what lays
+                                // the run out, gives the box a block size and
+                                // positions the lines.
                                 stack.push(Step::Exit {
                                     fragment: anonymous,
                                 });
@@ -372,6 +396,24 @@ pub fn layout_document(
                 }
 
                 Step::Exit { fragment } => {
+                    // The inline content recorded on the way down, laid out now
+                    // that everything this container holds has been sized. The
+                    // lines join `pending` as ordinary children and the stacking
+                    // loop below recognises them by kind, exactly as it did when
+                    // they were built at `Children`.
+                    if let Some(run) = tables
+                        .inline_runs
+                        .get_mut(fragment.index())
+                        .and_then(Option::take)
+                    {
+                        let available = tables
+                            .inline_sizes
+                            .get(fragment.index())
+                            .copied()
+                            .unwrap_or(Au(0));
+                        layout_inline_run(&mut tree, &mut tables, fragment, &run, available);
+                    }
+
                     // Reserved slots collapse to the children that exist.
                     // A `None` is a block child that generated no box -- an
                     // unimplemented formatting context -- and dropping it here
@@ -541,25 +583,25 @@ fn first_element(arena: &Arena) -> Option<NodeId> {
         .find(|id| arena.get(*id).is_some_and(|n| n.element_name().is_some()))
 }
 
-/// Lay `text` out as lines inside `container`, and record their total height.
+/// Lay `run` out as lines inside `container`, and record their total height.
 ///
 /// Shared by the two places inline content can live: directly inside a block
 /// container that has no block-level children, and inside an anonymous block box
 /// generated because it does. The two differ only in which fragment the lines
 /// hang off, which is exactly what makes §9.2.1.1 cheap to implement here.
+///
+/// Called from `Exit`, not from `Children` — see [`PendingRun`] for why.
 fn layout_inline_run(
     tree: &mut FragmentTree,
     tables: &mut Tables,
     container: FragmentId,
-    text: &str,
-    font_size: Au,
-    line_height: Au,
+    run: &PendingRun,
     available: Au,
 ) {
     let context = crate::inline::InlineContext {
-        text,
-        font_size,
-        line_height,
+        text: &run.text,
+        font_size: run.font_size,
+        line_height: run.line_height,
         available,
     };
     let (lines, height) = crate::inline::layout_lines(tree, &context);
