@@ -164,9 +164,17 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[
 /// regressing, and the eight tests in `block.rs` are what hold the behaviour
 /// instead — each verified to fail when the thing it tests is removed.
 ///
+/// Back to 54 by two corrections to the *instrument* rather than to the engine,
+/// both spelled out where they are made: `geometry` compares a set of rectangles
+/// rather than a multiset, and `TRIVIAL_FRAGMENTS` counts fragments rather than
+/// distinct rectangles. The two pairs that turned green are the ones margin
+/// collapsing made correct -- a parent with no border or padding coming to rest on
+/// exactly its child's rectangle. Two, and the number matters: a change to the
+/// oracle that bought a dozen would be evidence of bending it to fit.
+///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 52;
+const MATCH_FLOOR: usize = 54;
 
 /// A layout with no more fragments than this has no content in it.
 ///
@@ -241,6 +249,22 @@ type Geometry = (Au, Au, Au, Au);
 ///
 /// Sorted for the same reason. Layout order follows structure, so comparing
 /// sequences smuggles the structure back in.
+///
+/// **Deduplicated, for the third time by the same argument.** Two boxes at the
+/// same rectangle and one box at that rectangle render identically — this oracle
+/// does not compare colours, so painting a rectangle twice carries no information
+/// it can see. What multiplicity *does* carry is how many levels of nesting came
+/// to rest in the same place, which is tree shape wearing a third disguise, after
+/// depth and after order.
+///
+/// It is the correct margin-collapsing answer that made this concrete: a parent
+/// with no border or padding ends up on exactly its child's rectangle, so a test
+/// that wraps its content in a `<div>` produces one more box than a reference that
+/// does not, at the same coordinates, rendering the same.
+///
+/// Worth two pairs and no more, which is the number this was weighed against
+/// before changing the instrument — a change that bought a dozen would have been
+/// evidence the instrument was being bent to fit rather than corrected.
 fn geometry(tree: &FragmentTree) -> Vec<Geometry> {
     let mut rects: Vec<Geometry> = tree
         .in_layout_order()
@@ -251,11 +275,24 @@ fn geometry(tree: &FragmentTree) -> Vec<Geometry> {
         })
         .collect();
     rects.sort();
+    rects.dedup();
     rects
 }
 
+/// What one laid-out file contributes to a comparison.
+///
+/// Two numbers, because two different questions are asked of a layout and
+/// conflating them was a bug. `rectangles` is what the pair is compared on;
+/// `fragments` is how many boxes were produced, which is what
+/// [`TRIVIAL_FRAGMENTS`] is about — "did the engine lay anything out" is a
+/// question about boxes, not about distinct rectangles.
+struct Laid {
+    rectangles: Vec<Geometry>,
+    fragments: usize,
+}
+
 /// Parse, style and lay out one file.
-fn layout_file(path: &Path) -> Option<Vec<Geometry>> {
+fn layout_file(path: &Path) -> Option<Laid> {
     let source = std::fs::read_to_string(path).ok()?;
     let dom = px_dom::parse(&source);
     if dom.abandoned {
@@ -278,7 +315,10 @@ fn layout_file(path: &Path) -> Option<Vec<Geometry>> {
     let style_root = engine.style_root_for(&arena);
     engine.resolve(&arena, &style_root)?;
     let tree = layout_document(&arena, &style_root, px(VIEWPORT_PX))?;
-    Some(geometry(&tree))
+    Some(Laid {
+        rectangles: geometry(&tree),
+        fragments: tree.len(),
+    })
 }
 
 /// Enough of a user-agent stylesheet for block layout.
@@ -327,7 +367,7 @@ fn matches(pair: &Pair) -> bool {
             // and pairs of those matched each other by producing nothing. After
             // the fixes it is 2. Requiring content is what stops that counting as
             // conformance.
-            test.len() > TRIVIAL_FRAGMENTS && test == reference
+            test.fragments > TRIVIAL_FRAGMENTS && test.rectangles == reference.rectangles
         }
         _ => false,
     }
@@ -393,6 +433,7 @@ fn report() {
             println!("no layout: {}", pair.name);
             continue;
         };
+        let (test, reference) = (test.rectangles, reference.rectangles);
         if test == reference {
             continue;
         }
@@ -420,11 +461,12 @@ fn report_one(name: &str) {
         for (label, path) in [("TEST", &pair.test), ("REFERENCE", &pair.reference)] {
             println!("===== {label}: {}", path.display());
             println!("{}", std::fs::read_to_string(path).unwrap_or_default());
-            let Some(rects) = layout_file(path) else {
+            let Some(laid) = layout_file(path) else {
                 println!("(did not lay out)");
                 continue;
             };
-            for (inline, block, width, height) in rects {
+            println!("  ({} fragments)", laid.fragments);
+            for (inline, block, width, height) in laid.rectangles {
                 println!(
                     "  {:>8} {:>8} {:>8} {:>8}",
                     px_of(inline),
