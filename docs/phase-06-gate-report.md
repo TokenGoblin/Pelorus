@@ -8,7 +8,7 @@
 |---|---|---|
 | WPT CSS2 reftest subset at threshold | `crates/px-layout/tests/reftest.rs`, 105 pairs, threshold pinned at 54 | **Pass** — and read "What 54 of 105 means" below before the tick |
 | identical box tree on repeat runs | `crates/px-layout/tests/determinism.rs`, 4 tests | **Pass** |
-| iterative (non-recursive) tree walks verified by a deep-nesting test | `crates/px-layout/tests/depth.rs`, 4 tests | **Pass** |
+| iterative (non-recursive) tree walks verified by a deep-nesting test | `crates/px-layout/tests/depth.rs`, 4 tests, plus 28 WPT crashtests in `crashtest.rs` | **Pass** |
 
 `ci/gate-layout.sh` passes on Windows and Linux. **25 of 26 CI jobs are green; the
 only red is `compat-list`**, which has been red since Phase 0 and is the user's
@@ -251,6 +251,44 @@ In `docs/backlog.md`:
 Not yet written down as backlog because they are features rather than defects:
 inline boxes (a `<span>`'s own borders and padding, and `display: inline-block`),
 tables, and `vertical-align`, which needs the font metrics Phase 9 brings.
+
+## 28 crashtests this phase nearly missed entirely
+
+`ci/vendor-css2-reftests.sh` pairs a test with a `-ref.html` of the same name.
+A **crashtest** has no reference -- it passes if the engine does not crash on it --
+so every crashtest in the seven vendored directories was silently skipped for the
+whole phase. There are 28 of them, and they are the inputs that made Chrome or
+Firefox crash, for exactly the features Phase 6 implements.
+
+They were found by surveying Phase 7's corpus, not this one. `css-flexbox` and
+`css-grid` have 14 between them, which prompted the obvious question about the
+directories already vendored.
+
+They are worth more than a count. For a crate that is `#![forbid(unsafe_code)]`,
+"does not crash" has exactly three meanings and `crashtest.rs` checks all three:
+
+- **A panic** — caught by the worker thread's `join` returning `Err`.
+- **A stack overflow** — each file runs on the same 256 KB stack `depth.rs` uses,
+  so a recursive walk reached by a real document fails here as well as there.
+- **Non-termination** — float placement and line breaking both step through
+  positions until a condition holds, and both have an *argument* for why they
+  terminate. An argument is not a test. A hung worker cannot be killed from Rust,
+  so a timeout reports the filename and ends the process rather than hanging until
+  CI's own deadline loses it.
+
+All 28 pass, and all 28 produce boxes, which is asserted — a crashtest that lays
+out nothing cannot crash, so a run where every file was empty would pass and mean
+nothing. The harness was verified by injecting a panic (reports the file, fails)
+and an infinite loop (reports the file, exits).
+
+Pinned in `ci/gate-layout.sh` by a count **read from the git index**, which is the
+Phase 4 lesson: that phase lost five commits to a fuzz corpus that was an empty
+directory git cannot store and `git status` does not report. The check earned its
+keep immediately — it failed on first run because the files were on disk and not
+yet staged.
+
+This is not a fourth gate item. It is a robustness floor under the third one, which
+until now was a single hand-written document.
 
 ## The `.xht` question ADR 029 left open, now closed
 

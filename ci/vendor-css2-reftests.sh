@@ -19,6 +19,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 DEST="tests/wpt/css2"
+CRASH_DEST="${CRASH_DEST:-tests/wpt/css2-crashtests}"
 REPO="web-platform-tests/wpt"
 REF="${1:-master}"
 
@@ -52,6 +53,7 @@ gh api "repos/$REPO/git/trees/$css2_sha?recursive=1" \
     --jq '.tree[] | select(.type=="blob") | [.path, .sha] | @tsv' > "$listing"
 
 mkdir -p "$DEST"
+mkdir -p "$CRASH_DEST"
 
 # Only `.html`, and only pairs. A test whose reference is a `.xht` is not usable
 # here (ADR 029: px-dom has no XML path), and a reference with no test is dead
@@ -63,10 +65,30 @@ done
 
 fetched=0
 pairs=0
+crashtests=0
 while IFS=$'\t' read -r path sha; do
     case "$path" in
         *-ref.html) continue ;;   # references are fetched with their test
     esac
+
+    # Crashtests, which have no reference and are not graded against one: a
+    # crashtest passes if the engine does not crash. They were invisible to this
+    # script for the length of Phase 6 because it pairs on a `-ref.html` name and
+    # they have none, and there are 28 of them in these seven directories.
+    #
+    # Worth more than their count suggests. They are the inputs that made Chrome
+    # and Firefox crash, which is a better-chosen adversarial corpus than anything
+    # hand-written, and they need no oracle, no threshold and no pairing.
+    case "$path" in
+        */crashtests/*|*-crash.html)
+            mkdir -p "$CRASH_DEST/$(dirname "$path")"
+            gh api "repos/$REPO/git/blobs/$sha" --jq '.content' \
+                | base64 --decode > "$CRASH_DEST/$path"
+            crashtests=$((crashtests + 1))
+            continue
+            ;;
+    esac
+
     ref="${path%.html}-ref.html"
     ref_sha="$(awk -v r="$ref" -F'\t' '$1 == r { print $2 }' "$wanted")"
     [ -n "$ref_sha" ] || continue   # no reference: not a reftest we can run
@@ -85,6 +107,27 @@ while IFS=$'\t' read -r path sha; do
     pairs=$((pairs + 1))
 done < "$wanted"
 
+cat > "$CRASH_DEST/PROVENANCE" <<CRASHPROV
+WPT CSS2 crashtests, vendored by ci/vendor-css2-reftests.sh.
+
+repository  https://github.com/$REPO
+commit      $resolved
+directories $DIRS
+selection   files under a crashtests/ directory, or named *-crash.html
+files       $crashtests
+
+A crashtest carries no reference and is not compared against one. It passes if
+the engine does not crash on it -- and for this project that means it does not
+panic, does not overflow its stack and does not fail to terminate, because
+px-layout contains no unsafe code and has no other way to crash.
+
+These were skipped for the whole of Phase 6 because this script pairs a test
+with a \`-ref.html\` of the same name and a crashtest has none. They are the
+inputs that made Chrome and Firefox crash, so as an adversarial corpus for
+exactly the features these directories cover they are better chosen than
+anything written by hand.
+CRASHPROV
+
 cat > "$DEST/PROVENANCE" <<PROV
 WPT CSS2 reftest subset, vendored by ci/vendor-css2-reftests.sh.
 
@@ -97,7 +140,20 @@ files       $fetched
 
 Why only .html: css/CSS2 holds 10,501 .xht files against 816 .html. px-dom has
 no XML path, and whether html5ever's HTML parser produces the tree an XML parser
-would is an empirical question about a parser this project did not write. ADR 029.
+would was an empirical question about a parser this project did not write.
+
+Answered at the end of Phase 6 by sampling thirty .xht files: it does not, and not
+for the reason you would guess. There are no self-closing non-void elements in the
+sample at all. What there is, in half of them, is a bare CDATA section immediately
+inside <style> -- and an HTML parser hands that to the CSS parser as stylesheet
+text, which discards the entire stylesheet rather than one rule. A test and a
+reference with no styles are both the user-agent skeleton, and two skeletons agree,
+so these files would raise the conformance number without measuring anything.
+ADR 029 has the measurement.
+
+This paragraph lives in ci/vendor-css2-reftests.sh, because PROVENANCE is generated
+and the first version of the note was written into the file and lost the next time
+the script ran.
 
 Why these directories: they are §9 Phase 6's scope -- box tree, BFCs, inline,
 floats, positioned. generated-content, pagination, lists and tables each need a
@@ -108,3 +164,4 @@ PROV
 
 rm -f "$listing" "$wanted"
 echo "  vendored $pairs pairs ($fetched files) into $DEST" >&2
+echo "  vendored $crashtests crashtests into $CRASH_DEST" >&2

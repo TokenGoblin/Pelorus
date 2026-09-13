@@ -55,10 +55,19 @@ fi
 # gate reported the deep-nesting item as having tests before px-layout had a file.
 # A filter that matches another crate's tests is a gate item satisfied by somebody
 # else's work.
+#
+# `css2-crashtests` is not one of §9's three items. It is a robustness floor
+# underneath the third of them: "iterative tree walks verified by a deep-nesting
+# test" is one hand-written document, and these are 28 real ones that made Chrome
+# or Firefox crash, in the directories this phase implements. They were invisible
+# for the whole of Phase 6 because the vendoring script pairs a test with a
+# `-ref.html` and a crashtest has none. Listed here so they cannot quietly stop
+# running, not so the item count reads higher.
 SUITES="
 css2-reftests::layout_reftest_::crates/px-layout/tests/reftest.rs
 box-tree-determinism::layout_determinism_::crates/px-layout/tests/determinism.rs
 deep-nesting::layout_depth_::crates/px-layout/tests/depth.rs
+css2-crashtests::layout_crashtest_::crates/px-layout/tests/crashtest.rs
 "
 
 ignored_tests="$(cargo test --workspace --locked -- --list --ignored 2>/dev/null \
@@ -117,6 +126,25 @@ else
         fail "the subset has ${pairs:-0} reference files, floor is $REFTEST_FLOOR"
     else
         ok "the CSS2 subset has $pairs test/reference pairs in the index (floor $REFTEST_FLOOR)"
+    fi
+fi
+
+# The crashtest corpus, pinned for the same reason and read from the index for the
+# same reason: Phase 4 lost five commits to a fuzz corpus that was an empty
+# directory git could not store and `git status` did not report. A crashtest suite
+# that passes because the files are gone is the identical failure.
+CRASH_DIR="tests/wpt/css2-crashtests"
+CRASH_FLOOR=20
+
+if [ ! -d "$CRASH_DIR" ]; then
+    fail "the CSS2 crashtests are not vendored at $CRASH_DIR"
+    fail "  re-run ci/vendor-css2-reftests.sh"
+else
+    crashtests="$(git ls-files "$CRASH_DIR" | grep -c '\.html$' || true)"
+    if [ "${crashtests:-0}" -lt "$CRASH_FLOOR" ]; then
+        fail "the crashtest corpus has ${crashtests:-0} files, floor is $CRASH_FLOOR"
+    else
+        ok "the CSS2 crashtests have $crashtests files in the index (floor $CRASH_FLOOR)"
     fi
 fi
 

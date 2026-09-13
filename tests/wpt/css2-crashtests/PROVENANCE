@@ -1,0 +1,18 @@
+WPT CSS2 crashtests, vendored by ci/vendor-css2-reftests.sh.
+
+repository  https://github.com/web-platform-tests/wpt
+commit      b875b21fd9e6b688e37c10d1b6366cab7418f91e
+directories normal-flow floats floats-clear box-display visuren positioning linebox
+selection   files under a crashtests/ directory, or named *-crash.html
+files       28
+
+A crashtest carries no reference and is not compared against one. It passes if
+the engine does not crash on it -- and for this project that means it does not
+panic, does not overflow its stack and does not fail to terminate, because
+px-layout contains no unsafe code and has no other way to crash.
+
+These were skipped for the whole of Phase 6 because this script pairs a test
+with a `-ref.html` of the same name and a crashtest has none. They are the
+inputs that made Chrome and Firefox crash, so as an adversarial corpus for
+exactly the features these directories cover they are better chosen than
+anything written by hand.
