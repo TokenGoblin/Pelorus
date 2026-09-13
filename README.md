@@ -19,25 +19,41 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 
 ## Status
 
-**Phases 0 through 5 are merged. Phase 6 — block and inline layout — is next.**
-Phase 5's three gate items are green in CI on Windows and Linux: computed style
-across a defined 64-property set, the CSS cascade (ported from WPT rather than
-run — see `docs/adr/028`), and the decision §9 asks for, which is that stylo
-survived contact.
+**Phases 0 through 5 are merged. Phase 6 — block and inline layout — passes its
+three gate items on branch `phase/06-layout`:** the WPT CSS2 reftest subset at a
+threshold of 54 of 105 pairs, an identical box tree on repeat runs, and iterative
+tree walks proven by a deep-nesting test. `docs/phase-06-gate-report.md` spends
+most of its length on what that first number does *not* mean, which is the part
+worth reading.
 
 What works: a sandboxed process launcher on both platforms, typed IPC with a
 capability broker, an HTTP/1.1 and TLS stack with partitioned pools, a
 generational-arena DOM driving `html5ever` at 99.43% on the tree-construction
 conformance corpus (94.62% unadjusted — see ADR 019 for what is set aside and
-why both numbers are printed), and `stylo` resolving computed style over that DOM
-with the cascade, specificity, `@layer`, inline `style` and the CSS-wide keywords
-all working.
+why both numbers are printed), `stylo` resolving computed style over that DOM
+with the cascade, specificity, `@layer`, inline `style` and the CSS-wide keywords,
+and normal-flow layout: block and inline boxes, anonymous block generation,
+margin collapsing, floats, and absolute positioning, in `Au` fixed point with no
+floating point and no recursion anywhere.
 
-**Nothing renders a page.** Style resolution now works, but there is no layout
-(Phases 6–7), no paint (8), no text shaping (9) and no JavaScript (10–11). First
-pixels are around Phase 8; a browser you could use is Phase 23. This has never
-been pointed at a website, because there is nothing yet that could load one end
-to end.
+**It has now been pointed at websites, and that is a diagnostic rather than a
+product.** `px-fetch` — test-only, behind `required-features = ["testing"]` —
+fetches a URL through `px-net`, parses it, applies its stylesheets, lays it out
+and searches the text:
+
+```
+$ cargo run -p px-broker --features testing --bin px-fetch -- \
+      https://rust-lang.org --find "performance"
+status   200
+parsed   242 elements, 640 nodes, 0 parse errors
+laid out 217 fragments, 7 deep
+found    3 occurrence(s) of "performance"
+```
+
+**Nothing renders a page.** There is no paint (Phase 8), no text shaping (9) and
+no JavaScript (10–11), and text is measured by a deliberate stub that gives every
+character half the font size. Tables, `inline-block` and `vertical-align` are not
+implemented. First pixels are around Phase 8; a browser you could use is Phase 23.
 
 Nothing is distributed to anyone before Phase 20 completes (invariant 10) — the
 update channel and signed release pipeline must exist before a build leaves
