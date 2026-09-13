@@ -1049,6 +1049,10 @@ five pairs it was blocking.
   history rather than on policy. A fresh install rejects sites a browser accepts,
   non-deterministically, and the failure presents as a site problem. It will also
   make Phase 23's forty-site compat run flaky in a way that looks like the sites.
+- **Proposed fix: `docs/adr/030-windows-chain-verification.md`**, written in Phase 6
+  and awaiting a decision. It weighs three options and recommends asking Windows to
+  build the chain, with two non-negotiables: a negative test in CI proving a bad
+  certificate is still rejected, and no unioning of the platform and bundled stores.
 - **What to do — two options and a trade, not a patch:**
   1. Ask Windows to build and verify the chain (`CertGetCertificateChain`) instead
      of handing rustls a snapshot. Keeps ADR 012's property that an
@@ -1062,3 +1066,36 @@ five pairs it was blocking.
   Either way ADR 012 gets reopened rather than amended in passing.
 - **Do not** union the platform store with the bundled one. `tls.rs` explains at
   length why those are never merged, and that reasoning is untouched by this.
+
+## Table layout is in no phase at all, found in Phase 6
+
+- **What:** `docs/build-spec.md` §9 has Phase 6 as "block and inline layout" and
+  Phase 7 as "flex and grid". **Table formatting — CSS 2.1 §17 — is not named in
+  any phase.** It is not deferred, disallowed or listed in §13's open decisions; it
+  is missing.
+- **What it costs, measured.** Pointing `px-fetch` at real sites in Phase 6:
+
+  | site | elements | fragments | why |
+  |---|---|---|---|
+  | news.ycombinator.com | 814 | **122** | `<table>` layout; `<tr>`/`<td>` are not block-level, so their content flattens into one inline run |
+  | fabiensanglard.net | 425 | **105** | the same |
+  | danluu.com | 629 | **835** | semantic HTML, no tables — boxes *multiply* into line boxes |
+
+  The last row is the control: the engine is not losing boxes in general, it is
+  losing them to tables specifically.
+- **Also:** four of the CSS2 reftest subset's remaining failures are table tests
+  (`floats-in-table-caption-001`, `float-table-align-left-quirk`,
+  `table-sizing-with-adjacent-floats`, `table-pseudo-in-part3-1`), so the
+  conformance number is capped by a feature with no phase to build it in.
+- **Why it is not started here:** table layout is its own formatting context and
+  is larger than floats. Phase 6 built what §9 named. Starting an unnamed feature
+  because it happens to be next in CSS 2.1's table of contents is how a phase plan
+  stops meaning anything.
+- **What to do:** decide where it goes. Candidates are a Phase 6 extension, a slot
+  beside Phase 7's flex and grid, or an explicit "not before Phase N" with the
+  compat cost written down. It wants a line in the build spec either way, because
+  right now a reader cannot tell whether it was considered.
+- **Note on scope:** `<table>` itself is in this tool's user-agent stylesheet as
+  `display: block`, which is why HN produces 122 boxes rather than none. The
+  missing part is the internal table model — rows, cells, column widths, the
+  anonymous table boxes §17.2.1 generates.
