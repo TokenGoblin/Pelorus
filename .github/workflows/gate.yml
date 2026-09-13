@@ -278,14 +278,13 @@ jobs:
 
   # Phase 6, and red on purpose until the phase closes.
   #
-  # Same lifecycle as the style job above: continue-on-error while the phase is
-  # open, removed in the phase's last commit. Wired from the first commit so the
-  # gate's CI behaviour is exercised from day one rather than discovered on the
-  # last day, which is the lesson Phase 4 paid for.
+  # `continue-on-error: true` was set from the phase's first commit and removed
+  # here, in its last: wired from day one so the gate's CI behaviour was exercised
+  # all along rather than discovered on the closing day, which is the lesson
+  # Phase 4 paid for. Phase 6 is closed; this job is now required.
   layout:
     name: layout (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

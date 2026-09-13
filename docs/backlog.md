@@ -1007,3 +1007,24 @@ five pairs it was blocking.
 - **The static position's inline axis** is the containing block's content start
   plus this box's start margin, which is right for a box that would have been at
   the start of its line and wrong for one that would not. The block axis is exact.
+
+## Phase 3's CI job is still `continue-on-error`, found in Phase 6
+
+- **What:** `.github/workflows/gate.yml`'s `network` job carries
+  `continue-on-error: true` with the comment *"Phase 3's deliverable, red until the
+  phase closes"*. Phase 3 closed — `docs/phase-03-gate-report.md` records all four
+  gate items passing — and the job has been green on both platforms ever since.
+- **Why it matters:** the workflow's own comment on the `dom` job states the
+  principle: *"a job that is allowed to fail and does not is"* not protecting
+  anything. `ci/gate-network.sh` could start failing tomorrow and the branch would
+  stay green. It is exactly the failure Phase 4 paid for in a different shape —
+  a gate that was red for five commits without anybody noticing.
+- **Why it is not fixed here:** the working agreement says work only on the
+  current phase, and this is Phase 3's line to delete. It is one line, in a file
+  Phase 6 edited for its own job, and deleting it silently alongside that edit
+  would have been the wrong kind of convenient.
+- **What to do:** delete `continue-on-error: true` from the `network` job. If it
+  then goes red, that is the finding, and it is a Phase 3 regression rather than a
+  Phase 6 one.
+- **Note:** `compat-list` keeps its exemption for a different and still-valid
+  reason — it is a Phase 0 deliverable only the user can produce.
