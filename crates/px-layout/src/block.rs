@@ -18,14 +18,23 @@
 //! and the "up" phase happens on the exit visit. The shape is uglier than
 //! recursion and it is the whole point.
 //!
+//! # Three steps, not two
+//!
+//! [`Step::Children`] sits between them and does one thing: partition a block
+//! container's content into runs of inline content and block-level boxes, in
+//! document order (§9.2.1.1). It is separate from `Enter` because the initial
+//! containing block needs it too — the ICB is a block container whose content is
+//! the document's — and because the partition is where anonymous block boxes are
+//! generated, which is a different job from resolving a box's width.
+//!
 //! # What this does not do yet
 //!
-//! Floats, positioned boxes, and inline/text layout. A box containing text
-//! currently produces no line fragments at all, so its `height: auto` resolves to
-//! zero — which is *wrong*, not merely incomplete, and is why the reftest gate
-//! item is not yet claimed. Margin collapsing is likewise absent. Each is a named
-//! gap rather than a silent one, and the tests below assert what is implemented
-//! rather than asserting around what is not.
+//! Floats, positioned boxes, and real text shaping ([`crate::text`] is a stub
+//! metric with its limits written down). Margin collapsing runs between siblings
+//! but not *through* a parent. Inline boxes generate no fragment of their own, so
+//! a `<span>`'s border and padding are not drawn; its text is laid out in the run
+//! around it. Each is a named gap rather than a silent one, and the tests below
+//! assert what is implemented rather than asserting around what is not.
 
 use app_units::Au;
 use px_dom::{Arena, NodeId};
@@ -41,9 +50,100 @@ use crate::geom::{LogicalEdges, LogicalSize};
 #[derive(Clone, Copy, Debug)]
 enum Step {
     /// Resolve this box's inline size and create its fragment.
-    Enter { node: NodeId, parent: FragmentId },
+    ///
+    /// `slot` is where this box's fragment belongs among its parent's children.
+    /// Reserved rather than appended, because a parent's children are a mix of
+    /// boxes created now (anonymous blocks, during [`Step::Children`]) and boxes
+    /// created later (block children, on their own `Enter`). Appending would order
+    /// them by creation and put every anonymous block before every real one.
+    Enter {
+        node: NodeId,
+        parent: FragmentId,
+        slot: usize,
+    },
+    /// Partition this container's content and schedule it.
+    ///
+    /// Separate from `Enter` so the initial containing block can use it too: the
+    /// ICB is a block container whose children come from the document, and
+    /// without this it needed its own copy of the partitioning.
+    Children { fragment: FragmentId, node: NodeId },
     /// Resolve this box's block size from the fragments its children produced.
     Exit { fragment: FragmentId },
+}
+
+/// One item of a block container's content, in document order.
+///
+/// CSS 2.1 §9.2.1.1: a block container holds either only inline content or only
+/// block-level content. When markup gives it both, the inline runs are wrapped in
+/// **anonymous block boxes** so the container's children are uniformly
+/// block-level.
+///
+/// This is the partition that produces them, and it is most of what the CSS2
+/// reftest corpus exercises — 42 of the subset's failures were `block-in-inline`
+/// before it existed.
+#[derive(Debug)]
+enum Content {
+    /// A run of inline-level content: text, and the text of inline descendants.
+    InlineRun(String),
+    /// A block-level child, which becomes a box of its own.
+    Block(NodeId),
+}
+
+/// Per-fragment layout state, indexed by fragment index.
+///
+/// A side table rather than fields on [`Fragment`], because none of it survives
+/// layout: the fragment tree is the output, and carrying a box's specified height
+/// or its margins into it would invite a consumer to depend on them.
+///
+/// They grow in lockstep, so a fragment index is a valid index into every one of
+/// them — which is what [`Tables::grow_to`] is for, and why it is one method
+/// rather than the five parallel `push` calls it replaced at three call sites.
+struct Tables {
+    /// Children accumulated per fragment, as reserved slots.
+    ///
+    /// `Option`, because a slot is reserved when a container's content is
+    /// partitioned and filled when the child's own `Enter` creates its fragment —
+    /// which happens later, after any *anonymous* siblings have already been
+    /// created. Appending instead of reserving ordered them by creation and put
+    /// every anonymous block before every real one.
+    ///
+    /// A slot that is still `None` at `Exit` is a child that generated no box.
+    pending: Vec<Vec<Option<FragmentId>>>,
+    /// The content-box inline size, which children resolve percentages against.
+    inline_sizes: Vec<Au>,
+    /// `None` means `height: auto`, which is resolved from content on the way up.
+    specified_block_sizes: Vec<Option<Au>>,
+    /// The block size this box's own inline content occupies, if any.
+    ///
+    /// Separate from the children cursor because line fragments are positioned by
+    /// [`crate::inline::layout_lines`] rather than by the block stacking pass.
+    inline_content_heights: Vec<Au>,
+    /// Resolved margins, borders and padding.
+    edges: Vec<Edges>,
+}
+
+impl Tables {
+    /// One row, for the initial containing block.
+    fn new(viewport_inline_size: Au) -> Self {
+        Self {
+            pending: vec![Vec::new()],
+            inline_sizes: vec![viewport_inline_size],
+            specified_block_sizes: vec![None],
+            inline_content_heights: vec![Au(0)],
+            edges: vec![Edges::ZERO],
+        }
+    }
+
+    /// Extend every table so that `index` is addressable in all of them.
+    fn grow_to(&mut self, index: usize) {
+        while self.pending.len() <= index {
+            self.pending.push(Vec::new());
+            self.inline_sizes.push(Au(0));
+            self.specified_block_sizes.push(None);
+            self.inline_content_heights.push(Au(0));
+            self.edges.push(Edges::ZERO);
+        }
+    }
 }
 
 /// The resolved box-model edges of one box, in app units.
@@ -54,6 +154,13 @@ struct Edges {
 }
 
 impl Edges {
+    /// No margin, border or padding — what an anonymous block box has (§9.2.1.1).
+    const ZERO: Self = Self {
+        margin: LogicalEdges::ZERO,
+        border: LogicalEdges::ZERO,
+        padding: LogicalEdges::ZERO,
+    };
+
     /// Everything outside the content box, along the inline axis.
     fn inline_surround(&self) -> Au {
         self.margin.inline_sum() + self.border.inline_sum() + self.padding.inline_sum()
@@ -90,63 +197,50 @@ pub fn layout_document(
     ));
     tree.set_root(icb);
 
-    let root_element = first_element(arena)?;
+    // Not the traversal's entry point -- the document node is, below -- but an
+    // empty parse must still be distinguishable from a laid-out document, and
+    // "has a root element" is the distinction the return type promises.
+    first_element(arena)?;
 
-    // Children accumulated per fragment, keyed by fragment index. A side table
-    // rather than building the tree top-down, because `set_children` needs the
-    // whole list at once and the list is only complete on the exit visit.
-    let mut pending: Vec<Vec<FragmentId>> = vec![Vec::new()];
-    let mut inline_sizes: Vec<Au> = vec![viewport_inline_size];
-    // `None` means `height: auto`, which is resolved from content on the way up.
-    let mut specified_block_sizes: Vec<Option<Au>> = vec![None];
-    // The block size this box's own inline content occupies, if any. Separate
-    // from the children cursor because line fragments are positioned by
-    // `layout_lines` rather than by the block stacking pass.
-    let mut inline_content_heights: Vec<Au> = vec![Au(0)];
-    let mut edges: Vec<Edges> = vec![Edges {
-        margin: LogicalEdges::ZERO,
-        border: LogicalEdges::ZERO,
-        padding: LogicalEdges::ZERO,
-    }];
+    let mut tables = Tables::new(viewport_inline_size);
 
+    // The ICB is entered as a block container whose content is the document's.
+    // Starting from the document node rather than from the root element is what
+    // lets `Step::Children` be the only place content is partitioned: a root
+    // element that is not block-level is flattened through by the same rule that
+    // flattens an inline span, rather than by a second copy of it in `Enter`.
     let mut stack = vec![
         Step::Exit { fragment: icb },
-        Step::Enter {
-            node: root_element,
-            parent: icb,
+        Step::Children {
+            fragment: icb,
+            node: arena.document(),
         },
     ];
 
     px_css::view::with_dom(arena, root, |dom| {
         while let Some(step) = stack.pop() {
             match step {
-                Step::Enter { node, parent } => {
+                Step::Enter { node, parent, slot } => {
                     let Some(style) = computed_style(dom, node) else {
                         continue;
                     };
-                    // A box whose formatting context this phase does not
-                    // implement -- flex, grid, inline-block, table -- generates no
-                    // fragment of its own, because laying it out as a block would
-                    // be confidently wrong geometry rather than none.
-                    //
-                    // Its **children are still visited**, attached to the same
-                    // parent. Skipping them too was a review finding and a bad
-                    // one: a single `display: flex` wrapper near the top of a page
-                    // deleted everything beneath it, which is why rust-lang.org
-                    // laid out to 2 fragments while 112 of its elements computed
-                    // `display: block`. Dropping a subtree is not the
-                    // conservative choice it looks like.
+                    // Only block-level nodes are scheduled as `Enter` steps --
+                    // `partition_content` classifies with the same predicate and
+                    // flattens through everything else. This is the belt to that
+                    // braces: a box whose formatting context this phase does not
+                    // implement (flex, grid, inline-block, table) generates no
+                    // fragment, because laying it out as a block would be
+                    // confidently wrong geometry rather than none. Its slot stays
+                    // empty and `Exit` drops it.
                     if !is_block_level(&style) {
-                        for child in children_of(arena, node).into_iter().rev() {
-                            stack.push(Step::Enter {
-                                node: child,
-                                parent,
-                            });
-                        }
                         continue;
                     }
 
-                    let containing = inline_sizes.get(parent.index()).copied().unwrap_or(Au(0));
+                    let containing = tables
+                        .inline_sizes
+                        .get(parent.index())
+                        .copied()
+                        .unwrap_or(Au(0));
                     let mut resolved = resolve_edges(&style, containing);
                     let content_inline = resolve_inline_size(&style, containing, &resolved);
                     centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
@@ -161,83 +255,133 @@ pub fn layout_document(
                         ),
                     ));
 
-                    // Grow the side tables in lockstep with the tree, so every
-                    // fragment index is a valid index into each of them.
-                    while pending.len() <= fragment.index() {
-                        pending.push(Vec::new());
-                        inline_sizes.push(Au(0));
-                        specified_block_sizes.push(None);
-                        inline_content_heights.push(Au(0));
-                        edges.push(Edges {
-                            margin: LogicalEdges::ZERO,
-                            border: LogicalEdges::ZERO,
-                            padding: LogicalEdges::ZERO,
-                        });
-                    }
-                    inline_sizes[fragment.index()] = content_inline;
-                    edges[fragment.index()] = resolved;
-                    specified_block_sizes[fragment.index()] = resolve_block_size(&style);
-                    if let Some(kids) = pending.get_mut(parent.index()) {
-                        kids.push(fragment);
-                    }
-
-                    stack.push(Step::Exit { fragment });
-
-                    let element_kids = children_of(arena, node);
+                    tables.grow_to(fragment.index());
+                    tables.inline_sizes[fragment.index()] = content_inline;
+                    tables.edges[fragment.index()] = resolved;
+                    tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
+                    if let Some(reserved) = tables
+                        .pending
+                        .get_mut(parent.index())
+                        .and_then(|kids| kids.get_mut(slot))
                     {
-                        // The box's own inline-level text: its text nodes, plus
-                        // the text of any non-block descendants, stopping at every
-                        // block-level one. Laid out on the way down, because the
-                        // available inline size is known here and the lines' total
-                        // height is what the Exit pass wants.
-                        //
-                        // The first version only did this for a box with *no*
-                        // element children, so `<div>hello <b>world</b></div>`
-                        // dropped its text entirely and resolved to zero height.
-                        // Stopping at block-level descendants rather than at any
-                        // element is what makes that work without also giving
-                        // `<body>` the text of every block inside it.
-                        let raw = collect_inline_text(dom, arena, node);
-                        let collapsed = crate::inline::collapse_whitespace(&raw);
-                        if !collapsed.is_empty() {
-                            let font_size = Au::from(style.clone_font_size().computed_size());
-                            let context = crate::inline::InlineContext {
-                                text: &collapsed,
-                                font_size,
-                                line_height: crate::inline::line_height_of(&style),
-                                available: content_inline,
+                        *reserved = Some(fragment);
+                    }
+
+                    // Popped in the reverse order: `Children` schedules the
+                    // subtree, and `Exit` runs once all of it has.
+                    stack.push(Step::Exit { fragment });
+                    stack.push(Step::Children { fragment, node });
+                }
+
+                Step::Children { fragment, node } => {
+                    let items = partition_content(dom, arena, node);
+                    let has_block = items.iter().any(|i| matches!(i, Content::Block(_)));
+                    let available = tables
+                        .inline_sizes
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(Au(0));
+                    // An anonymous box inherits from its enclosing non-anonymous
+                    // box (§9.2.1.1), and the container's own style is what the
+                    // inline content is measured with in either branch below.
+                    // Flattening through inline elements loses their fonts, which
+                    // is a limitation of `crate::text`'s single-metric stub rather
+                    // than of this partition.
+                    let style = computed_style(dom, node);
+                    let font_size = style.as_ref().map_or_else(
+                        || crate::geom::px(16),
+                        |s| Au::from(s.clone_font_size().computed_size()),
+                    );
+                    // The fallback is `normal` computed by hand, because the
+                    // document node has no computed style and is the container
+                    // the ICB partitions. Reaching it means the markup put text
+                    // outside `<html>`, which the tree builder normally moves in.
+                    let line_height = style
+                        .as_ref()
+                        .map_or(font_size * 6 / 5, |s| crate::inline::line_height_of(s));
+
+                    if !has_block {
+                        // Only inline content, so no anonymous box is generated:
+                        // §9.2.1.1 wraps inline content only when it has
+                        // block-level *siblings* to be separated from. The lines
+                        // hang directly off this container.
+                        for item in items {
+                            let Content::InlineRun(text) = item else {
+                                continue;
                             };
-                            let (lines, height) = crate::inline::layout_lines(&mut tree, &context);
-                            while pending.len() <= tree.len() {
-                                pending.push(Vec::new());
-                                inline_sizes.push(Au(0));
-                                specified_block_sizes.push(None);
-                                inline_content_heights.push(Au(0));
-                                edges.push(Edges {
-                                    margin: LogicalEdges::ZERO,
-                                    border: LogicalEdges::ZERO,
-                                    padding: LogicalEdges::ZERO,
+                            layout_inline_run(
+                                &mut tree,
+                                &mut tables,
+                                fragment,
+                                &text,
+                                font_size,
+                                line_height,
+                                available,
+                            );
+                        }
+                        continue;
+                    }
+
+                    // Mixed content. Every slot is reserved up front so that a
+                    // block child, whose fragment does not exist until its own
+                    // `Enter`, still lands between the anonymous blocks created
+                    // here and now.
+                    tables.grow_to(fragment.index());
+                    tables.pending[fragment.index()] = vec![None; items.len()];
+
+                    for (slot, item) in items.into_iter().enumerate() {
+                        match item {
+                            Content::Block(child) => stack.push(Step::Enter {
+                                node: child,
+                                parent: fragment,
+                                slot,
+                            }),
+                            Content::InlineRun(text) => {
+                                let anonymous = tree.push(Fragment::new(
+                                    FragmentKind::AnonymousBlock,
+                                    LogicalSize::new(available, Au(0)),
+                                ));
+                                tables.grow_to(anonymous.index());
+                                tables.inline_sizes[anonymous.index()] = available;
+                                if let Some(reserved) = tables
+                                    .pending
+                                    .get_mut(fragment.index())
+                                    .and_then(|kids| kids.get_mut(slot))
+                                {
+                                    *reserved = Some(anonymous);
+                                }
+                                layout_inline_run(
+                                    &mut tree,
+                                    &mut tables,
+                                    anonymous,
+                                    &text,
+                                    font_size,
+                                    line_height,
+                                    available,
+                                );
+                                // An anonymous block has no children of its own
+                                // beyond those lines, so it needs no `Children`
+                                // step -- but it does need `Exit`, which is what
+                                // gives it a block size and positions its lines.
+                                stack.push(Step::Exit {
+                                    fragment: anonymous,
                                 });
                             }
-                            if let Some(kids) = pending.get_mut(fragment.index()) {
-                                kids.extend_from_slice(&lines);
-                            }
-                            inline_content_heights[fragment.index()] = height;
                         }
-                    }
-
-                    // Children pushed in reverse so they are entered in document
-                    // order once popped.
-                    for child in element_kids.into_iter().rev() {
-                        stack.push(Step::Enter {
-                            node: child,
-                            parent: fragment,
-                        });
                     }
                 }
 
                 Step::Exit { fragment } => {
-                    let kids = pending.get(fragment.index()).cloned().unwrap_or_default();
+                    // Reserved slots collapse to the children that exist.
+                    // A `None` is a block child that generated no box -- an
+                    // unimplemented formatting context -- and dropping it here
+                    // rather than at reservation time is what keeps the *other*
+                    // slots in document order.
+                    let kids: Vec<FragmentId> = tables
+                        .pending
+                        .get(fragment.index())
+                        .map(|slots| slots.iter().copied().flatten().collect())
+                        .unwrap_or_default();
 
                     // Stack the children along the block axis. No margin
                     // Margin collapsing between siblings, per CSS 2.1 §8.3.1.
@@ -252,11 +396,13 @@ pub fn layout_document(
                     //
                     // Inline content sits above any block children, and the line
                     // fragments were already positioned relative to it.
-                    let mut cursor = inline_content_heights
+                    let mut cursor = tables
+                        .inline_content_heights
                         .get(fragment.index())
                         .copied()
                         .unwrap_or(Au(0));
-                    let surround = edges
+                    let surround = tables
+                        .edges
                         .get(fragment.index())
                         .map_or(Au(0), Edges::block_surround);
                     // The parent's content-box origin, relative to its own
@@ -266,14 +412,16 @@ pub fn layout_document(
                     // twice, which is what a review found -- a child of a
                     // 30px-margin parent inside an 8px-margin body came out at
                     // 35px, which is neither absolute (43) nor parent-relative (5).
-                    let content_inline_start = edges
+                    let content_inline_start = tables
+                        .edges
                         .get(fragment.index())
                         .map_or(Au(0), |e| e.border.inline_start + e.padding.inline_start);
                     // The block axis needs the same origin and did not have it at
                     // all: children were placed at the parent's border-box top,
                     // inside its own top padding, while the inline axis did
                     // include padding. The two axes disagreed.
-                    let content_block_start = edges
+                    let content_block_start = tables
+                        .edges
                         .get(fragment.index())
                         .map_or(Au(0), |e| e.border.block_start + e.padding.block_start);
 
@@ -301,7 +449,8 @@ pub fn layout_document(
                             }
                             continue;
                         }
-                        let kid_margin = edges
+                        let kid_margin = tables
+                            .edges
                             .get(kid.index())
                             .map_or(LogicalEdges::ZERO, |e| e.margin);
 
@@ -335,7 +484,8 @@ pub fn layout_document(
                     cursor += pending_margin;
 
                     tree.set_children(fragment, &kids);
-                    let specified = specified_block_sizes
+                    let specified = tables
+                        .specified_block_sizes
                         .get(fragment.index())
                         .copied()
                         .unwrap_or(None);
@@ -391,16 +541,54 @@ fn first_element(arena: &Arena) -> Option<NodeId> {
         .find(|id| arena.get(*id).is_some_and(|n| n.element_name().is_some()))
 }
 
-/// The inline-level text belonging to `node`, stopping at block-level children.
+/// Lay `text` out as lines inside `container`, and record their total height.
 ///
-/// A block container's inline content is its own text nodes and the text of any
-/// inline descendants — not the text of block descendants, which form their own
-/// boxes and lay out their own lines. Without the stop, `<body>` would collect
-/// every word on the page and lay it out again as body's own lines.
+/// Shared by the two places inline content can live: directly inside a block
+/// container that has no block-level children, and inside an anonymous block box
+/// generated because it does. The two differ only in which fragment the lines
+/// hang off, which is exactly what makes §9.2.1.1 cheap to implement here.
+fn layout_inline_run(
+    tree: &mut FragmentTree,
+    tables: &mut Tables,
+    container: FragmentId,
+    text: &str,
+    font_size: Au,
+    line_height: Au,
+    available: Au,
+) {
+    let context = crate::inline::InlineContext {
+        text,
+        font_size,
+        line_height,
+        available,
+    };
+    let (lines, height) = crate::inline::layout_lines(tree, &context);
+    tables.grow_to(tree.len());
+    if let Some(kids) = tables.pending.get_mut(container.index()) {
+        kids.extend(lines.into_iter().map(Some));
+    }
+    if let Some(slot) = tables.inline_content_heights.get_mut(container.index()) {
+        *slot = height;
+    }
+}
+
+/// Partition `node`'s content into runs of inline content and block-level boxes.
 ///
-/// Iterative, and a pre-order walk so the text comes out in document order.
-fn collect_inline_text(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> String {
-    let mut out = String::new();
+/// CSS 2.1 §9.2.1.1, and the one walk that used to be two: an earlier version
+/// collected *all* of a container's inline text into a single run laid out before
+/// *all* of its block children, so `<div>one<p>two</p>three</div>` laid out
+/// "onethree" above the paragraph. Document order was lost, and no anonymous box
+/// was generated because nothing recorded that the content was mixed.
+///
+/// Flattens through non-block-level elements: an inline `<span>`'s text belongs to
+/// the run it sits in, and a block-level element *inside* that span ends the run
+/// and becomes an item of its own. That is the block-in-inline case, and it is
+/// where most of the vendored CSS2 reftests that exercise anonymous boxes live.
+///
+/// Iterative, and a pre-order walk so the items come out in document order.
+fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> Vec<Content> {
+    let mut out = Vec::new();
+    let mut run = String::new();
     let mut stack: Vec<NodeId> = children_in_order(arena, node);
     stack.reverse();
 
@@ -410,22 +598,49 @@ fn collect_inline_text(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) 
         };
 
         if current.element_name().is_some() {
-            // A block-level element is a box of its own; its text is not ours.
-            let is_block = computed_style(dom, id).is_some_and(|s| is_block_level(&s));
-            if is_block {
+            let style = computed_style(dom, id);
+            // `display: none` generates no box and no *content* -- neither the
+            // element nor its descendants (§9.2.4). Flattening through it the way
+            // an inline element is flattened through put the UA sheet's
+            // `title { display: none }` text into an anonymous block at the top of
+            // every document in the reftest corpus, which is how this was found:
+            // a test whose title was longer than its reference's laid out a wider
+            // first line and failed on a string neither document renders.
+            if style.as_ref().is_some_and(|s| is_display_none(s)) {
                 continue;
             }
-            let mut kids = children_in_order(arena, id);
-            kids.reverse();
-            stack.extend(kids);
+            if style.is_some_and(|s| is_block_level(&s)) {
+                flush_run(&mut run, &mut out);
+                out.push(Content::Block(id));
+            } else {
+                let mut kids = children_in_order(arena, id);
+                kids.reverse();
+                stack.extend(kids);
+            }
             continue;
         }
 
         if let Some(text) = current.text() {
-            out.push_str(text);
+            run.push_str(text);
         }
     }
+    flush_run(&mut run, &mut out);
     out
+}
+
+/// End the run being accumulated, dropping it if it collapses to nothing.
+///
+/// Whitespace is collapsed here rather than at the point of use so that a run of
+/// only whitespace between two block boxes -- the newline in
+/// `<div><p>a</p>\n<p>b</p></div>`, which every hand-written document has -- does
+/// not generate an empty anonymous block between them. §9.2.1.1 says as much:
+/// white space that would collapse away generates no anonymous box.
+fn flush_run(run: &mut String, out: &mut Vec<Content>) {
+    let collapsed = crate::inline::collapse_whitespace(run);
+    run.clear();
+    if !collapsed.trim().is_empty() {
+        out.push(Content::InlineRun(collapsed));
+    }
 }
 
 /// Every child of `node`, elements and text alike, in document order.
@@ -438,23 +653,6 @@ fn children_in_order(arena: &Arena, node: NodeId) -> Vec<NodeId> {
     while let Some(id) = next {
         let Some(child) = arena.get(id) else { break };
         out.push(id);
-        next = child.next_sibling();
-    }
-    out
-}
-
-/// The element children of `node`, in document order.
-fn children_of(arena: &Arena, node: NodeId) -> Vec<NodeId> {
-    let mut out = Vec::new();
-    let Some(parent) = arena.get(node) else {
-        return out;
-    };
-    let mut next = parent.first_child();
-    while let Some(id) = next {
-        let Some(child) = arena.get(id) else { break };
-        if child.element_name().is_some() {
-            out.push(id);
-        }
         next = child.next_sibling();
     }
     out
@@ -477,6 +675,24 @@ fn computed_style(
 /// block-level too, and each establishes a formatting context this phase does not
 /// implement — laying them out as plain blocks would produce confidently wrong
 /// geometry rather than none.
+/// Whether this element generates no box at all.
+///
+/// Distinct from "not block-level", which this phase also declines to lay out:
+/// an unimplemented formatting context still has *content*, and its text belongs
+/// to the inline run it sits in. `display: none` has none, and the difference is
+/// the whole of §9.2.4.
+fn is_display_none(style: &ComputedValues) -> bool {
+    use style::values::computed::Display;
+    style.clone_display() == Display::None
+}
+
+/// Whether this box participates in block layout.
+///
+/// Only `display: block` for now. `inline-block`, `flex` and `grid` are
+/// block-level too, and each establishes a formatting context this phase does not
+/// implement — laying them out as plain blocks would produce confidently wrong
+/// geometry rather than none. Their *content* is still visited, flattened into the
+/// run around them by [`partition_content`]; only `display: none` is dropped.
 fn is_block_level(style: &ComputedValues) -> bool {
     use style::values::computed::Display;
     style.clone_display() == Display::Block
@@ -694,6 +910,179 @@ mod tests {
 
         let tree = layout_document(&arena, &style_root, px(800)).expect("a root element exists");
         (tree, arena)
+    }
+
+    /// Every fragment kind in the tree, in layout order.
+    fn kinds(tree: &FragmentTree) -> Vec<FragmentKind> {
+        tree.in_layout_order()
+            .into_iter()
+            .filter_map(|(_, id)| tree.get(id).map(|f| f.kind))
+            .collect()
+    }
+
+    /// The block-axis offset and height of every fragment of `kind`.
+    fn bands(tree: &FragmentTree, kind: FragmentKind) -> Vec<(Au, Au)> {
+        tree.in_layout_order()
+            .into_iter()
+            .filter_map(|(_, id)| tree.get(id))
+            .filter(|f| f.kind == kind)
+            .map(|f| (f.block_offset, f.size.block))
+            .collect()
+    }
+
+    const FLAT: &str = "html, body, div, p { display: block; margin: 0; padding: 0 } \
+         * { font-size: 10px; line-height: 20px }";
+
+    /// §9.2.1.1: inline content with no block-level siblings needs no wrapper.
+    ///
+    /// The negative half of the rule, and the one a naive implementation gets
+    /// wrong by wrapping unconditionally — which costs a level of nesting on every
+    /// paragraph on the web and makes the reftest comparison disagree with every
+    /// reference that spells the structure out.
+    #[test]
+    fn block_inline_only_content_generates_no_anonymous_box() {
+        let (tree, _) = layout("<html><body><div>just text</div></body></html>", FLAT);
+        assert!(
+            !kinds(&tree).contains(&FragmentKind::AnonymousBlock),
+            "a container of only inline content holds its lines directly: {:?}",
+            kinds(&tree)
+        );
+    }
+
+    /// §9.2.1.1: block-level content with no inline siblings needs no wrapper.
+    #[test]
+    fn block_block_only_content_generates_no_anonymous_box() {
+        let (tree, _) = layout(
+            "<html><body><div><p>one</p><p>two</p></div></body></html>",
+            FLAT,
+        );
+        assert!(
+            !kinds(&tree).contains(&FragmentKind::AnonymousBlock),
+            "a container of only block content generates no wrapper: {:?}",
+            kinds(&tree)
+        );
+    }
+
+    /// Mixed content wraps each inline run, and *only* the inline runs.
+    ///
+    /// The canonical example from §9.2.1.1. Three items — text, a block, more text
+    /// — become three block-level children, two of them anonymous.
+    #[test]
+    fn block_mixed_content_wraps_each_inline_run() {
+        let (tree, _) = layout(
+            "<html><body><div>before<p>middle</p>after</div></body></html>",
+            FLAT,
+        );
+        let anonymous = bands(&tree, FragmentKind::AnonymousBlock);
+        assert_eq!(
+            anonymous.len(),
+            2,
+            "one anonymous box per inline run, got {:?}",
+            kinds(&tree)
+        );
+    }
+
+    /// The anonymous boxes sit *around* the block, not before it.
+    ///
+    /// This is the property the restructure exists for. The previous
+    /// implementation collected all of a container's inline text into one run laid
+    /// out before all of its block children, so "before" and "after" both rendered
+    /// above the paragraph. Asserting the count alone would not have caught that;
+    /// asserting the sibling sequence is what does.
+    #[test]
+    fn block_mixed_content_keeps_document_order() {
+        let (tree, _) = layout(
+            "<html><body><div>before<p>middle</p>after</div></body></html>",
+            FLAT,
+        );
+
+        // The <div>'s children, by construction: the only fragment in this
+        // document with three of them.
+        let container = tree
+            .in_layout_order()
+            .into_iter()
+            .map(|(_, id)| id)
+            .find(|id| tree.children(*id).len() == 3)
+            .expect("the div has three block-level children");
+
+        let sequence: Vec<(FragmentKind, Au, Au)> = tree
+            .children(container)
+            .iter()
+            .filter_map(|id| tree.get(*id))
+            .map(|f| (f.kind, f.block_offset, f.size.block))
+            .collect();
+
+        // Three 20px bands, stacked, with the real block between the two
+        // anonymous ones. Both the kinds and the offsets are asserted: the kinds
+        // alone would pass if all three were laid out at the same place, and the
+        // offsets alone would pass if the wrapper were the <p>.
+        assert_eq!(
+            sequence,
+            vec![
+                (FragmentKind::AnonymousBlock, px(0), px(20)),
+                (FragmentKind::Block, px(20), px(20)),
+                (FragmentKind::AnonymousBlock, px(40), px(20)),
+            ]
+        );
+    }
+
+    /// A block inside an inline splits the run around it (§9.2.1.1).
+    ///
+    /// `block-in-inline`, which is what most of the vendored `box-display` and
+    /// `visuren` reftests exercise. The `<span>` is not a box this phase lays out,
+    /// but its *content* is, and the block-level child inside it still has to end
+    /// the run it interrupts rather than being hoisted past it.
+    #[test]
+    fn block_a_block_inside_an_inline_splits_the_run() {
+        let (tree, _) = layout(
+            "<html><body><div><span>before<p>middle</p>after</span></div></body></html>",
+            FLAT,
+        );
+        assert_eq!(
+            bands(&tree, FragmentKind::AnonymousBlock).len(),
+            2,
+            "the block ends the run inside the span: {:?}",
+            kinds(&tree)
+        );
+    }
+
+    /// Whitespace between two blocks generates no anonymous box (§9.2.1.1).
+    ///
+    /// Every hand-written document has a newline between its block elements, and
+    /// wrapping each one would put an empty line box between every pair of
+    /// paragraphs on the web — visible as extra height, not as nothing.
+    #[test]
+    fn block_whitespace_between_blocks_generates_no_anonymous_box() {
+        let (tree, _) = layout(
+            "<html><body><div>\n  <p>one</p>\n  <p>two</p>\n</div></body></html>",
+            FLAT,
+        );
+        assert!(
+            !kinds(&tree).contains(&FragmentKind::AnonymousBlock),
+            "collapsible white space generates no box: {:?}",
+            kinds(&tree)
+        );
+    }
+
+    /// `display: none` contributes no content, not even text (§9.2.4).
+    ///
+    /// Distinct from the formatting contexts this phase declines to lay out, whose
+    /// text *does* belong to the run around them. Getting the two confused put the
+    /// UA stylesheet's `title { display: none }` into an anonymous block at the top
+    /// of every document in the reftest corpus.
+    #[test]
+    fn block_display_none_contributes_no_text() {
+        let css = "html, body, div { display: block; margin: 0; padding: 0 } \
+             .hidden { display: none } * { font-size: 10px; line-height: 20px }";
+        let (tree, _) = layout(
+            "<html><body><div><span class=hidden>invisible</span></div></body></html>",
+            css,
+        );
+        assert!(
+            !kinds(&tree).contains(&FragmentKind::Line),
+            "a display:none subtree produces no line boxes: {:?}",
+            kinds(&tree)
+        );
     }
 
     #[test]

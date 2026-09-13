@@ -61,33 +61,47 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 
 /// How many pairs must match.
 ///
-/// **Seven, down from a previously recorded twenty-five, and the fall is a
-/// correction rather than a regression.** This is the uncomfortable case the
-/// ratchet was built for, so the evidence is here rather than in a commit message.
+/// **Fifty-two, raised from seven by anonymous block box generation (§9.2.1.1).**
 ///
-/// A code review found three defects in box generation: a box whose formatting
-/// context is unimplemented pruned its entire subtree, inline text was dropped
-/// unless a box had no element children, and child offsets used two different
-/// origins on the two axes. Fixing them made the engine lay out substantially
-/// more of every document — measured across the 210 corpus files, 1357 fragments
-/// became 2212, and the number of files producing three fragments or fewer fell
-/// from **39 to 2**.
+/// Two changes, and the smaller one accounts for most of it. The intended change
+/// was the partition itself: a block container's content is split into runs of
+/// inline content and block-level boxes in document order, and the inline runs are
+/// wrapped in anonymous blocks when — and only when — they have block-level
+/// siblings. That is what the `box-display` and `visuren` directories of this
+/// subset are largely about, and on its own it moved the count from 7 to 8.
 ///
-/// Those 39 were laying out nothing at all: an initial containing block, `<html>`
-/// and `<body>`. A test and a reference that both lay out nothing agree
-/// perfectly, and roughly seventeen pairs were counted as matching on exactly
-/// that basis. The old 25 was measuring agreement-in-brokenness, which the
-/// reviewer predicted in as many words before any of this was measured.
+/// The unintended one is why it is 52. Flattening a container's content through
+/// non-block elements had been flattening it through `display: none` ones too, so
+/// the user-agent stylesheet's `title { display: none }` put each document's
+/// `<title>` text into an anonymous block at the top of the page. Every file in
+/// this corpus has a title, and a test's title is never its reference's — so a
+/// pair could not agree about its first line no matter what the engine did below
+/// it. §9.2.4 is unambiguous that `display: none` generates no box *and no
+/// content*; the fix is four lines and it is worth ninety percent of this number.
 ///
-/// So the engine improved and the score fell, because the score had been
-/// counting the wrong thing. Lowering a floor is the move that most looks like
-/// gaming a gate, which is why it is spelled out: the denominator is unchanged
-/// at 105, `TRIVIAL_FRAGMENTS` now rejects the empty agreements outright, and the
-/// number that remains is 7 pairs that genuinely lay out the same.
+/// The previous floor of 7 was itself a correction, and that history is kept
+/// because lowering a floor is the move that most looks like gaming a gate:
+///
+/// > A code review found three defects in box generation: a box whose formatting
+/// > context is unimplemented pruned its entire subtree, inline text was dropped
+/// > unless a box had no element children, and child offsets used two different
+/// > origins on the two axes. Fixing them made the engine lay out substantially
+/// > more of every document — measured across the 210 corpus files, 1357 fragments
+/// > became 2212, and the number of files producing three fragments or fewer fell
+/// > from **39 to 2**. Those 39 were laying out nothing at all: an initial
+/// > containing block, `<html>` and `<body>`. A test and a reference that both lay
+/// > out nothing agree perfectly, and roughly seventeen pairs were counted as
+/// > matching on exactly that basis. The old 25 was measuring
+/// > agreement-in-brokenness, which the reviewer predicted in as many words before
+/// > any of this was measured.
+///
+/// [`TRIVIAL_FRAGMENTS`] is what keeps that from recurring, and it is doing work
+/// here: four more pairs agree than this number counts, and they are rejected for
+/// agreeing about nothing.
 ///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 7;
+const MATCH_FLOOR: usize = 52;
 
 /// A layout with no more fragments than this has no content in it.
 ///
