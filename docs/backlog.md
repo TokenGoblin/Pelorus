@@ -1028,3 +1028,41 @@ five pairs it was blocking.
   Phase 6 one.
 - **Note:** `compat-list` keeps its exemption for a different and still-valid
   reason — it is a Phase 0 deliverable only the user can produce.
+
+## px-net rejected a certificate the OS accepts, once, and then stopped
+
+- **Found in:** Phase 6, pointing `px-fetch` at eight real sites.
+- **Belongs to:** Phase 3 / ADR 012 (trust anchors).
+- **What happened:** `https://lite.cnn.com` failed with
+  `transport error: invalid peer certificate: UnknownIssuer`. `curl` fetched the
+  same URL successfully at the same moment (`ssl_verify_result=0`). Minutes later,
+  with no code change, `px-fetch` fetched it successfully too.
+- **Leading explanation, not proven:** Windows populates `LocalMachine\Root`
+  **lazily**. The Microsoft Trusted Root Program is not all present on disk; the OS
+  downloads a root on demand the first time a chain needs it. `px-sandbox`'s
+  `platform_roots()` *enumerates* that store, so it sees only the roots already
+  cached — while schannel (curl, Edge) triggers the download and then succeeds.
+  The `curl` call in the middle of this sequence is the most likely thing that
+  installed GlobalSign's ECC Root CA - R5 locally, which is why the third attempt
+  worked.
+- **Evidence gathered:** `root_store()` reports `Platform` with **46** anchors, all
+  46 accepted by rustls, none rejected. `Cert:\LocalMachine\Root` also holds 46 and
+  *does* contain `GlobalSign ECC Root CA - R5` — but that reading was taken after
+  `curl` had run, so it cannot distinguish "was always there" from "arrived just
+  now". Seven other sites including `globalsign.com` fetch fine.
+- **Why it matters more than one flaky fetch:** it makes a trust decision depend on
+  the machine's browsing history rather than on policy. A fresh install would
+  reject sites a browser accepts, non-deterministically, and the failure looks like
+  a site problem rather than a client one. ADR 012 chose the platform store so an
+  administrator's distrust decisions are honoured; enumerating it turns out not to
+  be the same thing as asking the platform.
+- **What to do:** reproduce deliberately — on a machine (or fresh VM) that has
+  never visited the site, enumerate the store, attempt the fetch, and enumerate
+  again. If the root count grows, this is confirmed. The fix is then either to ask
+  Windows to build and verify the chain (`CertGetCertificateChain`) instead of
+  handing rustls a snapshot, or to accept the bundled Mozilla floor as the source
+  on Windows and lose ADR 012's administrator-override property — which is a real
+  trade and wants the ADR reopened, not a patch.
+- **Do not** paper over it by merging the platform store with the bundled one.
+  `tls.rs` explains at length why those are never unioned, and that reasoning is
+  still right.
