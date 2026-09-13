@@ -9,7 +9,16 @@ files       210
 
 Why only .html: css/CSS2 holds 10,501 .xht files against 816 .html. px-dom has
 no XML path, and whether html5ever's HTML parser produces the tree an XML parser
-would is an empirical question about a parser this project did not write. ADR 029.
+would was an empirical question about a parser this project did not write.
+
+Answered at the end of Phase 6 by sampling thirty .xht files: it does not, and not
+for the reason you would guess. There are no self-closing non-void elements in the
+sample at all. What there is, in half of them, is a bare `<![CDATA[` inside
+`<style>` -- and an HTML parser hands that to the CSS parser as stylesheet text,
+which discards the entire stylesheet rather than one rule. A test and a reference
+with no styles are both the user-agent skeleton, and two skeletons agree, so these
+files would raise the conformance number without measuring anything. ADR 029 has
+the measurement.
 
 Why these directories: they are §9 Phase 6's scope -- box tree, BFCs, inline,
 floats, positioned. generated-content, pagination, lists and tables each need a

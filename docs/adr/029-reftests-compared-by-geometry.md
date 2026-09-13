@@ -86,9 +86,45 @@ the corpus exists and is runnable.
 **Include the `.xht` files by parsing them as HTML.** Would multiply the corpus by
 thirteen. Rejected on `/CLAUDE.md`'s rule about inferring behaviour: whether
 html5ever's HTML parser produces the tree an XML parser would, for these files, is
-an empirical question about a parser this project did not write. Revisit if a
-real XML path arrives, or by checking a sample against the XML parse — but not by
-assuming.
+an empirical question about a parser this project did not write.
+
+**Checked at the end of Phase 6, and the answer is no.** Thirty `.xht` files were
+sampled across the six directories this subset uses, at the pinned commit. Two
+things were looked for and only one of them was there:
+
+- **Self-closing non-void elements — none.** `<div/>` closes in XML and does not in
+  HTML, and that is the divergence everyone expects. Every `/>` in the sample is on
+  a void element (`br`, `img`, `link`, `meta`), where the two parsers agree. So the
+  expected problem is not the problem.
+- **A bare `<![CDATA[` inside `<style>` — in half of them.** Fifteen of thirty, all
+  the same shape: `<style type="text/css"><![CDATA[` … `]]></style>`, not the
+  comment-wrapped `/*<![CDATA[*/` idiom that survives both parsers.
+
+HTML parses `<style>` content as raw text, so the CDATA markers reach the CSS
+parser as stylesheet text. Measured rather than reasoned about, with px-dom and
+px-css on a two-rule stylesheet:
+
+```
+with CDATA: stylesheet text begins "<![CDATA[\ndiv { height: "
+with CDATA: [(800, 0), (800, 0), (800, 0), (800, 0), (800, 0)]
+without:    [(800, 250), (800, 250), (800, 250), (200, 200), (800, 50)]
+```
+
+**The whole stylesheet is lost, not the first rule.** CSS error recovery consumes
+everything after the unexpected token, so a `div` that asked for 200×200 comes out
+800×0 along with everything else.
+
+That is worse than a corpus that fails, because it is a corpus that *does not
+fail*: a test and its reference stripped of their stylesheets are both the
+user-agent skeleton, and two skeletons agree. Adding 10,501 files this way would
+move the conformance number without measuring anything — the same
+agreement-in-brokenness that made this subset's own count fall from 25 to 7 once
+the boxes were being generated properly.
+
+Revisit if a real XML path arrives. A vendoring-time transform that strips the
+CDATA markers from `<style>` contents is mechanical and auditable and would work,
+but it edits vendored test files, which is a decision for its own ADR rather than
+a line in the fetch script.
 
 ## Consequences
 
@@ -158,7 +194,8 @@ Wrong if a test passes here and fails a real reftest run at Phase 8 for a reason
 other than paint. That is the check this decision is ultimately betting on, and it
 is two phases away.
 
-Wrong in the cheapest way if html5ever turns out to parse the `.xht` files into
-the same tree an XML parser would — in which case the corpus is thirteen times
-larger than this ADR settles for. Checkable by sampling, and worth doing before
-Phase 7 rather than after.
+~~Wrong in the cheapest way if html5ever turns out to parse the `.xht` files into
+the same tree an XML parser would.~~ **Checked at the end of Phase 6 and settled:
+it does not, and the reason is a bare `<![CDATA[` inside `<style>` rather than the
+self-closing tags everyone expects.** See the rejected alternative above for the
+measurement. The subset stays at 105 pairs.

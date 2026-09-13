@@ -246,9 +246,41 @@ Not yet written down as backlog because they are features rather than defects:
 inline boxes (a `<span>`'s own borders and padding, and `display: inline-block`),
 tables, and `vertical-align`, which needs the font metrics Phase 9 brings.
 
-## One thing to fix before Phase 7 starts
+## The `.xht` question ADR 029 left open, now closed
 
-ADR 029 says to check whether html5ever parses the corpus's `.xht` files into the
-same tree an XML parser would. If it does, the available subset is thirteen times
-larger than this phase settled for, and the threshold conversation changes shape.
-It is checkable by sampling and worth doing before Phase 7 rather than after.
+ADR 029 held the subset to `.html` files -- 105 pairs against a possible 1,400 --
+because whether html5ever's HTML parser produces the tree an XML parser would was
+an empirical question it declined to guess at. Thirty `.xht` files were sampled
+across the six directories at the pinned commit, and the answer is **no**, for a
+reason that is not the expected one.
+
+There are **no self-closing non-void elements in the sample at all**. `<div/>`
+closing in XML and not in HTML is the divergence everyone reaches for, and every
+`/>` in these files is on a void element where the two parsers agree.
+
+What there is, in fifteen of thirty, is a bare `<![CDATA[` immediately inside
+`<style type="text/css">` -- not the comment-wrapped `/*<![CDATA[*/` idiom that
+survives both parsers. HTML parses `<style>` content as raw text, so the markers
+reach the CSS parser as stylesheet text. Measured with px-dom and px-css rather
+than reasoned about:
+
+```
+with CDATA: stylesheet text begins "<![CDATA[
+div { height: "
+with CDATA: [(800, 0), (800, 0), (800, 0), (800, 0), (800, 0)]
+without:    [(800, 250), (800, 250), (800, 250), (200, 200), (800, 50)]
+```
+
+**The whole stylesheet is discarded, not the first rule.** A `div` that asked for
+200x200 comes out 800x0, along with everything else.
+
+That is worse than a corpus that fails, because it is one that does not: a test
+and its reference stripped of their stylesheets are both the user-agent skeleton,
+and two skeletons agree. Adding ten thousand files this way would move the
+conformance number without measuring anything -- the same agreement-in-brokenness
+that made this subset's own count fall from 25 to 7 once boxes were being
+generated properly.
+
+A vendoring-time transform stripping the markers from `<style>` contents would
+work and is mechanical and auditable, but it edits vendored test files. That is a
+decision for its own ADR rather than a line in the fetch script.
