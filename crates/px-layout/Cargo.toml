@@ -18,3 +18,7 @@ px-css = { path = "../px-css", version = "0.0.0" }
 px-dom = { path = "../px-dom", version = "0.0.0" }
 stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
 
+[dev-dependencies]
+# The reftest harness reads <style> elements out of the corpus, which means
+# naming html5ever's local_name! macro. Same version px-dom resolves.
+html5ever = "0.39.0"

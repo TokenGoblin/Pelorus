@@ -841,6 +841,7 @@ name = "px-layout"
 version = "0.0.0"
 dependencies = [
  "app_units",
+ "html5ever",
  "px-css",
  "px-dom",
  "stylo",
