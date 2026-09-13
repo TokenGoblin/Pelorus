@@ -215,9 +215,16 @@ pub fn layout_document(
                     let kids = pending.get(fragment.index()).cloned().unwrap_or_default();
 
                     // Stack the children along the block axis. No margin
-                    // collapsing yet: adjacent margins both apply, which is
-                    // wrong per §8.3.1 and is a named gap rather than a silent
-                    // approximation.
+                    // Margin collapsing between siblings, per CSS 2.1 §8.3.1.
+                    //
+                    // Two adjoining vertical margins collapse into one whose size
+                    // is the larger of the two — or, when they have opposite
+                    // signs, the sum of the most positive and the most negative.
+                    // "Adjoining" here means only sibling-to-sibling: collapsing
+                    // *through* a parent, which happens when no border or padding
+                    // separates a parent from its first or last child, is not
+                    // implemented and is still a named gap.
+                    //
                     // Inline content sits above any block children, and the line
                     // fragments were already positioned relative to it.
                     let mut cursor = inline_content_heights
@@ -230,6 +237,11 @@ pub fn layout_document(
                     let inline_start = edges.get(fragment.index()).map_or(Au(0), |e| {
                         e.margin.inline_start + e.border.inline_start + e.padding.inline_start
                     });
+
+                    // The margin left over from the previous sibling's bottom
+                    // edge, waiting to collapse with the next one's top.
+                    let mut pending_margin = Au(0);
+                    let mut first_in_flow = true;
 
                     for kid in &kids {
                         // Line fragments were already positioned by
@@ -245,14 +257,29 @@ pub fn layout_document(
                         let kid_margin = edges
                             .get(kid.index())
                             .map_or(LogicalEdges::ZERO, |e| e.margin);
-                        cursor += kid_margin.block_start;
+
+                        // The first in-flow child's top margin has nothing to
+                        // collapse against here, because collapsing it with the
+                        // parent's is the through-the-parent case this does not
+                        // implement.
+                        cursor += if first_in_flow {
+                            kid_margin.block_start
+                        } else {
+                            collapse(pending_margin, kid_margin.block_start)
+                        };
+                        first_in_flow = false;
+
                         if let Some(kid_fragment) = tree.get_mut(*kid) {
                             kid_fragment.block_offset = cursor;
                             kid_fragment.inline_offset = inline_start + kid_margin.inline_start;
                             cursor += kid_fragment.size.block;
                         }
-                        cursor += kid_margin.block_end;
+                        pending_margin = kid_margin.block_end;
                     }
+                    // The last child's bottom margin is inside this box's content
+                    // height. Collapsing it out through the parent is the case
+                    // above that is not implemented.
+                    cursor += pending_margin;
 
                     tree.set_children(fragment, &kids);
                     let specified = specified_block_sizes
@@ -365,6 +392,22 @@ fn resolve_edges(style: &ComputedValues, containing_inline: Au) -> Edges {
             inline_start: padding.padding_left.to_used_value(containing_inline),
             inline_end: padding.padding_right.to_used_value(containing_inline),
         },
+    }
+}
+
+/// Collapse two adjoining vertical margins into one, per CSS 2.1 §8.3.1.
+///
+/// The larger of the two when both have the same sign; the sum of the most
+/// positive and the most negative when they differ. Two negative margins collapse
+/// to the more negative, which the "maximum of the absolute values" phrasing gets
+/// wrong and which `min` here gets right.
+fn collapse(a: Au, b: Au) -> Au {
+    if a >= Au(0) && b >= Au(0) {
+        if a > b { a } else { b }
+    } else if a <= Au(0) && b <= Au(0) {
+        if a < b { a } else { b }
+    } else {
+        a + b
     }
 }
 
@@ -669,5 +712,58 @@ mod tests {
             px(20) * i32::try_from(lines).expect("few lines"),
             "the block is as tall as its lines"
         );
+    }
+    /// Adjoining sibling margins collapse to the larger, not the sum (§8.3.1).
+    #[test]
+    fn block_adjoining_sibling_margins_collapse_to_the_larger() {
+        let (tree, _arena) = layout(
+            "<html><body><div id=a></div><div id=b></div></body></html>",
+            "html, body { display: block; margin: 0; padding: 0 }              div { display: block; height: 20px; padding: 0; border: 0 }              #a { margin-bottom: 30px } #b { margin-top: 10px }",
+        );
+        let order = tree.in_layout_order();
+        let second = order
+            .iter()
+            .filter(|(depth, _)| *depth == 3)
+            .nth(1)
+            .expect("two divs at depth 3");
+        let fragment = tree.get(second.1).expect("resolves");
+        assert_eq!(
+            fragment.block_offset,
+            px(50),
+            "20px box + max(30, 10) collapsed margin, not 20 + 30 + 10"
+        );
+    }
+
+    /// A positive and a negative margin add rather than taking a maximum.
+    #[test]
+    fn block_opposite_sign_margins_are_summed() {
+        let (tree, _arena) = layout(
+            "<html><body><div id=a></div><div id=b></div></body></html>",
+            "html, body { display: block; margin: 0; padding: 0 }              div { display: block; height: 20px; padding: 0; border: 0 }              #a { margin-bottom: 30px } #b { margin-top: -10px }",
+        );
+        let order = tree.in_layout_order();
+        let second = order
+            .iter()
+            .filter(|(depth, _)| *depth == 3)
+            .nth(1)
+            .expect("two divs at depth 3");
+        let fragment = tree.get(second.1).expect("resolves");
+        assert_eq!(
+            fragment.block_offset,
+            px(40),
+            "20px box + (30 + -10), because the signs differ"
+        );
+    }
+
+    /// Two negative margins collapse to the *more* negative.
+    ///
+    /// The "maximum of the absolute values" phrasing gets this wrong; §8.3.1 says
+    /// the most negative wins, and this is the case that distinguishes them.
+    #[test]
+    fn block_two_negative_margins_collapse_to_the_more_negative() {
+        assert_eq!(collapse(px(-10), px(-30)), px(-30));
+        assert_eq!(collapse(px(-30), px(-10)), px(-30));
+        assert_eq!(collapse(px(10), px(30)), px(30));
+        assert_eq!(collapse(px(30), px(-10)), px(20));
     }
 }
