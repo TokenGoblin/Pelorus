@@ -193,11 +193,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    # Phase 3's deliverable, red until the phase closes. Not marked required
-    # yet for the same reason compat-list is not: a job that is red for a known
-    # and recorded reason teaches people to ignore red, unless it is separated
-    # from the ones that mean something is broken.
-    continue-on-error: true
+    # `continue-on-error: true` lived here while Phase 3 was open and outlived it
+    # by three phases. Phase 5 recorded that in docs/backlog.md when it removed the
+    # same line from the style job; Phase 6 rediscovered it from scratch, removing
+    # the same line from the layout job, and filed a duplicate before noticing.
+    # Two phases deferred it as out-of-phase, correctly, and the effect was that a
+    # green job nobody owned stayed unenforced. Deleted on the third encounter.
     steps:
       - uses: actions/checkout@v4
       - name: Phase 3 gate

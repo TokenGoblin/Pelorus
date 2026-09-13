@@ -891,27 +891,16 @@ Format: one entry per defect.
   `em`, `rem`, percentages and absolute units, which
   `crates/px-css/tests/properties.rs` documents at its fixture table.
 
-## The network job still carries continue-on-error, and Phase 3 has merged
+## ~~The network job still carries continue-on-error~~ — done in Phase 6
 
-- **Found in:** phase 5, removing the same line from the style job
-- **Belongs to:** phase 3's job; a one-line change
-- **What:** `.github/workflows/gate.yml`'s `network` job still sets
-  `continue-on-error: true`, with a comment explaining it is red until Phase 3
-  closes. Phase 3 closed and merged, and the job passes.
-- **Why it matters:** the line's own comment, on the `dom` job that removed it,
-  says why — *"a job that is allowed to fail and does not is telling you nothing
-  at all."* A green `network` that is permitted to go red silently is a regression
-  nobody would see.
-- **What to do:** delete the line and the stale comment above it.
-- **Not done in Phase 5 because** phase discipline puts out-of-phase defects here
-  rather than in this phase's diff, and this is Phase 3's job. It is a one-line
-  change whenever somebody is in that file for another reason.
-- **Phase 6 hit it again**, removing the same line from the `layout` job, and
-  filed a second entry before noticing this one. That is the finding worth adding:
-  the rule that sends out-of-phase defects here is working, and the thing it is
-  protecting against — a defect nobody owns because it belongs to a closed phase —
-  is now two phases old and was rediscovered from scratch. Whoever next opens
-  `gate.yml` should delete it rather than file it a third time.
+Deleted on the third encounter. Filed in Phase 5 while removing the same line from
+the `style` job, rediscovered from scratch in Phase 6 while removing it from the
+`layout` job, and fixed there rather than filed a third time.
+
+Kept as a record of the failure mode, which is about process rather than CI: a
+defect that belongs to a closed phase has nobody whose phase it is, and
+"one line, whenever somebody is in that file anyway" did not happen twice running.
+`ci/gate-network.sh` passes and the job is required now.
 
 ## sandbox_policy_repeated_spawns_do_not_leak_handles fails while reporting no leak
 
