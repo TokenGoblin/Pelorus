@@ -113,9 +113,14 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// wraps float fixtures in one, and treating it as an unimplemented formatting
 /// context threw the whole container away.
 ///
+/// `min-width`, `max-width`, `min-height` and `max-height` (§10.4, §10.7) took it
+/// to 54, and opened the `positioning` chapter's account at 1/8 -- those tests are
+/// about bounds on an absolutely positioned box, and half of what they need is the
+/// bounds rather than the positioning.
+///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 53;
+const MATCH_FLOOR: usize = 54;
 
 /// A layout with no more fragments than this has no content in it.
 ///

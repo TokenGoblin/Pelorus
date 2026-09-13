@@ -128,6 +128,12 @@ struct Tables {
     /// Read on the way up, where it decides whether the box's `height: auto`
     /// stretches to contain its own floats (§10.6.7).
     formatting_context_roots: Vec<bool>,
+    /// What `min-height` and `max-height` allow this box's content to be (§10.7).
+    ///
+    /// The inline axis needs no table: its bounds are applied at `Enter`, where
+    /// the width is resolved. The block axis is resolved on the way up, so the
+    /// bounds have to wait there with everything else.
+    block_bounds: Vec<Bounds>,
     /// This box's outer margins *after* collapsing with its own children.
     ///
     /// §8.3.1: a box with no border or padding between it and its first in-flow
@@ -170,6 +176,7 @@ impl Tables {
             // The initial containing block is a formatting context root: there
             // is no outer context for a float in it to escape into.
             formatting_context_roots: vec![true],
+            block_bounds: vec![Bounds::NONE],
             collapsed_margins: vec![(Au(0), Au(0))],
             clear_sides: vec![None],
             float_sides: vec![None],
@@ -185,6 +192,7 @@ impl Tables {
             self.inline_sizes.push(Au(0));
             self.specified_block_sizes.push(None);
             self.formatting_context_roots.push(false);
+            self.block_bounds.push(Bounds::NONE);
             self.collapsed_margins.push((Au(0), Au(0)));
             self.clear_sides.push(None);
             self.float_sides.push(None);
@@ -220,6 +228,35 @@ struct PendingRun {
     /// exists so that a float *before* the text is placed before the lines are
     /// measured, and a float after it is not.
     slot: usize,
+}
+
+/// The bounds `min-*` and `max-*` put on a used size (§10.4, §10.7).
+///
+/// Kept as a pair rather than clamped eagerly because the order matters and is
+/// easy to get backwards: the spec applies `max` first and `min` second, so a box
+/// whose `min-width` exceeds its `max-width` gets the **minimum**. Clamping in the
+/// other order silently gives the maximum and looks identical everywhere else.
+#[derive(Clone, Copy, Debug)]
+struct Bounds {
+    min: Au,
+    max: Option<Au>,
+}
+
+impl Bounds {
+    /// No bounds at all: `min-*: 0` and `max-*: none`, the initial values.
+    const NONE: Self = Self {
+        min: Au(0),
+        max: None,
+    };
+
+    /// Apply the bounds to a tentative used size, §10.4's order.
+    fn clamp(self, size: Au) -> Au {
+        let capped = match self.max {
+            Some(max) if size > max => max,
+            _ => size,
+        };
+        if capped < self.min { self.min } else { capped }
+    }
 }
 
 /// The resolved box-model edges of one box, in app units.
@@ -345,6 +382,13 @@ pub fn layout_document(
                         }
                         _ => resolve_inline_size(&style, containing, &resolved),
                     };
+                    // §10.4. Applied to the *used* width rather than by recomputing
+                    // §10.3 with the bound as the computed width, which is how the
+                    // spec phrases it. The two agree for everything this phase
+                    // resolves, because the only part of §10.3 that would run again
+                    // is the auto-margin centring below, and that reads the width
+                    // it is given.
+                    let content_inline = inline_bounds(&style, containing).clamp(content_inline);
 
                     // §9.5.1 rule 9: `auto` margins on a float are zero, not
                     // centring. A float is shifted to an edge; there is nothing
@@ -371,6 +415,7 @@ pub fn layout_document(
                     tables.formatting_context_roots[fragment.index()] =
                         establishes_formatting_context(&style);
                     tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
+                    tables.block_bounds[fragment.index()] = block_bounds(&style);
                     if let Some(reserved) = tables
                         .pending
                         .get_mut(parent.index())
@@ -754,13 +799,20 @@ pub fn layout_document(
                         .get(fragment.index())
                         .copied()
                         .unwrap_or(None);
+                    let bounds = tables
+                        .block_bounds
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(Bounds::NONE);
                     if let Some(f) = tree.get_mut(fragment) {
                         // A specified `height` wins; `auto` takes the content's
                         // block size (§10.6.3). Either way the box's own border
                         // and padding are added, because the fragment records a
                         // border box.
                         //
-                        let content = specified.unwrap_or(cursor);
+                        // §10.7, after §10.6: the content height is resolved
+                        // first and bounded second.
+                        let content = bounds.clamp(specified.unwrap_or(cursor));
                         f.size.block = content + surround;
                     }
                 }
@@ -1167,6 +1219,50 @@ fn widest_word(text: &str, font_size: Au) -> Au {
         .unwrap_or(Au(0))
 }
 
+/// What `min-width` and `max-width` allow the inline size to be (§10.4).
+///
+/// Percentages resolve against the containing block's inline size, like every
+/// other percentage on this axis.
+fn inline_bounds(style: &ComputedValues, containing: Au) -> Bounds {
+    use style::values::computed::{MaxSize, Size};
+
+    let min = match style.clone_min_width() {
+        Size::LengthPercentage(ref lp) => lp.0.to_used_value(containing).max(Au(0)),
+        // `auto` on `min-width` is zero for a block box. It means the automatic
+        // minimum size only for flex and grid items, which this phase has none of.
+        _ => Au(0),
+    };
+    let max = match style.clone_max_width() {
+        MaxSize::LengthPercentage(ref lp) => Some(lp.0.to_used_value(containing).max(Au(0))),
+        _ => None,
+    };
+    Bounds { min, max }
+}
+
+/// What `min-height` and `max-height` allow the block size to be (§10.7).
+///
+/// A percentage needs the containing block's height, which is `auto` while its
+/// content is still being measured — so `maybe_to_used_value(None)` returns
+/// `None` and §10.7 says to treat the declaration as if it were not there. That is
+/// exactly what `Bounds::NONE`'s two halves mean, which is why this reads as
+/// falling through rather than as a special case.
+fn block_bounds(style: &ComputedValues) -> Bounds {
+    use style::values::computed::{MaxSize, Size};
+
+    let min = match style.clone_min_height() {
+        Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None).unwrap_or(Au(0)),
+        _ => Au(0),
+    };
+    let max = match style.clone_max_height() {
+        MaxSize::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
+        _ => None,
+    };
+    Bounds {
+        min: min.max(Au(0)),
+        max,
+    }
+}
+
 /// The used `width`, if it is a length this phase can resolve without a context.
 ///
 /// `auto` and percentages both return `None`, which the intrinsic walk reads as
@@ -1526,6 +1622,108 @@ mod tests {
             .into_iter()
             .filter(|r| *r == rect)
             .count()
+    }
+
+    /// §10.4: `max-width` caps the used width.
+    #[test]
+    fn block_max_width_caps_the_used_width() {
+        let (tree, _) = layout(
+            "<html><body><div id=d></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #d { max-width: 100px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(100), px(10))),
+            "an auto width fills to 800 and is then capped: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.4: `min-width` raises it.
+    #[test]
+    fn block_min_width_raises_the_used_width() {
+        let (tree, _) = layout(
+            "<html><body><div id=d></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #d { width: 50px; min-width: 200px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(200), px(10))),
+            "{:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.4's order: `max` is applied first, so `min` wins a conflict.
+    ///
+    /// The whole reason [`Bounds`] keeps the two rather than clamping eagerly.
+    /// Clamping in the other order gives 100 here, looks entirely reasonable, and
+    /// is wrong.
+    #[test]
+    fn block_min_width_wins_when_it_exceeds_max_width() {
+        let (tree, _) = layout(
+            "<html><body><div id=d></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #d { width: 400px; min-width: 300px; max-width: 100px; height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(300), px(10))),
+            "min-width beats max-width: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.7: `min-height` raises a content height.
+    #[test]
+    fn block_min_height_raises_an_auto_height() {
+        let (tree, _) = layout(
+            "<html><body><div id=d><div id=k></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #d { min-height: 60px } #k { height: 10px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(60))),
+            "{:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.7: `max-height` caps it, including a stated `height`.
+    #[test]
+    fn block_max_height_caps_a_stated_height() {
+        let (tree, _) = layout(
+            "<html><body><div id=d></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #d { height: 90px; max-height: 30px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(30))),
+            "{:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.7: a percentage `min-height` against an auto height is ignored.
+    ///
+    /// Not rounded to zero and not resolved against the viewport — the declaration
+    /// is treated as if it were not there, which is a different answer from `0`
+    /// only when there is also a `max-height` to conflict with, and is the rule.
+    #[test]
+    fn block_a_percentage_min_height_is_ignored_when_the_basis_is_auto() {
+        let (tree, _) = layout(
+            "<html><body><div id=d><div id=k></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #d { min-height: 50% } #k { height: 10px }",
+        );
+        // Counted, not searched for: the child is 10 tall whatever happens to its
+        // parent, so `contains` passes either way. The ICB, html, body and the div
+        // are all 10 tall only if the declaration really was ignored.
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(10))),
+            5,
+            "every box is as tall as the content: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
     }
 
     /// §8.3.1: a parent with no top border or padding shares its child's margin.
