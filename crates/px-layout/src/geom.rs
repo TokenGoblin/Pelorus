@@ -82,7 +82,14 @@ impl LogicalSize {
         block: Au(0),
     };
 
-    /// A size, clamped on both axes.
+    /// A size from two `Au`.
+    ///
+    /// No clamping happens here, and the doc used to claim it did. It does not
+    /// need to: an `Au` built through [`px`], [`au`] or `Au::from_px` is already
+    /// in range, and one built through the tuple constructor is the thing
+    /// `ci/gate-layout.sh` refuses. Saying "clamped" where nothing clamps is worse
+    /// than saying nothing, because it invites exactly the out-of-range value the
+    /// rest of this module is built to keep out.
     #[must_use]
     pub fn new(inline: Au, block: Au) -> Self {
         Self { inline, block }

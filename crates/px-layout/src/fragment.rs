@@ -178,10 +178,19 @@ impl FragmentTree {
             u32::try_from(self.fragments.len()).expect("a document cannot hold 4G fragments"),
         );
         self.fragments.push(fragment);
-        if self.root.is_none() {
-            self.root = Some(id);
-        }
         id
+    }
+
+    /// Name the fragment the tree is rooted at.
+    ///
+    /// Explicit, because it used to be implicit: `push` made the first fragment
+    /// pushed the root, which was correct only because `layout_document` happens
+    /// to push the initial containing block first. `layout_lines` called on a
+    /// fresh tree rooted it at a `Line`, and any future bottom-up construction
+    /// would have rooted it at a leaf — silently, since every accessor would keep
+    /// working and only the traversal would be wrong.
+    pub fn set_root(&mut self, id: FragmentId) {
+        self.root = Some(id);
     }
 
     /// Attach `kids` to `parent`, replacing any it already had.
@@ -242,6 +251,7 @@ mod tests {
     fn fragment_children_are_a_slice_in_layout_order() {
         let mut tree = FragmentTree::new();
         let root = tree.push(block(100, 100));
+        tree.set_root(root);
         let a = tree.push(block(10, 10));
         let b = tree.push(block(20, 20));
         tree.set_children(root, &[a, b]);
@@ -256,6 +266,7 @@ mod tests {
     fn fragment_layout_order_is_preorder_and_depth_tagged() {
         let mut tree = FragmentTree::new();
         let root = tree.push(block(100, 100));
+        tree.set_root(root);
         let a = tree.push(block(10, 10));
         let b = tree.push(block(20, 20));
         let a1 = tree.push(block(5, 5));
@@ -283,6 +294,9 @@ mod tests {
         let mut chain = Vec::with_capacity(DEPTH);
         for _ in 0..DEPTH {
             chain.push(tree.push(block(10, 10)));
+        }
+        if let Some(first) = chain.first() {
+            tree.set_root(*first);
         }
         for window in chain.windows(2) {
             tree.set_children(window[0], &[window[1]]);

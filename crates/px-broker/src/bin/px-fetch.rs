@@ -61,7 +61,14 @@ fn flag_value(args: &[String], name: &str) -> Option<String> {
 }
 
 fn run(url: &str, find: Option<&str>, show_tree: bool) -> Result<(), String> {
-    let page = fetch_page(url)?;
+    // Read and parsed once. It was inside `fetch_page`, so a page with ten linked
+    // stylesheets re-parsed the whole public suffix list eleven times.
+    let psl_text = std::fs::read_to_string(psl_path())
+        .map_err(|e| format!("cannot read the public suffix list: {e}"))?;
+    let psl = px_net::psl::PublicSuffixList::parse(&psl_text)
+        .map_err(|e| format!("the public suffix list will not parse: {e:?}"))?;
+
+    let page = fetch_page(&psl, url)?;
 
     println!("== {} ==", page.final_url);
     println!("status  {}", page.status);
@@ -102,7 +109,7 @@ fn run(url: &str, find: Option<&str>, show_tree: bool) -> Result<(), String> {
         let Ok(absolute) = resolve_redirect(&page.final_url, &href) else {
             continue;
         };
-        match fetch_page(&absolute) {
+        match fetch_page(&psl, &absolute) {
             Ok(sheet) => {
                 engine.add_author_stylesheet(&sheet.body, &absolute);
                 sheets += 1;
@@ -195,8 +202,16 @@ fn run(url: &str, find: Option<&str>, show_tree: bool) -> Result<(), String> {
 /// a word split across markup still matches, and a word that appears only in an
 /// attribute or a comment does not.
 fn search(text: &str, needle: &str) {
-    let haystack = text.to_lowercase();
-    let lowered = needle.to_lowercase();
+    // `to_ascii_lowercase`, not `to_lowercase`. The latter is not
+    // length-preserving -- `İ` (U+0130) lowercases to two chars, three bytes from
+    // two -- so byte offsets found in the folded string do not index the original.
+    // After any such character the context window was sliced at the wrong place,
+    // printing a shifted excerpt or silently printing none.
+    //
+    // The cost is that only ASCII case is folded, which is stated rather than
+    // hidden: a search for "STRASSE" will not match "straße" here.
+    let haystack = text.to_ascii_lowercase();
+    let lowered = needle.to_ascii_lowercase();
 
     let mut hits = 0usize;
     let mut from = 0usize;
@@ -230,17 +245,12 @@ struct Page {
 /// decision is the caller's — so the loop is here. Capped, because a redirect
 /// cycle is a real thing on the real web and this is the first code in the
 /// project to meet one.
-fn fetch_page(url: &str) -> Result<Page, String> {
+fn fetch_page(psl: &px_net::psl::PublicSuffixList, url: &str) -> Result<Page, String> {
     const MAX_REDIRECTS: usize = 5;
-
-    let psl_text = std::fs::read_to_string(psl_path())
-        .map_err(|e| format!("cannot read the public suffix list: {e}"))?;
-    let psl = px_net::psl::PublicSuffixList::parse(&psl_text)
-        .map_err(|e| format!("the public suffix list will not parse: {e:?}"))?;
 
     let mut current = url.to_owned();
     for hop in 0..=MAX_REDIRECTS {
-        let (key, path) = key_and_path(&psl, &current)?;
+        let (key, path) = key_and_path(psl, &current)?;
         let response =
             px_net::fetch::fetch(&key, &path).map_err(|e| format!("fetch failed: {e}"))?;
 
@@ -312,7 +322,11 @@ fn psl_path() -> std::path::PathBuf {
 fn document_title(arena: &px_dom::Arena) -> Option<String> {
     let document = arena.document();
     for id in core::iter::once(document).chain(arena.descendants(document)) {
-        let node = arena.get(id)?;
+        // `else { continue }`, not `?`. The first version returned `None` from the
+        // whole function on the first id that did not resolve, so a page whose
+        // <title> followed any such node reported no title -- and every sibling
+        // function in this file already did it the right way.
+        let Some(node) = arena.get(id) else { continue };
         if node
             .element_name()
             .is_some_and(|q| q.local == html5ever::local_name!("title"))

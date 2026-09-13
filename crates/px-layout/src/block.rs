@@ -32,7 +32,7 @@ use px_dom::{Arena, NodeId};
 use style::properties::ComputedValues;
 
 use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree};
-use crate::geom::{LogicalEdges, LogicalSize, au};
+use crate::geom::{LogicalEdges, LogicalSize};
 
 /// One visit in the iterative traversal.
 ///
@@ -88,6 +88,7 @@ pub fn layout_document(
         FragmentKind::Block,
         LogicalSize::new(viewport_inline_size, Au(0)),
     ));
+    tree.set_root(icb);
 
     let root_element = first_element(arena)?;
 
@@ -123,9 +124,25 @@ pub fn layout_document(
                     let Some(style) = computed_style(dom, node) else {
                         continue;
                     };
-                    // Inline layout is not implemented, so a non-block box
-                    // contributes nothing rather than being laid out wrongly.
+                    // A box whose formatting context this phase does not
+                    // implement -- flex, grid, inline-block, table -- generates no
+                    // fragment of its own, because laying it out as a block would
+                    // be confidently wrong geometry rather than none.
+                    //
+                    // Its **children are still visited**, attached to the same
+                    // parent. Skipping them too was a review finding and a bad
+                    // one: a single `display: flex` wrapper near the top of a page
+                    // deleted everything beneath it, which is why rust-lang.org
+                    // laid out to 2 fragments while 112 of its elements computed
+                    // `display: block`. Dropping a subtree is not the
+                    // conservative choice it looks like.
                     if !is_block_level(&style) {
+                        for child in children_of(arena, node).into_iter().rev() {
+                            stack.push(Step::Enter {
+                                node: child,
+                                parent,
+                            });
+                        }
                         continue;
                     }
 
@@ -167,12 +184,20 @@ pub fn layout_document(
                     stack.push(Step::Exit { fragment });
 
                     let element_kids = children_of(arena, node);
-                    if element_kids.is_empty() {
-                        // A leaf block container: its children are inline
-                        // content, so lay it out into lines now. Done on the way
-                        // down because the available inline size is known here
-                        // and the lines' total height is what the Exit pass wants.
-                        let raw = crate::inline::collect_text(arena, node);
+                    {
+                        // The box's own inline-level text: its text nodes, plus
+                        // the text of any non-block descendants, stopping at every
+                        // block-level one. Laid out on the way down, because the
+                        // available inline size is known here and the lines' total
+                        // height is what the Exit pass wants.
+                        //
+                        // The first version only did this for a box with *no*
+                        // element children, so `<div>hello <b>world</b></div>`
+                        // dropped its text entirely and resolved to zero height.
+                        // Stopping at block-level descendants rather than at any
+                        // element is what makes that work without also giving
+                        // `<body>` the text of every block inside it.
+                        let raw = collect_inline_text(dom, arena, node);
                         let collapsed = crate::inline::collapse_whitespace(&raw);
                         if !collapsed.is_empty() {
                             let font_size = Au::from(style.clone_font_size().computed_size());
@@ -234,9 +259,23 @@ pub fn layout_document(
                     let surround = edges
                         .get(fragment.index())
                         .map_or(Au(0), Edges::block_surround);
-                    let inline_start = edges.get(fragment.index()).map_or(Au(0), |e| {
-                        e.margin.inline_start + e.border.inline_start + e.padding.inline_start
-                    });
+                    // The parent's content-box origin, relative to its own
+                    // *border* box. Its margin is deliberately not included: a
+                    // margin is outside the border box, and the parent's own
+                    // offset already accounts for it. Adding it here counted it
+                    // twice, which is what a review found -- a child of a
+                    // 30px-margin parent inside an 8px-margin body came out at
+                    // 35px, which is neither absolute (43) nor parent-relative (5).
+                    let content_inline_start = edges
+                        .get(fragment.index())
+                        .map_or(Au(0), |e| e.border.inline_start + e.padding.inline_start);
+                    // The block axis needs the same origin and did not have it at
+                    // all: children were placed at the parent's border-box top,
+                    // inside its own top padding, while the inline axis did
+                    // include padding. The two axes disagreed.
+                    let content_block_start = edges
+                        .get(fragment.index())
+                        .map_or(Au(0), |e| e.border.block_start + e.padding.block_start);
 
                     // The margin left over from the previous sibling's bottom
                     // edge, waiting to collapse with the next one's top.
@@ -252,6 +291,14 @@ pub fn layout_document(
                         // double height, with its single line sitting one
                         // line-height below the top.
                         if tree.get(*kid).is_some_and(|f| f.kind == FragmentKind::Line) {
+                            // Shifted into the content box rather than
+                            // repositioned: `layout_lines` already stacked them
+                            // relative to the content origin, and moving them
+                            // again is the double-height bug from earlier.
+                            if let Some(line) = tree.get_mut(*kid) {
+                                line.inline_offset += content_inline_start;
+                                line.block_offset += content_block_start;
+                            }
                             continue;
                         }
                         let kid_margin = edges
@@ -270,8 +317,14 @@ pub fn layout_document(
                         first_in_flow = false;
 
                         if let Some(kid_fragment) = tree.get_mut(*kid) {
-                            kid_fragment.block_offset = cursor;
-                            kid_fragment.inline_offset = inline_start + kid_margin.inline_start;
+                            // Relative to this parent's border box. A final pass
+                            // converts the whole tree to absolute once every
+                            // parent's own offset is known -- which it is not
+                            // here, because a parent is positioned by *its*
+                            // parent's exit visit, which happens later.
+                            kid_fragment.block_offset = content_block_start + cursor;
+                            kid_fragment.inline_offset =
+                                content_inline_start + kid_margin.inline_start;
                             cursor += kid_fragment.size.block;
                         }
                         pending_margin = kid_margin.block_end;
@@ -299,7 +352,35 @@ pub fn layout_document(
         }
     })?;
 
+    make_offsets_absolute(&mut tree);
     Some(tree)
+}
+
+/// Turn parent-relative offsets into offsets from the fragment tree's origin.
+///
+/// Layout places a child relative to its parent's border box, because a parent's
+/// own position is not known until *its* parent's exit visit, which happens after
+/// the child has been placed. One top-down pass afterwards resolves that, and it
+/// is the pass that makes [`Fragment`]'s documented "offset from the fragment
+/// tree's origin" true.
+///
+/// Iterative, like every other walk here.
+fn make_offsets_absolute(tree: &mut FragmentTree) {
+    let Some(root) = tree.root() else { return };
+    let mut stack = vec![(root, Au(0), Au(0))];
+
+    while let Some((id, base_inline, base_block)) = stack.pop() {
+        let Some(fragment) = tree.get_mut(id) else {
+            continue;
+        };
+        fragment.inline_offset += base_inline;
+        fragment.block_offset += base_block;
+        let (inline, block) = (fragment.inline_offset, fragment.block_offset);
+
+        for kid in tree.children(id).to_vec() {
+            stack.push((kid, inline, block));
+        }
+    }
 }
 
 /// The first element in the document, which is `<html>` for a parsed page.
@@ -308,6 +389,58 @@ fn first_element(arena: &Arena) -> Option<NodeId> {
     core::iter::once(document)
         .chain(arena.descendants(document))
         .find(|id| arena.get(*id).is_some_and(|n| n.element_name().is_some()))
+}
+
+/// The inline-level text belonging to `node`, stopping at block-level children.
+///
+/// A block container's inline content is its own text nodes and the text of any
+/// inline descendants — not the text of block descendants, which form their own
+/// boxes and lay out their own lines. Without the stop, `<body>` would collect
+/// every word on the page and lay it out again as body's own lines.
+///
+/// Iterative, and a pre-order walk so the text comes out in document order.
+fn collect_inline_text(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> String {
+    let mut out = String::new();
+    let mut stack: Vec<NodeId> = children_in_order(arena, node);
+    stack.reverse();
+
+    while let Some(id) = stack.pop() {
+        let Some(current) = arena.get(id) else {
+            continue;
+        };
+
+        if current.element_name().is_some() {
+            // A block-level element is a box of its own; its text is not ours.
+            let is_block = computed_style(dom, id).is_some_and(|s| is_block_level(&s));
+            if is_block {
+                continue;
+            }
+            let mut kids = children_in_order(arena, id);
+            kids.reverse();
+            stack.extend(kids);
+            continue;
+        }
+
+        if let Some(text) = current.text() {
+            out.push_str(text);
+        }
+    }
+    out
+}
+
+/// Every child of `node`, elements and text alike, in document order.
+fn children_in_order(arena: &Arena, node: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let Some(parent) = arena.get(node) else {
+        return out;
+    };
+    let mut next = parent.first_child();
+    while let Some(id) = next {
+        let Some(child) = arena.get(id) else { break };
+        out.push(id);
+        next = child.next_sibling();
+    }
+    out
 }
 
 /// The element children of `node`, in document order.
@@ -501,7 +634,7 @@ fn centre_if_auto_margins(
 
     if start_auto && end_auto {
         // Halved in app units, so the result is exact rather than rounded twice.
-        let half = au(leftover.0 / 2);
+        let half = leftover / 2;
         edges.margin.inline_start = half;
         edges.margin.inline_end = leftover - half;
     } else if start_auto {

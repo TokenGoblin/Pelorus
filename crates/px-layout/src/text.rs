@@ -35,10 +35,13 @@
 //! advance is computed in app units by integer division, so it is exactly
 //! reproducible and its rounding is one documented truncation rather than an
 //! accumulation of them.
+//!
+//! The division goes through `Au`'s own `Div<i32>` rather than through its inner
+//! field. Division cannot overflow the way multiplication can, so this one was
+//! safe — but a review found a `.0 * 6 / 5` in [`crate::inline`] that was not,
+//! and the rule is easier to keep when it has no exceptions.
 
 use app_units::Au;
-
-use crate::geom::au;
 
 /// The advance of one character, as a fraction of the font size.
 ///
@@ -64,7 +67,7 @@ pub fn measure(text: &str, font_size: Au) -> Au {
 /// The advance of a single character at `font_size`.
 #[must_use]
 pub fn char_advance(font_size: Au) -> Au {
-    au(font_size.0 / ADVANCE_DIVISOR)
+    font_size / ADVANCE_DIVISOR
 }
 
 /// A place where a line may be broken, and the text before it.
@@ -175,6 +178,6 @@ mod tests {
         let twice = measure("the quick brown fox", px(17));
         assert_eq!(once, twice);
         // 17px / 2 truncates to 8px per character, not 8.5.
-        assert_eq!(char_advance(px(17)), au(px(17).0 / 2));
+        assert_eq!(char_advance(px(17)), px(17) / 2);
     }
 }

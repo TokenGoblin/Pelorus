@@ -187,6 +187,38 @@ if [ -d "$layout_src" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Nothing reads `Au`'s inner field to do arithmetic on it.
+#
+# The tuple-constructor scan above stops an out-of-range `Au` being *built*. It
+# does not stop one being taken apart: `au(font_size.0 * 6 / 5)` multiplies a raw
+# `i32` and clamps the result, which is the panic-in-debug, wrap-in-release
+# behaviour §4.2 forbids — and it was in this crate, reachable from page CSS with
+# a large `font-size`, until a review found it.
+#
+# app_units gives checked `Mul<i32>` and `Div<i32>` on `Au` itself, so arithmetic
+# never needs the field. Reads that do not compute -- comparisons, `Reverse`,
+# formatting -- are the legitimate uses, and are allowed by requiring an operator
+# after the field access rather than banning `.0` outright.
+#
+# The first version filtered by keyword -- `Au`, `font_size`, `margin` and so on
+# -- and reported one site while three existed. A scan that is narrowed to the
+# names you happened to think of finds the bugs you already knew about.
+# ---------------------------------------------------------------------------
+
+if [ -d "$layout_src" ]; then
+    au_math="$( { grep -rnE '\.0[[:space:]]*[-+*/][[:space:]]*' "$layout_src" || true; }                | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; }                | { grep -vE 'self\.0[[:space:]]*[-+*/][[:space:]]*other\.0' || true; } | wc -l)"
+    if [ "$au_math" -eq 0 ]; then
+        ok "px-layout does no arithmetic on Au's inner field"
+    else
+        fail "px-layout computes on a raw .0 field in $au_math place(s)."
+        fail "  Au has checked Mul<i32> and Div<i32>; use those. Reaching into the"
+        fail "  field multiplies a raw i32, which panics in debug and wraps in"
+        fail "  release -- §4.2's whole subject, and reachable from page CSS."
+        { grep -rnE '\.0[[:space:]]*[-+*/][[:space:]]*' "$layout_src" || true; }             | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; }             | { grep -vE 'self\.0[[:space:]]*[-+*/][[:space:]]*other\.0' || true; }             | head -n 5 | sed 's/^/       /' >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Why there is no source scan for recursive ownership here.
 #
 # There were two, and both fired on correct code.

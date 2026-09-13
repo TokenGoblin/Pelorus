@@ -61,15 +61,39 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 
 /// How many pairs must match.
 ///
-/// Measured, not chosen: 25 of 105 with block layout, basic inline layout and no
-/// floats, positioned boxes, margin collapsing or anonymous block generation.
+/// **Seven, down from a previously recorded twenty-five, and the fall is a
+/// correction rather than a regression.** This is the uncomfortable case the
+/// ratchet was built for, so the evidence is here rather than in a commit message.
 ///
-/// **It may not fall.** Raising it is a deliberate commit whose diff says the
-/// engine improved; a fall means a regression, and the fixed denominator means
-/// neither can be arranged by editing the corpus. The remaining 80 are the
-/// phase's named gaps, and the gate report lists which features they are waiting
-/// on.
-const MATCH_FLOOR: usize = 25;
+/// A code review found three defects in box generation: a box whose formatting
+/// context is unimplemented pruned its entire subtree, inline text was dropped
+/// unless a box had no element children, and child offsets used two different
+/// origins on the two axes. Fixing them made the engine lay out substantially
+/// more of every document — measured across the 210 corpus files, 1357 fragments
+/// became 2212, and the number of files producing three fragments or fewer fell
+/// from **39 to 2**.
+///
+/// Those 39 were laying out nothing at all: an initial containing block, `<html>`
+/// and `<body>`. A test and a reference that both lay out nothing agree
+/// perfectly, and roughly seventeen pairs were counted as matching on exactly
+/// that basis. The old 25 was measuring agreement-in-brokenness, which the
+/// reviewer predicted in as many words before any of this was measured.
+///
+/// So the engine improved and the score fell, because the score had been
+/// counting the wrong thing. Lowering a floor is the move that most looks like
+/// gaming a gate, which is why it is spelled out: the denominator is unchanged
+/// at 105, `TRIVIAL_FRAGMENTS` now rejects the empty agreements outright, and the
+/// number that remains is 7 pairs that genuinely lay out the same.
+///
+/// **It may not fall from here.** Raising it is a deliberate commit whose diff
+/// says the engine improved.
+const MATCH_FLOOR: usize = 7;
+
+/// A layout with no more fragments than this has no content in it.
+///
+/// The initial containing block, `<html>` and `<body>`. A pair that agrees at
+/// this size agrees about nothing.
+const TRIVIAL_FRAGMENTS: usize = 3;
 
 /// One test and its reference.
 struct Pair {
@@ -120,22 +144,35 @@ fn pairs() -> Vec<Pair> {
 /// reference's explicit `<div>` occupy the same space and are the same thing for
 /// a reftest's purposes; comparing kinds would fail every test that exercises
 /// anonymous box generation, which is much of what CSS2 normal-flow is about.
-type Geometry = (usize, Au, Au, Au, Au);
+type Geometry = (Au, Au, Au, Au);
 
+/// Every fragment's absolute rectangle, sorted.
+///
+/// **Depth is not part of it, and nor is order.** ADR 029 said to compare
+/// flattened geometry rather than tree shape, because a test and its reference
+/// deliberately differ in structure where anonymous box generation is the thing
+/// under test — and the first version of this function included the depth anyway,
+/// which is tree shape wearing a different name.
+///
+/// That was invisible while offsets were parent-relative, because then two
+/// rectangles at different depths genuinely were different rectangles. Now that
+/// `layout_document` resolves offsets against the tree origin, a rectangle is a
+/// rectangle: two documents that put the same boxes in the same places render the
+/// same, however they nested to get there.
+///
+/// Sorted for the same reason. Layout order follows structure, so comparing
+/// sequences smuggles the structure back in.
 fn geometry(tree: &FragmentTree) -> Vec<Geometry> {
-    tree.in_layout_order()
+    let mut rects: Vec<Geometry> = tree
+        .in_layout_order()
         .into_iter()
-        .filter_map(|(depth, id)| {
+        .filter_map(|(_, id)| {
             let f = tree.get(id)?;
-            Some((
-                depth,
-                f.inline_offset,
-                f.block_offset,
-                f.size.inline,
-                f.size.block,
-            ))
+            Some((f.inline_offset, f.block_offset, f.size.inline, f.size.block))
         })
-        .collect()
+        .collect();
+    rects.sort();
+    rects
 }
 
 /// Parse, style and lay out one file.
@@ -200,10 +237,18 @@ fn inline_stylesheets(arena: &px_dom::Arena) -> Vec<String> {
 fn matches(pair: &Pair) -> bool {
     match (layout_file(&pair.test), layout_file(&pair.reference)) {
         (Some(test), Some(reference)) => {
-            // Two empty layouts are trivially equal, and that is a false pass
-            // rather than a result. ADR 029 names it as the thing the comparison
-            // cannot afford.
-            !test.is_empty() && test == reference
+            // Two *near*-empty layouts are trivially equal, and that is a false
+            // pass rather than a result. ADR 029 names the empty case; the
+            // interesting one turned out to be three fragments -- the initial
+            // containing block, `<html>` and `<body>` -- with no content under
+            // them at all.
+            //
+            // Measured rather than guessed at: before the box-generation fixes,
+            // 39 of the 210 corpus files laid out to three fragments or fewer,
+            // and pairs of those matched each other by producing nothing. After
+            // the fixes it is 2. Requiring content is what stops that counting as
+            // conformance.
+            test.len() > TRIVIAL_FRAGMENTS && test == reference
         }
         _ => false,
     }

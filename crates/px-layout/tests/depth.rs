@@ -118,6 +118,9 @@ fn layout_depth_walks_a_deep_fragment_tree_without_overflowing() {
                 LogicalSize::new(px(10), px(10)),
             )));
         }
+        if let Some(first) = chain.first() {
+            tree.set_root(*first);
+        }
         for window in chain.windows(2) {
             tree.set_children(window[0], &[window[1]]);
         }

@@ -36,7 +36,7 @@ use px_dom::{Arena, NodeId};
 use style::properties::ComputedValues;
 
 use crate::fragment::{Fragment, FragmentKind, FragmentTree};
-use crate::geom::{LogicalSize, au};
+use crate::geom::LogicalSize;
 use crate::text;
 
 /// A run of inline content to be laid out into lines.
@@ -194,7 +194,16 @@ pub fn line_height_of(style: &ComputedValues) -> Au {
     let font_size_au = Au::from(font_size);
 
     match style.clone_line_height() {
-        LineHeight::Normal => au(font_size_au.0 * 6 / 5),
+        // `font_size_au * 6 / 5`, not `au(font_size_au.0 * 6 / 5)`. Reaching into
+        // `Au`'s public field multiplies a raw `i32`, which panics in debug and
+        // wraps in release above ~5.96M px — reachable from page CSS with
+        // `font-size: 100000000px`, and precisely the panic-or-wrap §4.2 exists
+        // to prevent. app_units' `Mul<i32>` is checked and saturating.
+        //
+        // `geom.rs` states the rule as "never write `Au(...)`" and this was the
+        // hole in it: the hazard here is *field access*, which the tuple-
+        // constructor scan in ci/gate-layout.sh cannot see.
+        LineHeight::Normal => font_size_au * 6 / 5,
         // `line-height: 1.5` is a float multiplier and there is no integer
         // spelling of it. `Au::scale_by` does the multiply inside `app_units`,
         // which is the same argument Phase 5 made for `GenericAtomIdent::cast`:
