@@ -187,32 +187,41 @@ if [ -d "$layout_src" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# No recursion over tree depth.
+# No box owns another box inline, so the Drop the compiler writes cannot recurse.
 #
-# The scan ci/gate-dom.sh runs, for the same reason and against the same failure.
-# A function that calls itself while walking boxes is a stack overflow on a
-# document a page can serve, and `Drop` is the one everybody forgets because the
-# compiler writes it.
+# The first version of this check scanned for functions calling themselves, by
+# counting how often a function's name appeared in its own file. It fired on
+# `geom::px` and `geom::au` -- which are not recursive, they are used by tests in
+# the same file -- and on every `new()`. A check that fails on correct code is
+# worse than no check: it teaches people to ignore it, which is the argument ADR
+# 029 makes against comparing box trees structurally, one file over.
+#
+# ci/gate-dom.sh solved the same problem properly and this is its approach. Rather
+# than detect recursion, forbid the *structure* that makes the worst case
+# unavoidable. A recursive `Drop` on a linked tree is the classic deep-nesting
+# crash and nobody writes it on purpose -- it happens because dropping a box drops
+# the boxes it owns. Boxes in a flat arena cannot. A `Vec<Fragment>` inside a
+# `Fragment` can, and will, the first time a page nests a hundred thousand divs.
+#
+# The behavioural half is gate item 3, the deep-nesting test. This is the half a
+# test cannot give you: it says tomorrow's code will still be iterative.
 # ---------------------------------------------------------------------------
 
+# A crate with no box type trivially has no box owning another, which is where
+# px-layout is today. These are the names this phase will introduce.
+OWNED_CHILD='(Box|Vec|Rc|Arc)<[[:space:]]*(BoxFragment|Fragment|LayoutBox|BlockBox|InlineBox)'
+
 if [ -d "$layout_src" ]; then
-    self_calls=0
-    while IFS= read -r -d '' path; do
-        # A direct self-call: `fn name(` declared in this file, and `name(` used
-        # inside it. Crude, and deliberately so -- it is a prompt to look, not a
-        # proof, and the deep-nesting test is what actually holds the property.
-        while IFS= read -r fname; do
-            [ -n "$fname" ] || continue
-            uses="$(grep -cE "(^|[^a-zA-Z_.])${fname}\s*\(" "$path" || true)"
-            # One occurrence is the declaration itself.
-            if [ "${uses:-0}" -gt 1 ]; then
-                fail "$path: ${fname}() appears to call itself; layout walks are iterative"
-                self_calls=$((self_calls + 1))
-            fi
-        done < <(grep -oE '^\s*(pub(\([a-z]+\))? )?fn [a-z_][a-z0-9_]*' "$path" \
-                 | sed 's/.*fn //' || true)
-    done < <(git ls-files -z "$layout_src/*.rs")
-    [ "$self_calls" -eq 0 ] && ok "no function in px-layout calls itself"
+    owners="$( { grep -rnE "$OWNED_CHILD" "$layout_src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | wc -l)"
+    if [ "$owners" -eq 0 ]; then
+        ok "no box type owns another box inline"
+    else
+        fail "px-layout has a box type owning boxes inline, in $owners place(s)."
+        fail "  Dropping the outer one drops the inner ones, recursively, and that"
+        fail "  is the deep-nesting crash gate item 3 exists to prevent -- written"
+        fail "  by the compiler, so no test of yours will show it."
+        { grep -rnE "$OWNED_CHILD" "$layout_src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | head -n 5 | sed 's/^/       /' >&2
+    fi
 fi
 
 verdict "layout"

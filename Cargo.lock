@@ -841,6 +841,7 @@ name = "px-layout"
 version = "0.0.0"
 dependencies = [
  "app_units",
+ "px-dom",
 ]
 
 [[package]]

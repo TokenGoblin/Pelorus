@@ -12,3 +12,8 @@ publish.workspace = true
 # reason the toml dev-dependency taught: reaching for the newest resolves a second
 # copy and doubles the audit surface for nothing.
 app_units = "0.7.8"
+
+[dev-dependencies]
+# The reftest corpus is HTML, so validating it means parsing it. Dev-only: the
+# layout crate takes a box tree, it does not parse documents.
+px-dom = { path = "../px-dom", version = "0.0.0" }
