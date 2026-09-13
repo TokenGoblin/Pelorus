@@ -906,3 +906,33 @@ Format: one entry per defect.
 - **Not done in Phase 5 because** phase discipline puts out-of-phase defects here
   rather than in this phase's diff, and this is Phase 3's job. It is a one-line
   change whenever somebody is in that file for another reason.
+
+## sandbox_policy_repeated_spawns_do_not_leak_handles fails while reporting no leak
+
+- **Found in:** phase 6 CI, on a branch that does not touch px-sandbox
+- **Belongs to:** phase 2's test
+- **What:** `sanitizers (windows-latest)` failed with
+
+  ```
+  handles grew from 115 to 135 across 40 spawns;
+  the spawn path leaks roughly 0 per launch
+  ```
+
+  The message contradicts itself: it fails, and says the per-launch leak is zero.
+  20 handles across 40 spawns is 0.5 each, and the integer division in the
+  message renders that as 0.
+- **Why it matters:** two separate problems. The **threshold** treats any growth
+  as a failure while the message it prints computes a per-launch figure that
+  rounds to nothing, so the test cannot state its own verdict — a reader cannot
+  tell whether 20 handles is a leak or noise. And the **flakiness**: the same job
+  passed on ubuntu, passed on `main`, and passes locally, so under ASAN on Windows
+  the handle count moves for reasons the test does not model. A test that fails
+  intermittently in a job nobody expects to be red is how a real leak gets
+  dismissed.
+- **What to do:** decide what the test actually asserts. If the claim is "no
+  growth", say so and drop the per-launch arithmetic. If it is "growth below a
+  rate", state the rate in the threshold rather than only in the message, and
+  give it enough headroom for ASAN's own allocations. Either way the message and
+  the condition have to agree.
+- **Not done in Phase 6 because** it is Phase 2's test and phase discipline puts
+  out-of-phase defects here. Worth doing before anybody trusts that job again.
