@@ -187,41 +187,31 @@ if [ -d "$layout_src" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# No box owns another box inline, so the Drop the compiler writes cannot recurse.
+# Why there is no source scan for recursive ownership here.
 #
-# The first version of this check scanned for functions calling themselves, by
-# counting how often a function's name appeared in its own file. It fired on
-# `geom::px` and `geom::au` -- which are not recursive, they are used by tests in
-# the same file -- and on every `new()`. A check that fails on correct code is
-# worse than no check: it teaches people to ignore it, which is the argument ADR
-# 029 makes against comparing box trees structurally, one file over.
+# There were two, and both fired on correct code.
 #
-# ci/gate-dom.sh solved the same problem properly and this is its approach. Rather
-# than detect recursion, forbid the *structure* that makes the worst case
-# unavoidable. A recursive `Drop` on a linked tree is the classic deep-nesting
-# crash and nobody writes it on purpose -- it happens because dropping a box drops
-# the boxes it owns. Boxes in a flat arena cannot. A `Vec<Fragment>` inside a
-# `Fragment` can, and will, the first time a page nests a hundred thousand divs.
+# The first counted how often a function's name appeared in its own file, and
+# reported `geom::px` and `geom::au` as recursive because tests in the same file
+# call them. The second forbade `Vec<Fragment>` -- and `FragmentTree` holds
+# exactly that, because a flat arena of fragments *is* the design the check was
+# meant to encourage. A grep cannot tell an arena holding fragments from a
+# fragment holding fragments.
 #
-# The behavioural half is gate item 3, the deep-nesting test. This is the half a
-# test cannot give you: it says tomorrow's code will still be iterative.
+# The property is real and worth enforcing; a scan is the wrong instrument. The
+# right one is the compiler: `Fragment` is `Copy`, and a type that owns a `Vec`
+# cannot be. So a fragment that owned its children would not compile, which is a
+# stronger guarantee than any scan and needs no exception list.
+#
+# `layout_depth_fragments_are_copy_so_drop_cannot_recurse` is where that is
+# asserted, in gate item 3's own test file, so removing the guarantee fails the
+# gate item it belongs to rather than a scan somebody could silence.
+#
+# Recorded at length because three checks in this file have now been wrong in the
+# same direction, and the lesson is not "write better greps". It is that a
+# structural claim wants a structural mechanism, and `Copy` was available the
+# whole time.
 # ---------------------------------------------------------------------------
 
-# A crate with no box type trivially has no box owning another, which is where
-# px-layout is today. These are the names this phase will introduce.
-OWNED_CHILD='(Box|Vec|Rc|Arc)<[[:space:]]*(BoxFragment|Fragment|LayoutBox|BlockBox|InlineBox)'
-
-if [ -d "$layout_src" ]; then
-    owners="$( { grep -rnE "$OWNED_CHILD" "$layout_src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | wc -l)"
-    if [ "$owners" -eq 0 ]; then
-        ok "no box type owns another box inline"
-    else
-        fail "px-layout has a box type owning boxes inline, in $owners place(s)."
-        fail "  Dropping the outer one drops the inner ones, recursively, and that"
-        fail "  is the deep-nesting crash gate item 3 exists to prevent -- written"
-        fail "  by the compiler, so no test of yours will show it."
-        { grep -rnE "$OWNED_CHILD" "$layout_src" || true; } | { grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true; } | head -n 5 | sed 's/^/       /' >&2
-    fi
-fi
 
 verdict "layout"
