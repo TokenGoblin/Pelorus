@@ -307,10 +307,18 @@ fn layout_reftest_the_subset_is_present_and_paired() {
 /// for a reason the exclusion does not name.
 /// Every failing pair, ordered by how close it is to matching.
 ///
-/// `cargo test -p px-layout --test reftest -- --ignored --nocapture layout_reftest_report`
+/// ```text
+/// REPORT=1 cargo test -p px-layout --test reftest -- --nocapture
+/// DIAG=normal-flow/some-test.html cargo test -p px-layout --test reftest -- --nocapture
+/// ```
 ///
-/// Ignored because it is an instrument, not an assertion: it always "passes", and
-/// running it on every build would print a hundred lines nobody asked for.
+/// An instrument, not an assertion, and deliberately **not a test**. The obvious
+/// shape for it is an `#[ignore]`d test — which `ci/gate-layout.sh` rejects,
+/// because a gate item whose tests can be ignored is not a gate, and the check
+/// matches on the `layout_reftest_` name prefix rather than on intent. Renaming it
+/// out of the prefix would have passed the check while leaving an ignored test in
+/// the gate's own file, which is the thing the check exists to notice. So it is a
+/// function the gate test calls when asked, and there is nothing to ignore.
 ///
 /// It exists because the alternative is writing it again. This diagnostic has been
 /// hand-written and deleted twice — once to find that all of a container's inline
@@ -318,12 +326,10 @@ fn layout_reftest_the_subset_is_present_and_paired() {
 /// `display: flow-root` was being thrown away. Both times the finding was in the
 /// first three lines of its output. A tool worth writing twice is worth committing.
 ///
-/// `DIAG=<test filename>` dumps one pair's two fragment trees instead, which is
-/// the second thing wanted every time: the count says which pair to look at and
-/// the trees say what is wrong with it.
-#[test]
-#[ignore = "a diagnostic, not an assertion -- run it with --ignored"]
-fn layout_reftest_report() {
+/// `DIAG` dumps one pair's two layouts with the source that produced them, which
+/// is the second thing wanted every time: the list says which pair to look at and
+/// the dump says what is wrong with it.
+fn report() {
     if let Ok(name) = std::env::var("DIAG") {
         report_one(&name);
         return;
@@ -445,6 +451,9 @@ fn layout_reftest_matches_at_or_above_the_pinned_floor() {
     );
     for line in breakdown() {
         println!("  {line}");
+    }
+    if std::env::var("REPORT").is_ok() || std::env::var("DIAG").is_ok() {
+        report();
     }
 
     assert!(
