@@ -99,9 +99,23 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// here: four more pairs agree than this number counts, and they are rejected for
 /// agreeing about nothing.
 ///
+/// Floats (§9.5) raised it again, by **one**, and the number is worth more than
+/// it looks. The float chapter went 4/17 to 5/17, and reading the twelve that
+/// still fail is what says why: two are multi-column, four are tables, three are
+/// `overflow` or paint order, and the rest need `inline-block`. None of them is
+/// waiting on float placement. The engine now places floats, flows text beside
+/// them, shrinks them to fit, clears past them and contains them in a
+/// `flow-root`, and `crates/px-layout/src/block.rs`'s own tests are what hold
+/// that -- nine of them, each verified to fail when the behaviour is removed.
+/// This corpus cannot see most of it yet.
+///
+/// The same reading is why `display: flow-root` was found at all: the corpus
+/// wraps float fixtures in one, and treating it as an unimplemented formatting
+/// context threw the whole container away.
+///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 52;
+const MATCH_FLOOR: usize = 53;
 
 /// A layout with no more fragments than this has no content in it.
 ///

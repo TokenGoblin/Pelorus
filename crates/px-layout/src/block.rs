@@ -87,6 +87,16 @@ enum Content {
     InlineRun(String),
     /// A block-level child, which becomes a box of its own.
     Block(NodeId),
+    /// A floated child (§9.5), which becomes a box of its own but stays *inside*
+    /// the run it appears in.
+    ///
+    /// §9.2.1.1's anonymous box rule is about in-flow block-level boxes: an
+    /// out-of-flow one does not separate the inline content around it, because the
+    /// content flows past it rather than below it. Treating a float as
+    /// `Content::Block` split every `text <span style="float:left">…</span> text`
+    /// into two anonymous blocks and stacked them, which is the opposite of what a
+    /// float is for.
+    Float(NodeId),
 }
 
 /// Per-fragment layout state, indexed by fragment index.
@@ -113,11 +123,20 @@ struct Tables {
     inline_sizes: Vec<Au>,
     /// `None` means `height: auto`, which is resolved from content on the way up.
     specified_block_sizes: Vec<Option<Au>>,
-    /// The block size this box's own inline content occupies, if any.
+    /// Whether this fragment establishes a block formatting context (§9.4.1).
     ///
-    /// Separate from the children cursor because line fragments are positioned by
-    /// [`crate::inline::layout_lines`] rather than by the block stacking pass.
-    inline_content_heights: Vec<Au>,
+    /// Read on the way up, where it decides whether the box's `height: auto`
+    /// stretches to contain its own floats (§10.6.7).
+    formatting_context_roots: Vec<bool>,
+    /// Which floats this fragment must clear, if any (§9.5.2).
+    clear_sides: Vec<Option<crate::float::ClearSide>>,
+    /// Whether this fragment is a float, and if so which edge it takes.
+    ///
+    /// A side table rather than a [`FragmentKind`], because "float" is a statement
+    /// about a box's *flow*, not about what kind of box it is — a float is an
+    /// ordinary block box that happens to be out of flow, and the distinction
+    /// matters again for `position: absolute` in a later phase.
+    float_sides: Vec<Option<crate::float::FloatSide>>,
     /// The inline content a box holds directly, waiting to be laid out.
     ///
     /// Recorded when the container is partitioned and used on the way *up*.
@@ -136,7 +155,11 @@ impl Tables {
             pending: vec![Vec::new()],
             inline_sizes: vec![viewport_inline_size],
             specified_block_sizes: vec![None],
-            inline_content_heights: vec![Au(0)],
+            // The initial containing block is a formatting context root: there
+            // is no outer context for a float in it to escape into.
+            formatting_context_roots: vec![true],
+            clear_sides: vec![None],
+            float_sides: vec![None],
             inline_runs: vec![None],
             edges: vec![Edges::ZERO],
         }
@@ -148,7 +171,9 @@ impl Tables {
             self.pending.push(Vec::new());
             self.inline_sizes.push(Au(0));
             self.specified_block_sizes.push(None);
-            self.inline_content_heights.push(Au(0));
+            self.formatting_context_roots.push(false);
+            self.clear_sides.push(None);
+            self.float_sides.push(None);
             self.inline_runs.push(None);
             self.edges.push(Edges::ZERO);
         }
@@ -174,6 +199,13 @@ struct PendingRun {
     text: String,
     font_size: Au,
     line_height: Au,
+    /// Where this run sits among its container's content items.
+    ///
+    /// Only meaningful for a run held directly by a block container — one wrapped
+    /// in an anonymous block is laid out when its wrapper's slot comes round. It
+    /// exists so that a float *before* the text is placed before the lines are
+    /// measured, and a float after it is not.
+    slot: usize,
 }
 
 /// The resolved box-model edges of one box, in app units.
@@ -272,8 +304,40 @@ pub fn layout_document(
                         .copied()
                         .unwrap_or(Au(0));
                     let mut resolved = resolve_edges(&style, containing);
-                    let content_inline = resolve_inline_size(&style, containing, &resolved);
-                    centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
+                    let side = float_side(&style);
+
+                    // §10.3.5: a float with `width: auto` shrinks to fit rather
+                    // than filling its containing block, which is why floats need
+                    // intrinsic sizes at all. An in-flow block with `width: auto`
+                    // fills, and getting these the wrong way round makes every
+                    // float the full width of the page — indistinguishable from
+                    // "floats are not implemented" in a rendering.
+                    let content_inline = match side {
+                        Some(_) if definite_inline_size(&style).is_none() => {
+                            let available = containing - resolved.inline_surround();
+                            let available = available.max(Au(0));
+                            let intrinsic = intrinsic_inline_size(dom, arena, node);
+                            // The intrinsic figures are border-box, and this box's
+                            // own surround is already counted in `available`.
+                            let surround =
+                                resolved.border.inline_sum() + resolved.padding.inline_sum();
+                            shrink_to_fit(
+                                Intrinsic {
+                                    min: (intrinsic.min - surround).max(Au(0)),
+                                    max: (intrinsic.max - surround).max(Au(0)),
+                                },
+                                available,
+                            )
+                        }
+                        _ => resolve_inline_size(&style, containing, &resolved),
+                    };
+
+                    // §9.5.1 rule 9: `auto` margins on a float are zero, not
+                    // centring. A float is shifted to an edge; there is nothing
+                    // for the leftover space to be shared between.
+                    if side.is_none() {
+                        centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
+                    }
 
                     let fragment = tree.push(Fragment::new(
                         FragmentKind::Block,
@@ -288,6 +352,10 @@ pub fn layout_document(
                     tables.grow_to(fragment.index());
                     tables.inline_sizes[fragment.index()] = content_inline;
                     tables.edges[fragment.index()] = resolved;
+                    tables.float_sides[fragment.index()] = side;
+                    tables.clear_sides[fragment.index()] = clear_side(&style);
+                    tables.formatting_context_roots[fragment.index()] =
+                        establishes_formatting_context(&style);
                     tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
                     if let Some(reserved) = tables
                         .pending
@@ -305,6 +373,8 @@ pub fn layout_document(
 
                 Step::Children { fragment, node } => {
                     let items = partition_content(dom, arena, node);
+                    // Only *in-flow* block-level content forces anonymous boxes
+                    // (§9.2.1.1); a float is block-level and does not.
                     let has_block = items.iter().any(|i| matches!(i, Content::Block(_)));
                     let available = tables
                         .inline_sizes
@@ -330,39 +400,36 @@ pub fn layout_document(
                         .as_ref()
                         .map_or(font_size * 6 / 5, |s| crate::inline::line_height_of(s));
 
-                    if !has_block {
-                        // Only inline content, so no anonymous box is generated:
-                        // §9.2.1.1 wraps inline content only when it has
-                        // block-level *siblings* to be separated from. The lines
-                        // hang directly off this container.
-                        tables.grow_to(fragment.index());
-                        for item in items {
-                            let Content::InlineRun(text) = item else {
-                                continue;
-                            };
-                            tables.inline_runs[fragment.index()] = Some(PendingRun {
-                                text,
-                                font_size,
-                                line_height,
-                            });
-                        }
-                        continue;
-                    }
-
-                    // Mixed content. Every slot is reserved up front so that a
-                    // block child, whose fragment does not exist until its own
-                    // `Enter`, still lands between the anonymous blocks created
-                    // here and now.
+                    // A slot per content item, always -- floats included, and
+                    // whether or not anonymous boxes are generated. `Exit` walks
+                    // the slots in order, so this is what keeps a float placed
+                    // before the text that flows past it and after the text that
+                    // does not.
                     tables.grow_to(fragment.index());
                     tables.pending[fragment.index()] = vec![None; items.len()];
 
                     for (slot, item) in items.into_iter().enumerate() {
                         match item {
-                            Content::Block(child) => stack.push(Step::Enter {
-                                node: child,
-                                parent: fragment,
-                                slot,
-                            }),
+                            Content::Block(child) | Content::Float(child) => {
+                                stack.push(Step::Enter {
+                                    node: child,
+                                    parent: fragment,
+                                    slot,
+                                });
+                            }
+                            Content::InlineRun(text) if !has_block => {
+                                // §9.2.1.1: inline content with no in-flow
+                                // block-level sibling is not wrapped. The lines
+                                // hang directly off this container, and the slot
+                                // stays empty -- `PendingRun::slot` is what tells
+                                // `Exit` where in the sequence to build them.
+                                tables.inline_runs[fragment.index()] = Some(PendingRun {
+                                    text,
+                                    font_size,
+                                    line_height,
+                                    slot,
+                                });
+                            }
                             Content::InlineRun(text) => {
                                 let anonymous = tree.push(Fragment::new(
                                     FragmentKind::AnonymousBlock,
@@ -381,65 +448,33 @@ pub fn layout_document(
                                     text,
                                     font_size,
                                     line_height,
+                                    slot,
                                 });
-                                // An anonymous block has no children of its own
-                                // beyond that run, so it needs no `Children` step
-                                // -- but it does need `Exit`, which is what lays
-                                // the run out, gives the box a block size and
-                                // positions the lines.
-                                stack.push(Step::Exit {
-                                    fragment: anonymous,
-                                });
+                                // No `Children` step, because an anonymous block
+                                // has no children beyond that run -- and no `Exit`
+                                // either. Its container lays the run out when the
+                                // slot comes round, because that is the only point
+                                // at which the floats the lines must avoid have
+                                // been placed.
                             }
                         }
                     }
                 }
 
                 Step::Exit { fragment } => {
-                    // The inline content recorded on the way down, laid out now
-                    // that everything this container holds has been sized. The
-                    // lines join `pending` as ordinary children and the stacking
-                    // loop below recognises them by kind, exactly as it did when
-                    // they were built at `Children`.
-                    if let Some(run) = tables
-                        .inline_runs
-                        .get_mut(fragment.index())
-                        .and_then(Option::take)
-                    {
-                        let available = tables
-                            .inline_sizes
-                            .get(fragment.index())
-                            .copied()
-                            .unwrap_or(Au(0));
-                        layout_inline_run(&mut tree, &mut tables, fragment, &run, available);
-                    }
-
-                    // Reserved slots collapse to the children that exist.
-                    // A `None` is a block child that generated no box -- an
-                    // unimplemented formatting context -- and dropping it here
-                    // rather than at reservation time is what keeps the *other*
-                    // slots in document order.
-                    let kids: Vec<FragmentId> = tables
+                    // The content slots reserved when this container was
+                    // partitioned, walked in document order. Three things happen
+                    // in this loop and the order between them is the whole point:
+                    // floats are placed, inline runs are broken into lines around
+                    // the floats already placed, and in-flow boxes are stacked.
+                    let slots = tables
                         .pending
                         .get(fragment.index())
-                        .map(|slots| slots.iter().copied().flatten().collect())
+                        .cloned()
                         .unwrap_or_default();
 
-                    // Stack the children along the block axis. No margin
-                    // Margin collapsing between siblings, per CSS 2.1 §8.3.1.
-                    //
-                    // Two adjoining vertical margins collapse into one whose size
-                    // is the larger of the two — or, when they have opposite
-                    // signs, the sum of the most positive and the most negative.
-                    // "Adjoining" here means only sibling-to-sibling: collapsing
-                    // *through* a parent, which happens when no border or padding
-                    // separates a parent from its first or last child, is not
-                    // implemented and is still a named gap.
-                    //
-                    // Inline content sits above any block children, and the line
-                    // fragments were already positioned relative to it.
-                    let mut cursor = tables
-                        .inline_content_heights
+                    let available = tables
+                        .inline_sizes
                         .get(fragment.index())
                         .copied()
                         .unwrap_or(Au(0));
@@ -447,59 +482,145 @@ pub fn layout_document(
                         .edges
                         .get(fragment.index())
                         .map_or(Au(0), Edges::block_surround);
-                    // The parent's content-box origin, relative to its own
-                    // *border* box. Its margin is deliberately not included: a
-                    // margin is outside the border box, and the parent's own
-                    // offset already accounts for it. Adding it here counted it
-                    // twice, which is what a review found -- a child of a
-                    // 30px-margin parent inside an 8px-margin body came out at
-                    // 35px, which is neither absolute (43) nor parent-relative (5).
+                    // The content-box origin, relative to this box's own *border*
+                    // box. Its margin is deliberately not included: a margin is
+                    // outside the border box, and this box's own offset already
+                    // accounts for it. Adding it here counted it twice, which is
+                    // what a review found -- a child of a 30px-margin parent
+                    // inside an 8px-margin body came out at 35px, which is neither
+                    // absolute (43) nor parent-relative (5).
                     let content_inline_start = tables
                         .edges
                         .get(fragment.index())
                         .map_or(Au(0), |e| e.border.inline_start + e.padding.inline_start);
-                    // The block axis needs the same origin and did not have it at
-                    // all: children were placed at the parent's border-box top,
-                    // inside its own top padding, while the inline axis did
+                    // The block axis needs the same origin and once did not have
+                    // it at all: children were placed at the border-box top,
+                    // inside this box's own top padding, while the inline axis did
                     // include padding. The two axes disagreed.
                     let content_block_start = tables
                         .edges
                         .get(fragment.index())
                         .map_or(Au(0), |e| e.border.block_start + e.padding.block_start);
 
+                    // This container's floats, in its content box's coordinates.
+                    // A float in an *ancestor* context does not reach here, which
+                    // is the named gap in `crate::float`'s module documentation.
+                    let mut floats = crate::float::FloatContext::new();
+                    let mut own_run = tables
+                        .inline_runs
+                        .get_mut(fragment.index())
+                        .and_then(Option::take);
+
+                    let mut kids: Vec<FragmentId> = Vec::new();
+                    let mut cursor = Au(0);
                     // The margin left over from the previous sibling's bottom
                     // edge, waiting to collapse with the next one's top.
                     let mut pending_margin = Au(0);
                     let mut first_in_flow = true;
 
-                    for kid in &kids {
-                        // Line fragments were already positioned by
-                        // `layout_lines`, and their height is already in `cursor`
-                        // via `inline_content_heights`. Stacking them again moves
-                        // them down by their own height and counts it twice --
-                        // which presented as every text block coming out exactly
-                        // double height, with its single line sitting one
-                        // line-height below the top.
-                        if tree.get(*kid).is_some_and(|f| f.kind == FragmentKind::Line) {
-                            // Shifted into the content box rather than
-                            // repositioned: `layout_lines` already stacked them
-                            // relative to the content origin, and moving them
-                            // again is the double-height bug from earlier.
-                            if let Some(line) = tree.get_mut(*kid) {
-                                line.inline_offset += content_inline_start;
-                                line.block_offset += content_block_start;
+                    for slot in 0..=slots.len() {
+                        // This container's own inline content, at its position in
+                        // the sequence rather than always first -- so a float
+                        // before the text narrows it and a float after it does
+                        // not. The `..=` above is what lets a run that comes after
+                        // every other item still be reached.
+                        if let Some(run) = own_run.take_if(|run| run.slot == slot) {
+                            let height = place_run(
+                                &mut tree,
+                                &mut kids,
+                                &run,
+                                &floats,
+                                available,
+                                cursor,
+                                content_inline_start,
+                                content_block_start,
+                            );
+                            cursor += height;
+                        }
+
+                        let Some(Some(kid)) = slots.get(slot).copied() else {
+                            continue;
+                        };
+
+                        // A float is out of flow: it is positioned by the float
+                        // context and does not move the cursor, so the in-flow
+                        // content after it sits where it would have been anyway
+                        // and only the *lines* flow around it (§9.5).
+                        if let Some(side) = tables.float_sides.get(kid.index()).copied().flatten() {
+                            let margin = tables
+                                .edges
+                                .get(kid.index())
+                                .map_or(LogicalEdges::ZERO, |e| e.margin);
+                            let border_box = tree.get(kid).map_or(LogicalSize::ZERO, |f| f.size);
+                            let margin_box = LogicalSize::new(
+                                border_box.inline + margin.inline_sum(),
+                                border_box.block + margin.block_sum(),
+                            );
+                            // §9.5.2: `clear` on a float raises the floor the
+                            // placement search starts from, rather than moving the
+                            // float afterwards -- the float still has to fit
+                            // beside whatever is at the new position.
+                            let floor = match tables.clear_sides.get(kid.index()).copied().flatten()
+                            {
+                                Some(clear) => cursor.max(floats.clearance(clear)),
+                                None => cursor,
+                            };
+                            let placed = floats.place(side, margin_box, floor, available);
+                            if let Some(float_fragment) = tree.get_mut(kid) {
+                                float_fragment.inline_offset = content_inline_start
+                                    + placed.inline_start
+                                    + margin.inline_start;
+                                float_fragment.block_offset =
+                                    content_block_start + placed.block_start + margin.block_start;
                             }
+                            kids.push(kid);
                             continue;
                         }
+
+                        // An anonymous block box, whose run is laid out here
+                        // rather than at a visit of its own -- this is the only
+                        // point at which the floats its lines must avoid have
+                        // been placed.
+                        if let Some(run) = tables
+                            .inline_runs
+                            .get_mut(kid.index())
+                            .and_then(Option::take)
+                        {
+                            let mut wrapped = Vec::new();
+                            let height = place_run(
+                                &mut tree,
+                                &mut wrapped,
+                                &run,
+                                &floats,
+                                available,
+                                Au(0),
+                                Au(0),
+                                Au(0),
+                            );
+                            tree.set_children(kid, &wrapped);
+                            if let Some(anonymous) = tree.get_mut(kid) {
+                                anonymous.size.block = height;
+                            }
+                        }
+
                         let kid_margin = tables
                             .edges
                             .get(kid.index())
                             .map_or(LogicalEdges::ZERO, |e| e.margin);
 
+                        // Margin collapsing between siblings, per CSS 2.1 §8.3.1.
+                        // Two adjoining vertical margins collapse into one whose
+                        // size is the larger of the two -- or, when they have
+                        // opposite signs, the sum of the most positive and the
+                        // most negative. "Adjoining" here means only
+                        // sibling-to-sibling: collapsing *through* a parent, which
+                        // happens when no border or padding separates a parent
+                        // from its first or last child, is not implemented and is
+                        // still a named gap.
+                        //
                         // The first in-flow child's top margin has nothing to
-                        // collapse against here, because collapsing it with the
-                        // parent's is the through-the-parent case this does not
-                        // implement.
+                        // collapse against here, because collapsing it with this
+                        // box's own is that unimplemented case.
                         cursor += if first_in_flow {
                             kid_margin.block_start
                         } else {
@@ -507,8 +628,17 @@ pub fn layout_document(
                         };
                         first_in_flow = false;
 
-                        if let Some(kid_fragment) = tree.get_mut(*kid) {
-                            // Relative to this parent's border box. A final pass
+                        // §9.5.2: clearance is introduced *after* the margin, and
+                        // pushes the box down rather than replacing where it was
+                        // going. A box that is already below the floats it clears
+                        // does not move at all, which is what the `max` says.
+                        if let Some(clear) = tables.clear_sides.get(kid.index()).copied().flatten()
+                        {
+                            cursor = cursor.max(floats.clearance(clear));
+                        }
+
+                        if let Some(kid_fragment) = tree.get_mut(kid) {
+                            // Relative to this box's border box. A final pass
                             // converts the whole tree to absolute once every
                             // parent's own offset is known -- which it is not
                             // here, because a parent is positioned by *its*
@@ -519,11 +649,27 @@ pub fn layout_document(
                             cursor += kid_fragment.size.block;
                         }
                         pending_margin = kid_margin.block_end;
+                        kids.push(kid);
                     }
                     // The last child's bottom margin is inside this box's content
                     // height. Collapsing it out through the parent is the case
                     // above that is not implemented.
                     cursor += pending_margin;
+
+                    // §10.6.7: a box that establishes a block formatting context
+                    // and has `height: auto` stretches to contain its own floats.
+                    // A box that does *not* establish one leaves them to overflow,
+                    // which looks like a bug in every rendering and is the rule --
+                    // it is why `display: flow-root` exists, and why the clearfix
+                    // hack existed before it did.
+                    if tables
+                        .formatting_context_roots
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(false)
+                    {
+                        cursor = cursor.max(floats.lowest_edge(None));
+                    }
 
                     tree.set_children(fragment, &kids);
                     let specified = tables
@@ -536,6 +682,7 @@ pub fn layout_document(
                         // block size (§10.6.3). Either way the box's own border
                         // and padding are added, because the fragment records a
                         // border box.
+                        //
                         let content = specified.unwrap_or(cursor);
                         f.size.block = content + surround;
                     }
@@ -583,34 +730,89 @@ fn first_element(arena: &Arena) -> Option<NodeId> {
         .find(|id| arena.get(*id).is_some_and(|n| n.element_name().is_some()))
 }
 
-/// Lay `run` out as lines inside `container`, and record their total height.
+/// Lay `run` out into line fragments, position them, and return their height.
 ///
-/// Shared by the two places inline content can live: directly inside a block
-/// container that has no block-level children, and inside an anonymous block box
-/// generated because it does. The two differ only in which fragment the lines
-/// hang off, which is exactly what makes §9.2.1.1 cheap to implement here.
+/// The lines are appended to `into` and offset into the container's content box
+/// by `content_inline_start` / `content_block_start`, starting at `block_origin`
+/// along the block axis. `floats` is the container's float context, which is what
+/// shortens them (§9.5).
 ///
-/// Called from `Exit`, not from `Children` — see [`PendingRun`] for why.
-fn layout_inline_run(
+/// Called from `Exit`, once per inline run, at the point in the container's
+/// content sequence where that run sits — see [`PendingRun`] for why it is not
+/// called on the way down, and the `Exit` arm for why it is not called all at
+/// once.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "every argument is a distinct piece of the container's geometry; \
+              bundling them into a struct used at exactly two call sites would \
+              name the same values twice"
+)]
+fn place_run(
     tree: &mut FragmentTree,
-    tables: &mut Tables,
-    container: FragmentId,
+    into: &mut Vec<FragmentId>,
     run: &PendingRun,
+    floats: &crate::float::FloatContext,
     available: Au,
-) {
+    block_origin: Au,
+    content_inline_start: Au,
+    content_block_start: Au,
+) -> Au {
     let context = crate::inline::InlineContext {
         text: &run.text,
         font_size: run.font_size,
         line_height: run.line_height,
         available,
+        floats: if floats.is_empty() {
+            None
+        } else {
+            Some(floats)
+        },
+        block_origin,
     };
     let (lines, height) = crate::inline::layout_lines(tree, &context);
-    tables.grow_to(tree.len());
-    if let Some(kids) = tables.pending.get_mut(container.index()) {
-        kids.extend(lines.into_iter().map(Some));
+
+    for line in &lines {
+        // Shifted into the content box rather than repositioned: `layout_lines`
+        // has already placed each line against the floats and stacked it, and
+        // moving it again is the double-height bug an earlier version had, where
+        // every text block came out exactly twice as tall with its single line
+        // sitting one line-height below the top.
+        if let Some(fragment) = tree.get_mut(*line) {
+            fragment.inline_offset += content_inline_start;
+            fragment.block_offset += content_block_start;
+        }
     }
-    if let Some(slot) = tables.inline_content_heights.get_mut(container.index()) {
-        *slot = height;
+    into.extend_from_slice(&lines);
+    height
+}
+
+/// Which floats this box must clear, if any (§9.5.2).
+fn clear_side(style: &ComputedValues) -> Option<crate::float::ClearSide> {
+    use style::computed_values::clear::T as Clear;
+    match style.clone_clear() {
+        // The logical spellings collapse onto the physical ones for the same
+        // reason they do in `float_side`: this phase's inline axis is
+        // left-to-right everywhere.
+        Clear::Left | Clear::InlineStart => Some(crate::float::ClearSide::Start),
+        Clear::Right | Clear::InlineEnd => Some(crate::float::ClearSide::End),
+        Clear::Both => Some(crate::float::ClearSide::Both),
+        Clear::None => None,
+    }
+}
+
+/// Which edge this box floats to, if it floats at all (§9.5).
+fn float_side(style: &ComputedValues) -> Option<crate::float::FloatSide> {
+    use style::computed_values::float::T as Float;
+    match style.clone_float() {
+        // The logical spellings map straight across because this phase treats the
+        // inline axis as left-to-right everywhere -- `crate::geom`'s whole
+        // vocabulary does. Under `direction: rtl` `left` and `inline-start` are
+        // opposite edges and this is wrong for both; bidi is Phase 9's, and
+        // collapsing them here is the same simplification the rest of the crate
+        // already makes rather than a new one.
+        Float::Left | Float::InlineStart => Some(crate::float::FloatSide::Start),
+        Float::Right | Float::InlineEnd => Some(crate::float::FloatSide::End),
+        Float::None => None,
     }
 }
 
@@ -649,6 +851,13 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
             // a test whose title was longer than its reference's laid out a wider
             // first line and failed on a string neither document renders.
             if style.as_ref().is_some_and(|s| is_display_none(s)) {
+                continue;
+            }
+            // A float is block-level (stylo blockifies it, §9.7) but out of
+            // flow, so it neither ends the run nor forces an anonymous box.
+            if let Some(style) = style.as_ref().filter(|s| float_side(s).is_some()) {
+                let _ = style;
+                out.push(Content::Float(id));
                 continue;
             }
             if style.is_some_and(|s| is_block_level(&s)) {
@@ -700,6 +909,199 @@ fn children_in_order(arena: &Arena, node: NodeId) -> Vec<NodeId> {
     out
 }
 
+/// A box's intrinsic inline sizes: CSS 2.1 §10.3.5's two "preferred" widths.
+///
+/// - `max` is the **preferred width**: the width the box would take if nothing
+///   ever wrapped. For text, the whole run on one line.
+/// - `min` is the **preferred minimum width**: the narrowest the box can be
+///   without its content overflowing. For text, the widest single word, because
+///   §9.4.2 says a word wider than its line overflows rather than breaking.
+///
+/// Both are border-box sizes — margins, borders and padding included — because
+/// that is what shrink-to-fit compares against the available width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Intrinsic {
+    min: Au,
+    max: Au,
+}
+
+impl Intrinsic {
+    const ZERO: Self = Self {
+        min: Au(0),
+        max: Au(0),
+    };
+}
+
+/// A block container part-way through having its intrinsic sizes computed.
+struct IntrinsicFrame {
+    /// Everything outside the content box along the inline axis.
+    surround: Au,
+    /// The widest contribution seen so far, from text or from a child.
+    min: Au,
+    max: Au,
+}
+
+/// One visit in the intrinsic walk.
+enum IntrinsicStep {
+    /// Measure this box's own text and schedule its block-level children.
+    Descend(NodeId),
+    /// Every child has contributed; fold the frame into its parent.
+    Combine,
+}
+
+/// CSS 2.1 §10.3.5: shrink-to-fit.
+///
+/// > `min(max(preferred minimum width, available width), preferred width)`
+///
+/// Used for a float with `width: auto`, which is the only box in this phase that
+/// gets it — absolutely positioned boxes and inline-blocks are the other two and
+/// neither is implemented.
+fn shrink_to_fit(intrinsic: Intrinsic, available: Au) -> Au {
+    let lower = if intrinsic.min > available {
+        intrinsic.min
+    } else {
+        available
+    };
+    if lower < intrinsic.max {
+        lower
+    } else {
+        intrinsic.max
+    }
+}
+
+/// The intrinsic inline sizes of the box `node` generates.
+///
+/// A block container's children do not *sum* along the inline axis — they stack —
+/// so both figures are the widest child's rather than the total. That is the one
+/// thing about this algorithm that surprises people coming from inline layout,
+/// where the opposite is true.
+///
+/// Percentages resolve against zero. CSS 2.1 leaves intrinsic sizing undefined,
+/// and treating a percentage width or margin as zero is what CSS-SIZING-3 §5.2
+/// settled on: the alternative is a circularity, because the containing block's
+/// width is what is being computed.
+///
+/// Iterative, like every other walk in this crate, over an explicit stack of
+/// [`IntrinsicStep`]s. A frame is pushed when a container is descended into and
+/// popped when its children have all contributed, so `frames.last_mut()` is
+/// always the parent of whatever just finished.
+fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId) -> Intrinsic {
+    let mut frames: Vec<IntrinsicFrame> = Vec::new();
+    let mut stack = vec![IntrinsicStep::Descend(root)];
+    let mut result = Intrinsic::ZERO;
+
+    /// Fold a finished box's sizes into its parent, or into the result.
+    fn contribute(frames: &mut [IntrinsicFrame], result: &mut Intrinsic, value: Intrinsic) {
+        let target = match frames.last_mut() {
+            Some(frame) => {
+                frame.min = frame.min.max(value.min);
+                frame.max = frame.max.max(value.max);
+                return;
+            }
+            None => result,
+        };
+        *target = value;
+    }
+
+    while let Some(step) = stack.pop() {
+        match step {
+            IntrinsicStep::Descend(node) => {
+                let Some(style) = computed_style(dom, node) else {
+                    contribute(&mut frames, &mut result, Intrinsic::ZERO);
+                    continue;
+                };
+                if is_display_none(&style) {
+                    contribute(&mut frames, &mut result, Intrinsic::ZERO);
+                    continue;
+                }
+
+                let edges = resolve_edges(&style, Au(0));
+                let surround = edges.inline_surround();
+
+                // A definite width makes both figures the same and stops the
+                // walk: nothing inside can widen a box whose width is stated.
+                if let Some(width) = definite_inline_size(&style) {
+                    let total = width + surround;
+                    contribute(
+                        &mut frames,
+                        &mut result,
+                        Intrinsic {
+                            min: total,
+                            max: total,
+                        },
+                    );
+                    continue;
+                }
+
+                let font_size = Au::from(style.clone_font_size().computed_size());
+                let mut frame = IntrinsicFrame {
+                    surround,
+                    min: Au(0),
+                    max: Au(0),
+                };
+                let mut blocks = Vec::new();
+                for item in partition_content(dom, arena, node) {
+                    match item {
+                        // A float contributes to its container's preferred
+                        // *minimum* width -- content cannot be narrower than a
+                        // float it contains -- but not to its preferred width,
+                        // because text flows beside a float rather than after it.
+                        // Both are approximated by the block rule here, which
+                        // overstates the preferred width of a container whose only
+                        // wide thing is a float.
+                        Content::Block(child) | Content::Float(child) => blocks.push(child),
+                        Content::InlineRun(text) => {
+                            frame.max = frame.max.max(crate::text::measure(&text, font_size));
+                            frame.min = frame.min.max(widest_word(&text, font_size));
+                        }
+                    }
+                }
+
+                frames.push(frame);
+                stack.push(IntrinsicStep::Combine);
+                for child in blocks.into_iter().rev() {
+                    stack.push(IntrinsicStep::Descend(child));
+                }
+            }
+
+            IntrinsicStep::Combine => {
+                let Some(frame) = frames.pop() else { continue };
+                let value = Intrinsic {
+                    min: frame.min + frame.surround,
+                    max: frame.max + frame.surround,
+                };
+                contribute(&mut frames, &mut result, value);
+            }
+        }
+    }
+    result
+}
+
+/// The width of the widest word in `text`.
+///
+/// The preferred minimum width of a run of text. Trailing spaces are excluded
+/// because §16.6.1 removes them at a break, so they never contribute to how narrow
+/// a line can be.
+fn widest_word(text: &str, font_size: Au) -> Au {
+    crate::text::words(text, font_size)
+        .into_iter()
+        .map(|(word, _)| crate::text::width_without_trailing_spaces(word, font_size))
+        .max()
+        .unwrap_or(Au(0))
+}
+
+/// The used `width`, if it is a length this phase can resolve without a context.
+///
+/// `auto` and percentages both return `None`, which the intrinsic walk reads as
+/// "look inside". They mean different things in general and the same thing here.
+fn definite_inline_size(style: &ComputedValues) -> Option<Au> {
+    use style::values::computed::Size;
+    match style.clone_width() {
+        Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
+        _ => None,
+    }
+}
+
 /// The computed style of `node`, if it is a styled element.
 fn computed_style(
     dom: px_css::view::Dom<'_>,
@@ -711,12 +1113,6 @@ fn computed_style(
     Some(data.styles.primary().clone())
 }
 
-/// Whether this box participates in block layout.
-///
-/// Only `display: block` for now. `inline-block`, `flex` and `grid` are
-/// block-level too, and each establishes a formatting context this phase does not
-/// implement — laying them out as plain blocks would produce confidently wrong
-/// geometry rather than none.
 /// Whether this element generates no box at all.
 ///
 /// Distinct from "not block-level", which this phase also declines to lay out:
@@ -724,23 +1120,63 @@ fn computed_style(
 /// to the inline run it sits in. `display: none` has none, and the difference is
 /// the whole of §9.2.4.
 fn is_display_none(style: &ComputedValues) -> bool {
-    use style::values::computed::Display;
-    style.clone_display() == Display::None
+    use style::values::specified::box_::{DisplayInside, DisplayOutside};
+    let display = style.clone_display();
+    // Both halves, because `display: contents` is also outside `none` and is the
+    // opposite instruction: it generates no box *and keeps its children*, which is
+    // what flattening through a non-block-level element already does for it.
+    matches!(display.outside(), DisplayOutside::None)
+        && matches!(display.inside(), DisplayInside::None)
 }
 
-/// Whether this box participates in block layout.
+/// Whether this box participates in block layout: a **block container** whose
+/// outer role is block-level.
 ///
-/// Only `display: block` for now. `inline-block`, `flex` and `grid` are
-/// block-level too, and each establishes a formatting context this phase does not
-/// implement — laying them out as plain blocks would produce confidently wrong
-/// geometry rather than none. Their *content* is still visited, flattened into the
-/// run around them by [`partition_content`]; only `display: none` is dropped.
+/// `display` is two independent halves (CSS Display 3 §2.1, and stylo stores it
+/// that way): the *outside* role says how the box behaves in its parent, and the
+/// *inside* type says what layout it runs for its children. Block layout is
+/// outside `block` and inside `flow` or `flow-root` — and nothing else, because
+/// anything else is a formatting context this phase does not implement, and
+/// laying one out as a block would be confidently wrong geometry rather than
+/// none.
+///
+/// Reading the two halves rather than comparing against `Display::Block` is what
+/// admits `display: flow-root`. That matters more than it sounds: a `flow-root` is
+/// a block container in every respect and differs from a plain block only in
+/// establishing a formatting context, so treating it as unimplemented threw away
+/// the box entirely — which in the reftest corpus meant a
+/// `<div style="width: 150px; display: flow-root">` full of floats vanished and
+/// its floats were placed against the body's 784px instead. It is also the only
+/// spelling `Display::FlowRoot` has here, because stylo puts that constant behind
+/// a Gecko feature this build does not enable.
+///
+/// The content of a box that is *not* block-level is still visited, flattened into
+/// the run around it by [`partition_content`]; only `display: none` is dropped.
 fn is_block_level(style: &ComputedValues) -> bool {
-    use style::values::computed::Display;
-    style.clone_display() == Display::Block
+    use style::values::specified::box_::{DisplayInside, DisplayOutside};
+    let display = style.clone_display();
+    matches!(display.outside(), DisplayOutside::Block)
+        && matches!(
+            display.inside(),
+            DisplayInside::Flow | DisplayInside::FlowRoot
+        )
 }
 
-/// Resolve margins, borders and padding against the containing block's inline
+/// Whether this box establishes a block formatting context (§9.4.1).
+///
+/// A BFC root contains its own floats (§10.6.7) and its own margin collapsing.
+/// `display: flow-root` exists to ask for exactly this and nothing else, which is
+/// why it is the clearest case: inside `flow-root`, outside anything.
+///
+/// Floats and absolutely positioned boxes are BFC roots too, and so is anything
+/// with `overflow` other than `visible`. The first is here; the other two are not,
+/// and are named gaps rather than silent ones.
+fn establishes_formatting_context(style: &ComputedValues) -> bool {
+    use style::values::specified::box_::DisplayInside;
+    matches!(style.clone_display().inside(), DisplayInside::FlowRoot) || float_side(style).is_some()
+}
+
+/// Resolve margins, borders and padding against the containing block's inline/// Resolve margins, borders and padding against the containing block's inline
 /// size.
 ///
 /// Percentages on *all* of these resolve against the containing block's **inline**
@@ -974,6 +1410,216 @@ mod tests {
 
     const FLAT: &str = "html, body, div, p { display: block; margin: 0; padding: 0 } \
          * { font-size: 10px; line-height: 20px }";
+
+    /// Every fragment's rectangle, in layout order.
+    fn boxes(tree: &FragmentTree) -> Vec<(FragmentKind, Au, Au, Au, Au)> {
+        tree.in_layout_order()
+            .into_iter()
+            .filter_map(|(_, id)| tree.get(id))
+            .map(|f| {
+                (
+                    f.kind,
+                    f.inline_offset,
+                    f.block_offset,
+                    f.size.inline,
+                    f.size.block,
+                )
+            })
+            .collect()
+    }
+
+    /// The rectangles of every fragment of `kind`.
+    fn rects_of(tree: &FragmentTree, kind: FragmentKind) -> Vec<(Au, Au, Au, Au)> {
+        boxes(tree)
+            .into_iter()
+            .filter(|b| b.0 == kind)
+            .map(|b| (b.1, b.2, b.3, b.4))
+            .collect()
+    }
+
+    /// §9.5: a float is out of flow, so the block after it does not move down.
+    ///
+    /// The defining property, and the one that is invisible in a rendering when it
+    /// is wrong in the other direction — a float laid out in flow just looks like a
+    /// block, which is exactly how it looked before this existed.
+    #[test]
+    fn block_a_float_does_not_push_the_next_block_down() {
+        let (tree, _) = layout(
+            "<html><body><div id=f></div><div id=b></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #f { float: left; width: 50px; height: 40px } \
+             #b { height: 30px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert!(
+            blocks.contains(&(px(0), px(0), px(50), px(40))),
+            "the float is at the top-start corner: {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(0), px(800), px(30))),
+            "the in-flow block starts at the top too, beneath the float: {blocks:?}"
+        );
+    }
+
+    /// §9.5: line boxes shorten and shift to make room for a float.
+    #[test]
+    fn block_text_flows_beside_a_float() {
+        let (tree, _) = layout(
+            "<html><body><div><span id=f></span>aaaa bbbb cccc</div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             div { width: 100px; font-size: 10px; line-height: 20px } \
+             #f { float: left; width: 40px; height: 20px }",
+        );
+        let lines = rects_of(&tree, FragmentKind::Line);
+        assert!(!lines.is_empty(), "the text laid out at all");
+        assert_eq!(
+            lines[0].0,
+            px(40),
+            "the first line starts past the float: {lines:?}"
+        );
+        assert_eq!(
+            lines[1].0,
+            px(0),
+            "the second line is below the float and starts at the edge: {lines:?}"
+        );
+    }
+
+    /// A float does not force an anonymous block around the text it interrupts.
+    ///
+    /// §9.2.1.1 is about in-flow block-level boxes. Treating a float as one split
+    /// `text<float>text` into two stacked anonymous blocks, which is the opposite
+    /// of what a float is for.
+    #[test]
+    fn block_a_float_does_not_split_the_run_around_it() {
+        let (tree, _) = layout(
+            "<html><body><div>before<span id=f></span>after</div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             div { font-size: 10px; line-height: 20px } \
+             #f { float: left; width: 10px; height: 10px }",
+        );
+        assert!(
+            !boxes(&tree)
+                .iter()
+                .any(|b| b.0 == FragmentKind::AnonymousBlock),
+            "a float is out of flow and generates no anonymous siblings: {:?}",
+            boxes(&tree)
+        );
+        assert_eq!(
+            rects_of(&tree, FragmentKind::Line).len(),
+            1,
+            "the text on both sides of the float is one run, so one line"
+        );
+    }
+
+    /// §10.3.5: a float with `width: auto` shrinks to fit rather than filling.
+    #[test]
+    fn block_a_float_shrinks_to_fit_its_content() {
+        let (tree, _) = layout(
+            "<html><body><div id=f>abcd</div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #f { float: left; font-size: 10px; line-height: 20px }",
+        );
+        let floats: Vec<_> = rects_of(&tree, FragmentKind::Block)
+            .into_iter()
+            .filter(|r| r.2 < px(800))
+            .collect();
+        // Four characters at 5px each. An in-flow block would be 800 wide.
+        assert_eq!(
+            floats,
+            vec![(px(0), px(0), px(20), px(20))],
+            "the float is as wide as its text, not as wide as the page"
+        );
+    }
+
+    /// §9.5.2: `clear` pushes a box below the floats it names.
+    #[test]
+    fn block_clear_pushes_a_block_below_the_float() {
+        let (tree, _) = layout(
+            "<html><body><div id=f></div><div id=b></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #f { float: left; width: 50px; height: 40px } \
+             #b { clear: left; height: 30px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(40), px(800), px(30))),
+            "the cleared block starts below the float's bottom edge: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// `clear` on the other side does not move the box.
+    ///
+    /// The control for the test above: a `clear` implemented as "always drop below
+    /// every float" would pass that one and fail this.
+    #[test]
+    fn block_clear_on_the_other_side_does_nothing() {
+        let (tree, _) = layout(
+            "<html><body><div id=f></div><div id=b></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #f { float: left; width: 50px; height: 40px } \
+             #b { clear: right; height: 30px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(30))),
+            "there are no end-side floats to clear: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §10.6.7: a formatting context root stretches to contain its own floats.
+    #[test]
+    fn block_a_flow_root_contains_its_floats() {
+        let (tree, _) = layout(
+            "<html><body><div id=r><div id=f></div></div></body></html>",
+            "html, body { display: block; margin: 0; padding: 0 } \
+             #r { display: flow-root } \
+             #f { float: left; width: 50px; height: 40px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(40))),
+            "the flow-root is as tall as the float inside it: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// A plain block container does *not* contain its floats.
+    ///
+    /// The rule that looks like a bug in every rendering, and the reason
+    /// `display: flow-root` exists at all. Asserted because the tempting fix is to
+    /// make every container contain its floats, which would break far more pages
+    /// than it fixed.
+    #[test]
+    fn block_a_plain_block_does_not_contain_its_floats() {
+        let (tree, _) = layout(
+            "<html><body><div id=r><div id=f></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #f { float: left; width: 50px; height: 40px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(0))),
+            "the container has no in-flow content, so it is zero-high: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// `display: flow-root` is a block container, not an unimplemented context.
+    ///
+    /// Found by the reftest corpus rather than reasoned about: a
+    /// `<div style="width: 150px; display: flow-root">` was being thrown away
+    /// whole, and the floats inside it were placed against the body's 784px.
+    #[test]
+    fn block_flow_root_lays_out_as_a_block_container() {
+        let (tree, _) = layout(
+            "<html><body><div id=r></div></body></html>",
+            "html, body { display: block; margin: 0; padding: 0 } \
+             #r { display: flow-root; width: 150px; height: 20px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(150), px(20))),
+            "flow-root generates a box of its own: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
 
     /// §9.2.1.1: inline content with no block-level siblings needs no wrapper.
     ///

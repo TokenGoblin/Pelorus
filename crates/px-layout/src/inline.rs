@@ -47,8 +47,18 @@ pub struct InlineContext<'a> {
     pub font_size: Au,
     /// The height of one line box.
     pub line_height: Au,
-    /// The inline size available for lines.
+    /// The inline size available for lines, before floats narrow it.
     pub available: Au,
+    /// The floats these lines must flow around (§9.5), if any.
+    ///
+    /// In the same coordinate space as [`InlineContext::block_origin`]: the
+    /// content box of the block container these lines belong to.
+    pub floats: Option<&'a crate::float::FloatContext>,
+    /// Where the first line box starts along the block axis.
+    ///
+    /// Not always zero, because a run can follow other content in its container —
+    /// and because which floats a line has to avoid depends on where it is.
+    pub block_origin: Au,
 }
 
 /// Lay `context` out into line fragments, appended to `tree`.
@@ -56,55 +66,101 @@ pub struct InlineContext<'a> {
 /// Returns the line fragments in order, and the total block size they occupy.
 /// The caller attaches them — this function does not know whether they belong
 /// directly to a block container or to an anonymous block wrapping them.
+///
+/// # One line at a time
+///
+/// Lines are built individually rather than measured all at once, because with
+/// floats they are not all the same width: CSS 2.1 §9.5 shortens a line box to
+/// the space its block position leaves free, so how much text fits on a line
+/// depends on where that line ended up, which depends on how much text fit on the
+/// lines above it. The loop is the dependency.
+///
+/// Without floats every band is the full width and this reduces to the greedy
+/// single-width break it replaced.
 pub fn layout_lines(
     tree: &mut FragmentTree,
     context: &InlineContext<'_>,
 ) -> (Vec<crate::fragment::FragmentId>, Au) {
     let mut lines = Vec::new();
-    let mut block_cursor = Au(0);
+    let mut block_cursor = context.block_origin;
+    let words = text::words(context.text, context.font_size);
+    let mut next = 0usize;
 
-    for line_width in break_into_lines(context) {
-        let fragment = tree.push(Fragment::new(
-            FragmentKind::Line,
-            LogicalSize::new(line_width, context.line_height),
-        ));
-        if let Some(f) = tree.get_mut(fragment) {
-            f.block_offset = block_cursor;
+    while next < words.len() {
+        let (start, end) = match context.floats {
+            Some(floats) => floats.band(
+                block_cursor,
+                block_cursor + context.line_height,
+                context.available,
+            ),
+            None => (Au(0), context.available),
+        };
+
+        // No room at this block position at all. CSS 2.1 §9.5 moves the line box
+        // down past the float rather than overflowing it, and the next band edge
+        // is strictly below, so this cannot spin.
+        if end <= start
+            && let Some(below) = context.floats.and_then(|f| f.next_edge_below(block_cursor))
+        {
+            block_cursor = below;
+            continue;
         }
-        lines.push(fragment);
-        block_cursor += context.line_height;
+
+        let (consumed, width) = fill_line(&words[next..], end - start, context.font_size);
+        if consumed == 0 {
+            // `fill_line` takes at least one word whenever it is given one, so
+            // reaching here means the slice was empty -- but stopping on it is
+            // what makes that a property of this loop rather than a comment about
+            // another function.
+            break;
+        }
+        next += consumed;
+
+        if width > Au(0) {
+            let fragment = tree.push(Fragment::new(
+                FragmentKind::Line,
+                LogicalSize::new(width, context.line_height),
+            ));
+            if let Some(f) = tree.get_mut(fragment) {
+                f.inline_offset = start;
+                f.block_offset = block_cursor;
+            }
+            lines.push(fragment);
+            block_cursor += context.line_height;
+        }
     }
 
-    (lines, block_cursor)
+    (lines, block_cursor - context.block_origin)
 }
 
-/// The width of each line, in order.
+/// Fill one line box `available` wide from the front of `words`.
+///
+/// Returns how many words the line takes and how wide it ends up.
 ///
 /// Greedy: words are added until one does not fit, then the line closes. A word
 /// wider than the available size gets a line to itself and overflows, which is
 /// what CSS 2.1 §9.4.2 requires — an unbreakable word is not broken, it sticks
-/// out.
-fn break_into_lines(context: &InlineContext<'_>) -> Vec<Au> {
-    let mut lines = Vec::new();
+/// out. That is also why this always takes at least one word when it is given
+/// one: the alternative is a caller that never advances.
+///
+/// The returned width excludes trailing spaces (§16.6.1) while the fitting
+/// decision includes them, which is why the two are tracked separately.
+fn fill_line(words: &[(&str, Au)], available: Au, font_size: Au) -> (usize, Au) {
+    let mut consumed = 0usize;
     let mut current = Au(0);
+    let mut trimmed_width = Au(0);
     let mut has_content = false;
-    // Tracked separately from `current` because a line's *width* excludes the
-    // trailing space that caused the break (§16.6.1) while the fitting decision
-    // includes it.
-    let mut current_trimmed = Au(0);
 
-    for (word, width) in text::words(context.text, context.font_size) {
-        let trimmed = text::width_without_trailing_spaces(word, context.font_size);
+    for (word, width) in words {
+        let trimmed = text::width_without_trailing_spaces(word, font_size);
 
-        if has_content && current + trimmed > context.available {
-            lines.push(current_trimmed);
-            current = width;
-            current_trimmed = trimmed;
-            continue;
+        if has_content && current + trimmed > available {
+            break;
         }
 
-        current += width;
-        current_trimmed = current - (width - trimmed);
+        consumed += 1;
+        current += *width;
+        trimmed_width = current - (*width - trimmed);
         // Only real content opens a line. A "word" that is nothing but spaces
         // trims to zero width, and CSS 2.1 §9.4.2 generates no line box for a
         // block containing only collapsible white space — so `"   "` must produce
@@ -116,10 +172,7 @@ fn break_into_lines(context: &InlineContext<'_>) -> Vec<Au> {
         }
     }
 
-    if has_content {
-        lines.push(current_trimmed);
-    }
-    lines
+    (consumed, if has_content { trimmed_width } else { Au(0) })
 }
 
 /// The text content of `node`'s subtree, in document order.
@@ -230,13 +283,31 @@ mod tests {
             font_size: px(16),
             line_height: px(20),
             available: px(available_px),
+            floats: None,
+            block_origin: Au(0),
         }
+    }
+
+    /// The width of each line a context produces, in order.
+    ///
+    /// Line breaking used to have a function of this shape and no longer does:
+    /// with floats a line's width depends on where it ended up, so the widths only
+    /// exist once the lines have been placed. These tests are about the breaking
+    /// decisions rather than the placement, so they read the widths back off the
+    /// fragments.
+    fn widths(context: &InlineContext<'_>) -> Vec<Au> {
+        let mut tree = FragmentTree::new();
+        let (lines, _) = layout_lines(&mut tree, context);
+        lines
+            .into_iter()
+            .filter_map(|id| tree.get(id).map(|f| f.size.inline))
+            .collect()
     }
 
     #[test]
     fn inline_text_that_fits_is_one_line() {
         // "abc" is three characters at 8px = 24px.
-        let lines = break_into_lines(&context("abc", 100));
+        let lines = widths(&context("abc", 100));
         assert_eq!(lines, vec![px(24)]);
     }
 
@@ -245,7 +316,7 @@ mod tests {
         // Each word is 3 chars = 24px; "foo " is 32px with its space.
         // At 60px available: "foo " (32) fits, + "bar" (24) = 56 fits,
         // + "baz" would be 80, so it breaks.
-        let lines = break_into_lines(&context("foo bar baz", 60));
+        let lines = widths(&context("foo bar baz", 60));
         assert_eq!(lines.len(), 2, "three words at 60px make two lines");
     }
 
@@ -253,7 +324,7 @@ mod tests {
     fn inline_trailing_space_does_not_widen_a_broken_line() {
         // The first line ends with a space that caused the break; §16.6.1 says
         // the line's width excludes it.
-        let lines = break_into_lines(&context("foo bar", 40));
+        let lines = widths(&context("foo bar", 40));
         assert_eq!(lines.len(), 2);
         assert_eq!(
             lines[0],
@@ -265,7 +336,7 @@ mod tests {
     #[test]
     fn inline_an_unbreakable_word_overflows_rather_than_breaking() {
         // Eight characters at 8px = 64px, in a 20px box.
-        let lines = break_into_lines(&context("abcdefgh", 20));
+        let lines = widths(&context("abcdefgh", 20));
         assert_eq!(
             lines,
             vec![px(64)],
@@ -275,8 +346,78 @@ mod tests {
 
     #[test]
     fn inline_empty_text_produces_no_lines() {
-        assert!(break_into_lines(&context("", 100)).is_empty());
-        assert!(break_into_lines(&context("   ", 100)).is_empty());
+        assert!(widths(&context("", 100)).is_empty());
+        assert!(widths(&context("   ", 100)).is_empty());
+    }
+
+    /// §9.5: a line box shortens to the space a float leaves it.
+    #[test]
+    fn inline_a_float_shortens_the_lines_beside_it() {
+        let mut floats = crate::float::FloatContext::new();
+        // 40px wide and 20px tall: exactly one line box deep.
+        floats.place(
+            crate::float::FloatSide::Start,
+            crate::geom::LogicalSize::new(px(40), px(20)),
+            Au(0),
+            px(100),
+        );
+
+        let mut context = context("foo bar baz", 100);
+        context.floats = Some(&floats);
+
+        let mut tree = FragmentTree::new();
+        let (lines, _) = layout_lines(&mut tree, &context);
+
+        // Without the float all three words fit on one 100px line: 32 + 32 + 24.
+        // With it the first line has only 60px, so "baz" moves down -- and the
+        // second line is clear of the float, so it starts back at the edge.
+        assert_eq!(lines.len(), 2, "the float pushed a word onto a second line");
+        assert_eq!(
+            tree.get(lines[0]).map(|f| f.inline_offset),
+            Some(px(40)),
+            "the first line starts past the float"
+        );
+        assert_eq!(
+            tree.get(lines[1]).map(|f| f.inline_offset),
+            Some(px(0)),
+            "the second line is below the float and starts at the edge"
+        );
+    }
+
+    /// A float leaving no room at all moves the line down rather than overlapping.
+    #[test]
+    fn inline_a_full_width_float_pushes_the_line_below_it() {
+        let mut floats = crate::float::FloatContext::new();
+        floats.place(
+            crate::float::FloatSide::Start,
+            crate::geom::LogicalSize::new(px(100), px(50)),
+            Au(0),
+            px(100),
+        );
+
+        let mut context = context("foo", 100);
+        context.floats = Some(&floats);
+
+        let mut tree = FragmentTree::new();
+        let (lines, height) = layout_lines(&mut tree, &context);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            tree.get(lines[0]).map(|f| f.block_offset),
+            Some(px(50)),
+            "the line box moved below the float"
+        );
+        assert_eq!(height, px(70), "the height includes the space skipped");
+    }
+
+    /// The run starts where its container's cursor is, not at zero.
+    #[test]
+    fn inline_the_block_origin_offsets_the_first_line() {
+        let mut context = context("foo", 100);
+        context.block_origin = px(33);
+        let mut tree = FragmentTree::new();
+        let (lines, height) = layout_lines(&mut tree, &context);
+        assert_eq!(tree.get(lines[0]).map(|f| f.block_offset), Some(px(33)));
+        assert_eq!(height, px(20), "the height is the run's, not the offset's");
     }
 
     #[test]
