@@ -15,7 +15,16 @@ only red is `compat-list`**, which has been red since Phase 0 and is the user's
 forty-site list. The `layout` job's `continue-on-error` was set in the phase's
 first commit and removed in its last.
 
-One caveat on what "25 of 26 green" is worth, found while removing that line:
+One run in this phase was **26 of 26 minus two**: `sanitizers (windows-latest)`
+failed on `sandbox_policy_repeated_spawns_do_not_leak_handles`, in `px-sandbox`,
+on a branch that does not touch it, and passed again on the next commit. It is
+Phase 2's test and it is already in `docs/backlog.md` — the assertion reports
+"leaks roughly 0 per launch" while failing, which is the interesting part. Recorded
+here because an intermittent red that somebody has to recognise each time is worse
+than a permanent one, and because "the only red is `compat-list`" would otherwise
+be a slightly cleaner claim than the truth.
+
+A second caveat on what "25 of 26 green" is worth, found while removing that line:
 **Phase 3's `network` job still carries `continue-on-error: true`** and has been
 green for three phases. The workflow's own comment on the `dom` job states the
 principle — a job that is allowed to fail and does not is not protecting anything.
