@@ -24,12 +24,18 @@ here because an intermittent red that somebody has to recognise each time is wor
 than a permanent one, and because "the only red is `compat-list`" would otherwise
 be a slightly cleaner claim than the truth.
 
-A second caveat on what "25 of 26 green" is worth, found while removing that line:
-**Phase 3's `network` job still carries `continue-on-error: true`** and has been
-green for three phases. The workflow's own comment on the `dom` job states the
-principle — a job that is allowed to fail and does not is not protecting anything.
-It is Phase 3's line to delete rather than Phase 6's, so it is in
-`docs/backlog.md` instead of in this diff.
+A second caveat on what "25 of 26 green" is worth: **Phase 3's `network` job still
+carries `continue-on-error: true`** and has been green for three phases. The
+workflow's own comment on the `dom` job states the principle — a job that is
+allowed to fail and does not is not protecting anything. It is Phase 3's line to
+delete rather than Phase 6's, so it stays in `docs/backlog.md`.
+
+Not found here, though this phase rediscovered it from scratch while removing the
+same line from its own job, and filed a duplicate entry before noticing Phase 5
+had already written one. Both phases did the right thing and the defect is still
+there, which is the more useful observation than either filing: a defect belonging
+to a closed phase has nobody to fix it, and "whenever somebody is in that file
+anyway" has now failed twice.
 
 One hundred and five tests, which is a coincidence with the corpus size and not a
 correspondence: 92 in the crate, 4 determinism, 4 depth, 3 reftest, 2 corpus.

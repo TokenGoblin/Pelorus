@@ -906,6 +906,12 @@ Format: one entry per defect.
 - **Not done in Phase 5 because** phase discipline puts out-of-phase defects here
   rather than in this phase's diff, and this is Phase 3's job. It is a one-line
   change whenever somebody is in that file for another reason.
+- **Phase 6 hit it again**, removing the same line from the `layout` job, and
+  filed a second entry before noticing this one. That is the finding worth adding:
+  the rule that sends out-of-phase defects here is working, and the thing it is
+  protecting against — a defect nobody owns because it belongs to a closed phase —
+  is now two phases old and was rediscovered from scratch. Whoever next opens
+  `gate.yml` should delete it rather than file it a third time.
 
 ## sandbox_policy_repeated_spawns_do_not_leak_handles fails while reporting no leak
 
@@ -945,11 +951,24 @@ Format: one entry per defect.
   and no `Accept-Encoding`, deliberately and with the reason written down: *"Every
   header sent is a bit of entropy, and invariant 4's 'no identifiers' is easier to
   keep by not adding them in the first place."*
-- **What that costs, measured:** `https://en.wikipedia.org/wiki/Web_browser`
-  returns **403** with a 126-byte body. `example.com` and `rust-lang.org` serve
-  normally. So the position is not theoretical and not uniform — a meaningful
-  slice of the web refuses a client with no User-Agent, and Wikipedia is not an
-  edge case.
+- **What that costs, measured twice.** First against three sites, then against
+  sixteen major ones in Phase 6:
+
+  | | |
+  |---|---|
+  | Sites fetched | 16 (NASA, NOAA, NIH, weather.gov, usa.gov, Apple, Microsoft, IBM, Intel, Mozilla, GitHub, Stack Overflow, Reuters, AP, BBC, Ars Technica) |
+  | Returned 200 | 7 |
+  | Returned 403 | 8 |
+  | **Of those 403s, served 200 to the same request with a `User-Agent`** | **7 of 8** |
+
+  The eighth is Reuters, which returns 401 either way and is gated on something
+  else. `curl -H "User-Agent:"` against noaa.gov, weather.gov, nih.gov,
+  microsoft.com, stackoverflow.com, apnews.com and arstechnica.com returns 403;
+  the identical request carrying a Chrome UA string returns 200 from every one.
+
+  So it is not Wikipedia and it is not a slice. **Roughly half of the major web
+  refuses this client outright, and one header is the entire difference.**
+
 - **Why it matters:** Phase 23's gate is "compat suite green on all forty sites;
   thirty consecutive days of self-hosted use with no fallback". A browser that
   403s on Wikipedia cannot pass that, so the privacy position and the daily-driver
@@ -1008,61 +1027,49 @@ five pairs it was blocking.
   plus this box's start margin, which is right for a box that would have been at
   the start of its line and wrong for one that would not. The block axis is exact.
 
-## Phase 3's CI job is still `continue-on-error`, found in Phase 6
+## px-net trusts only the roots Windows happens to have cached — **confirmed**
 
-- **What:** `.github/workflows/gate.yml`'s `network` job carries
-  `continue-on-error: true` with the comment *"Phase 3's deliverable, red until the
-  phase closes"*. Phase 3 closed — `docs/phase-03-gate-report.md` records all four
-  gate items passing — and the job has been green on both platforms ever since.
-- **Why it matters:** the workflow's own comment on the `dom` job states the
-  principle: *"a job that is allowed to fail and does not is"* not protecting
-  anything. `ci/gate-network.sh` could start failing tomorrow and the branch would
-  stay green. It is exactly the failure Phase 4 paid for in a different shape —
-  a gate that was red for five commits without anybody noticing.
-- **Why it is not fixed here:** the working agreement says work only on the
-  current phase, and this is Phase 3's line to delete. It is one line, in a file
-  Phase 6 edited for its own job, and deleting it silently alongside that edit
-  would have been the wrong kind of convenient.
-- **What to do:** delete `continue-on-error: true` from the `network` job. If it
-  then goes red, that is the finding, and it is a Phase 3 regression rather than a
-  Phase 6 one.
-- **Note:** `compat-list` keeps its exemption for a different and still-valid
-  reason — it is a Phase 0 deliverable only the user can produce.
-
-## px-net rejected a certificate the OS accepts, once, and then stopped
-
-- **Found in:** Phase 6, pointing `px-fetch` at eight real sites.
+- **Found in:** Phase 6, pointing `px-fetch` at real sites. Two independent
+  instances: `lite.cnn.com` and `www.intel.com`.
 - **Belongs to:** Phase 3 / ADR 012 (trust anchors).
-- **What happened:** `https://lite.cnn.com` failed with
-  `transport error: invalid peer certificate: UnknownIssuer`. `curl` fetched the
-  same URL successfully at the same moment (`ssl_verify_result=0`). Minutes later,
-  with no code change, `px-fetch` fetched it successfully too.
-- **Leading explanation, not proven:** Windows populates `LocalMachine\Root`
-  **lazily**. The Microsoft Trusted Root Program is not all present on disk; the OS
-  downloads a root on demand the first time a chain needs it. `px-sandbox`'s
-  `platform_roots()` *enumerates* that store, so it sees only the roots already
-  cached — while schannel (curl, Edge) triggers the download and then succeeds.
-  The `curl` call in the middle of this sequence is the most likely thing that
-  installed GlobalSign's ECC Root CA - R5 locally, which is why the third attempt
-  worked.
-- **Evidence gathered:** `root_store()` reports `Platform` with **46** anchors, all
-  46 accepted by rustls, none rejected. `Cert:\LocalMachine\Root` also holds 46 and
-  *does* contain `GlobalSign ECC Root CA - R5` — but that reading was taken after
-  `curl` had run, so it cannot distinguish "was always there" from "arrived just
-  now". Seven other sites including `globalsign.com` fetch fine.
-- **Why it matters more than one flaky fetch:** it makes a trust decision depend on
-  the machine's browsing history rather than on policy. A fresh install would
-  reject sites a browser accepts, non-deterministically, and the failure looks like
-  a site problem rather than a client one. ADR 012 chose the platform store so an
-  administrator's distrust decisions are honoured; enumerating it turns out not to
-  be the same thing as asking the platform.
-- **What to do:** reproduce deliberately — on a machine (or fresh VM) that has
-  never visited the site, enumerate the store, attempt the fetch, and enumerate
-  again. If the root count grows, this is confirmed. The fix is then either to ask
-  Windows to build and verify the chain (`CertGetCertificateChain`) instead of
-  handing rustls a snapshot, or to accept the bundled Mozilla floor as the source
-  on Windows and lose ADR 012's administrator-override property — which is a real
-  trade and wants the ADR reopened, not a patch.
-- **Do not** paper over it by merging the platform store with the bundled one.
-  `tls.rs` explains at length why those are never unioned, and that reasoning is
-  still right.
+- **Status: reproduced deliberately.** Filed first as a hypothesis, then proven by
+  the experiment the first version of this entry asked for.
+
+  ```
+  roots in Cert:\LocalMachine\Root        46
+  px-fetch https://www.intel.com          UnknownIssuer
+  curl     https://www.intel.com          301, ssl_verify_result=0
+  roots in Cert:\LocalMachine\Root        47
+  newly installed                         CN=Sectigo Public Server Authentication
+                                          Root E46, O=Sectigo Limited, C=GB
+  px-fetch https://www.intel.com          TLS handshake completes
+  ```
+
+  intel.com's chain is `*.intel.com` <- `Sectigo Public Server Authentication CA
+  OV E36`. The root that arrived is that intermediate's. Nothing was rebuilt
+  between the failing and succeeding runs.
+
+- **The mechanism:** Windows populates `LocalMachine\Root` **lazily**. The
+  Microsoft Trusted Root Program is not all on disk; the OS fetches a root the
+  first time a chain needs one, and schannel triggers that. `px-sandbox`'s
+  `platform_roots()` *enumerates* the store, so it sees a snapshot of whatever has
+  been needed before and nothing else. `root_store()` reports `Platform` with 46
+  anchors, all 46 accepted by rustls, none rejected — the store is not broken, it
+  is incomplete, and nothing distinguishes those two from inside.
+- **Why it matters:** a trust decision that depends on the machine's browsing
+  history rather than on policy. A fresh install rejects sites a browser accepts,
+  non-deterministically, and the failure presents as a site problem. It will also
+  make Phase 23's forty-site compat run flaky in a way that looks like the sites.
+- **What to do — two options and a trade, not a patch:**
+  1. Ask Windows to build and verify the chain (`CertGetCertificateChain`) instead
+     of handing rustls a snapshot. Keeps ADR 012's property that an
+     administrator's distrust decisions are honoured, and gets auto-update for
+     free. Costs a `rustls::client::danger::ServerCertVerifier` implementation and
+     therefore a careful review, because that trait is how verification gets
+     switched off by accident.
+  2. Use the bundled Mozilla floor as the source on Windows. Deterministic, and
+     loses ADR 012's administrator override.
+
+  Either way ADR 012 gets reopened rather than amended in passing.
+- **Do not** union the platform store with the bundled one. `tls.rs` explains at
+  length why those are never merged, and that reasoning is untouched by this.
