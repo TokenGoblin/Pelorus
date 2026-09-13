@@ -963,3 +963,27 @@ Format: one entry per defect.
 - **Not decided here because** it is a product-level privacy decision, Phase 19
   owns it, and Phase 6 has no standing to settle it — but it should be settled
   well before Phase 23 discovers it.
+
+## Self-collapsing boxes (CSS 2.1 §8.3.1), found in Phase 6
+
+- **What works:** a box's top margin collapses with its first in-flow child's, and
+  its bottom margin with its last in-flow child's, whenever no border, padding,
+  formatting context or stated height separates them. `crates/px-layout/src/block.rs`
+  has six tests on it, each verified to fail both when the collapse is removed and
+  when it is made unconditional.
+- **What does not:** the third case in §8.3.1 — a box whose *own* top and bottom
+  margins are adjoining **to each other**, because the box has no border, no
+  padding, no inline content, and a zero or auto height. Its two margins should
+  collapse into one and that one should go on collapsing with both neighbours.
+- **What that costs:** an empty `<div>` between two paragraphs separates them by
+  the sum of two collapsed margins rather than by one. Empty divs are common
+  enough that this is a real rendering difference, not a curiosity.
+- **Why it is not in Phase 6's commit:** a self-collapsing box's final position
+  depends on a margin that is not settled until its *next* sibling is stacked, so
+  the parent's stacking loop has to defer placing it rather than position it as it
+  goes. That is a change to how the loop is shaped, not another condition in it,
+  and it belongs in its own commit with its own tests rather than bolted onto the
+  one that got the first two cases right.
+- **Where:** the `Step::Exit` arm of `crates/px-layout/src/block.rs`, where
+  `collapsed_margins` is written. The comment there says the same thing in three
+  lines.

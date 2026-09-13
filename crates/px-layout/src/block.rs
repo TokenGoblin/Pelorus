@@ -128,6 +128,18 @@ struct Tables {
     /// Read on the way up, where it decides whether the box's `height: auto`
     /// stretches to contain its own floats (§10.6.7).
     formatting_context_roots: Vec<bool>,
+    /// This box's outer margins *after* collapsing with its own children.
+    ///
+    /// §8.3.1: a box with no border or padding between it and its first in-flow
+    /// child shares that child's top margin rather than containing it — the two
+    /// are adjoining, and adjoining margins are one margin. So a box's effective
+    /// margin is not the one its style asked for, and the parent stacking it has
+    /// to be told which is which.
+    ///
+    /// Written at this box's `Exit` and read at its parent's, which is the whole
+    /// reason it is a table rather than a local: the two visits are far apart in
+    /// the traversal and the value has to survive between them.
+    collapsed_margins: Vec<(Au, Au)>,
     /// Which floats this fragment must clear, if any (§9.5.2).
     clear_sides: Vec<Option<crate::float::ClearSide>>,
     /// Whether this fragment is a float, and if so which edge it takes.
@@ -158,6 +170,7 @@ impl Tables {
             // The initial containing block is a formatting context root: there
             // is no outer context for a float in it to escape into.
             formatting_context_roots: vec![true],
+            collapsed_margins: vec![(Au(0), Au(0))],
             clear_sides: vec![None],
             float_sides: vec![None],
             inline_runs: vec![None],
@@ -172,6 +185,7 @@ impl Tables {
             self.inline_sizes.push(Au(0));
             self.specified_block_sizes.push(None);
             self.formatting_context_roots.push(false);
+            self.collapsed_margins.push((Au(0), Au(0)));
             self.clear_sides.push(None);
             self.float_sides.push(None);
             self.inline_runs.push(None);
@@ -518,6 +532,39 @@ pub fn layout_document(
                     let mut pending_margin = Au(0);
                     let mut first_in_flow = true;
 
+                    // §8.3.1: whether this box's own margins are adjoining to its
+                    // children's. Two margins are adjoining when nothing separates
+                    // them, and border or padding is what separates them -- one
+                    // pixel of either on this edge and the child's margin stays
+                    // inside. A box that establishes a formatting context does not
+                    // collapse with its children at all (§8.3.1, and it is half of
+                    // what `display: flow-root` is for), and a stated `height`
+                    // stops the bottom margin collapsing out because the box's
+                    // size no longer follows its content.
+                    let own_edges = tables.edges.get(fragment.index());
+                    let is_context_root = tables
+                        .formatting_context_roots
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(false);
+                    let top_adjoining = !is_context_root
+                        && own_edges.is_some_and(|e| {
+                            e.border.block_start == Au(0) && e.padding.block_start == Au(0)
+                        });
+                    let bottom_adjoining = !is_context_root
+                        && tables
+                            .specified_block_sizes
+                            .get(fragment.index())
+                            .copied()
+                            .flatten()
+                            .is_none()
+                        && own_edges.is_some_and(|e| {
+                            e.border.block_end == Au(0) && e.padding.block_end == Au(0)
+                        });
+
+                    // The child margins hoisted out of this box and into its own.
+                    let mut hoisted_top = Au(0);
+
                     for slot in 0..=slots.len() {
                         // This container's own inline content, at its position in
                         // the sequence rather than always first -- so a float
@@ -607,25 +654,34 @@ pub fn layout_document(
                             .edges
                             .get(kid.index())
                             .map_or(LogicalEdges::ZERO, |e| e.margin);
+                        // The child's *collapsed* margins, not the ones its style
+                        // asked for: it may already have absorbed its own first
+                        // and last child's.
+                        let (kid_top, kid_bottom) = tables
+                            .collapsed_margins
+                            .get(kid.index())
+                            .copied()
+                            .unwrap_or((kid_margin.block_start, kid_margin.block_end));
 
                         // Margin collapsing between siblings, per CSS 2.1 §8.3.1.
                         // Two adjoining vertical margins collapse into one whose
                         // size is the larger of the two -- or, when they have
                         // opposite signs, the sum of the most positive and the
-                        // most negative. "Adjoining" here means only
-                        // sibling-to-sibling: collapsing *through* a parent, which
-                        // happens when no border or padding separates a parent
-                        // from its first or last child, is not implemented and is
-                        // still a named gap.
-                        //
-                        // The first in-flow child's top margin has nothing to
-                        // collapse against here, because collapsing it with this
-                        // box's own is that unimplemented case.
-                        cursor += if first_in_flow {
-                            kid_margin.block_start
+                        // most negative.
+                        if first_in_flow && top_adjoining {
+                            // Adjoining to this box's own top margin, so it is not
+                            // space *inside* this box at all: it is hoisted out,
+                            // and the child sits flush against the content top.
+                            // The combined margin is applied when this box is
+                            // itself positioned, one visit further up.
+                            hoisted_top = kid_top;
                         } else {
-                            collapse(pending_margin, kid_margin.block_start)
-                        };
+                            cursor += if first_in_flow {
+                                kid_top
+                            } else {
+                                collapse(pending_margin, kid_top)
+                            };
+                        }
                         first_in_flow = false;
 
                         // §9.5.2: clearance is introduced *after* the margin, and
@@ -648,13 +704,34 @@ pub fn layout_document(
                                 content_inline_start + kid_margin.inline_start;
                             cursor += kid_fragment.size.block;
                         }
-                        pending_margin = kid_margin.block_end;
+                        pending_margin = kid_bottom;
                         kids.push(kid);
                     }
-                    // The last child's bottom margin is inside this box's content
-                    // height. Collapsing it out through the parent is the case
-                    // above that is not implemented.
-                    cursor += pending_margin;
+                    // The last in-flow child's bottom margin, which is either
+                    // inside this box's content height or adjoining this box's own
+                    // bottom margin and therefore outside it.
+                    let hoisted_bottom = if bottom_adjoining {
+                        pending_margin
+                    } else {
+                        cursor += pending_margin;
+                        Au(0)
+                    };
+
+                    let own_margin = own_edges.map_or(LogicalEdges::ZERO, |e| e.margin);
+                    // What this box looks like to *its* parent. A box whose margins
+                    // collapse straight through -- no border, no padding, no
+                    // content -- should also collapse its own top and bottom into
+                    // one, which this does not do: they stay two margins with a
+                    // zero-height box between them. An empty `<div>` between two
+                    // paragraphs therefore separates them by the sum of two
+                    // collapsed margins rather than by one. Named rather than
+                    // silent, and in docs/backlog.md.
+                    if let Some(slot) = tables.collapsed_margins.get_mut(fragment.index()) {
+                        *slot = (
+                            collapse(own_margin.block_start, hoisted_top),
+                            collapse(own_margin.block_end, hoisted_bottom),
+                        );
+                    }
 
                     // §10.6.7: a box that establishes a block formatting context
                     // and has `height: auto` stretches to contain its own floats.
@@ -1435,6 +1512,173 @@ mod tests {
             .filter(|b| b.0 == kind)
             .map(|b| (b.1, b.2, b.3, b.4))
             .collect()
+    }
+
+    /// How many fragments have exactly this rectangle.
+    ///
+    /// Counted rather than searched for, because through-collapsing moves a
+    /// *parent* onto its child's rectangle and leaves the child where it was: an
+    /// assertion that the child's rectangle is present passes whether or not the
+    /// parent collapsed. Three of the tests below did exactly that until removing
+    /// the feature failed only one of them.
+    fn count_rect(tree: &FragmentTree, rect: (Au, Au, Au, Au)) -> usize {
+        rects_of(tree, FragmentKind::Block)
+            .into_iter()
+            .filter(|r| *r == rect)
+            .count()
+    }
+
+    /// §8.3.1: a parent with no top border or padding shares its child's margin.
+    ///
+    /// The child does not move — it was always going to end up 20px down — but the
+    /// *parent* does, because the margin is outside it rather than inside. That is
+    /// the whole visible effect of through-collapsing and the reason it is easy to
+    /// get wrong in a way nothing notices: the text lands in the right place while
+    /// every background and border is 20px too tall.
+    ///
+    /// `html` and `body` are in the count too: they have no border or padding
+    /// here either, so all four boxes come to rest on the same rectangle.
+    #[test]
+    fn block_a_childs_top_margin_collapses_out_through_its_parent() {
+        let (tree, _) = layout(
+            "<html><body><div id=outer><div id=inner></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #inner { margin-top: 20px; height: 10px }",
+        );
+        assert_eq!(
+            count_rect(&tree, (px(0), px(20), px(800), px(10))),
+            4,
+            "html, body, outer and inner all sit below the margin: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(30))),
+            1,
+            "only the initial containing block contains the margin: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// One pixel of padding stops it: the margin stays inside (§8.3.1).
+    ///
+    /// The control. Collapsing unconditionally passes the test above and fails
+    /// this, and "unconditionally" is the shape the obvious implementation takes.
+    #[test]
+    fn block_padding_stops_a_margin_collapsing_through() {
+        let (tree, _) = layout(
+            "<html><body><div id=outer><div id=inner></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #outer { padding-top: 1px } \
+             #inner { margin-top: 20px; height: 10px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(31))),
+            4,
+            "the ICB, html, body and outer all contain the margin: {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(21), px(800), px(10))),
+            "the child is below the padding as well as the margin: {blocks:?}"
+        );
+    }
+
+    /// §8.3.1: the last child's bottom margin collapses out too.
+    #[test]
+    fn block_a_childs_bottom_margin_collapses_out_through_its_parent() {
+        let (tree, _) = layout(
+            "<html><body><div id=outer><div id=inner></div></div><div id=after></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #inner { margin-bottom: 20px; height: 10px } \
+             #after { height: 5px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(10))),
+            2,
+            "outer and inner are both as tall as the content, with the margin \
+             outside them: {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(30), px(800), px(5))),
+            "the next sibling is still pushed down by the collapsed margin: {blocks:?}"
+        );
+    }
+
+    /// A stated `height` stops the bottom margin collapsing out (§8.3.1).
+    #[test]
+    fn block_a_stated_height_stops_the_bottom_margin_collapsing_through() {
+        let (tree, _) = layout(
+            "<html><body><div id=outer><div id=inner></div></div><div id=after></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #outer { height: 40px } \
+             #inner { margin-bottom: 20px; height: 10px } \
+             #after { height: 5px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert!(
+            blocks.contains(&(px(0), px(40), px(800), px(5))),
+            "the sibling follows the stated height with no margin outside it: \
+             {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(0), px(800), px(40))),
+            "the stated height is what it says, margin and all: {blocks:?}"
+        );
+    }
+
+    /// §8.3.1: a formatting context root does not collapse with its children.
+    ///
+    /// The other half of what `display: flow-root` is for — the first half being
+    /// that it contains its floats.
+    #[test]
+    fn block_a_flow_root_does_not_collapse_with_its_children() {
+        let (tree, _) = layout(
+            "<html><body><div id=outer><div id=inner></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #outer { display: flow-root } \
+             #inner { margin-top: 20px; height: 10px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(30))),
+            4,
+            "the flow-root contains the margin, and so do the boxes above it: \
+             {blocks:?}"
+        );
+    }
+
+    /// The collapse runs through every level it can reach (§8.3.1).
+    ///
+    /// Adjoining is transitive: nested boxes with nothing between them share one
+    /// margin, not one each. A version that collapsed a single level deep would
+    /// pass every test above and fail this.
+    ///
+    /// **Five boxes, not three.** `html` and `body` have no border or padding here
+    /// either, so the margin keeps going and comes to rest against the initial
+    /// containing block — which stops it, because the ICB is a formatting context
+    /// root. That is the correct answer and it is not the one this test first
+    /// asserted: the engine was right and the expectation was short by two.
+    #[test]
+    fn block_margins_collapse_through_several_levels() {
+        let (tree, _) = layout(
+            "<html><body><div id=a><div id=b><div id=c></div></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #c { margin-top: 20px; height: 10px }",
+        );
+        let blocks = rects_of(&tree, FragmentKind::Block);
+        let stacked = blocks
+            .iter()
+            .filter(|r| **r == (px(0), px(20), px(800), px(10)))
+            .count();
+        assert_eq!(
+            stacked, 5,
+            "html, body and all three divs start at 20 and are 10 tall: {blocks:?}"
+        );
+        assert!(
+            blocks.contains(&(px(0), px(0), px(800), px(30))),
+            "the initial containing block stops the collapse: {blocks:?}"
+        );
     }
 
     /// §9.5: a float is out of flow, so the block after it does not move down.
