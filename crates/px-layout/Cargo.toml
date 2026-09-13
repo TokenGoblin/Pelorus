@@ -12,8 +12,9 @@ publish.workspace = true
 # reason the toml dev-dependency taught: reaching for the newest resolves a second
 # copy and doubles the audit surface for nothing.
 app_units = "0.7.8"
-
-[dev-dependencies]
-# The reftest corpus is HTML, so validating it means parsing it. Dev-only: the
-# layout crate takes a box tree, it does not parse documents.
+# Layout reads computed style, which is px-css's job, and walks the DOM the style
+# was computed against. Same versions the rest of the workspace resolves.
+px-css = { path = "../px-css", version = "0.0.0" }
 px-dom = { path = "../px-dom", version = "0.0.0" }
+stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
+
