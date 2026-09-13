@@ -98,6 +98,10 @@ pub fn layout_document(
     let mut inline_sizes: Vec<Au> = vec![viewport_inline_size];
     // `None` means `height: auto`, which is resolved from content on the way up.
     let mut specified_block_sizes: Vec<Option<Au>> = vec![None];
+    // The block size this box's own inline content occupies, if any. Separate
+    // from the children cursor because line fragments are positioned by
+    // `layout_lines` rather than by the block stacking pass.
+    let mut inline_content_heights: Vec<Au> = vec![Au(0)];
     let mut edges: Vec<Edges> = vec![Edges {
         margin: LogicalEdges::ZERO,
         border: LogicalEdges::ZERO,
@@ -146,6 +150,7 @@ pub fn layout_document(
                         pending.push(Vec::new());
                         inline_sizes.push(Au(0));
                         specified_block_sizes.push(None);
+                        inline_content_heights.push(Au(0));
                         edges.push(Edges {
                             margin: LogicalEdges::ZERO,
                             border: LogicalEdges::ZERO,
@@ -160,9 +165,45 @@ pub fn layout_document(
                     }
 
                     stack.push(Step::Exit { fragment });
+
+                    let element_kids = children_of(arena, node);
+                    if element_kids.is_empty() {
+                        // A leaf block container: its children are inline
+                        // content, so lay it out into lines now. Done on the way
+                        // down because the available inline size is known here
+                        // and the lines' total height is what the Exit pass wants.
+                        let raw = crate::inline::collect_text(arena, node);
+                        let collapsed = crate::inline::collapse_whitespace(&raw);
+                        if !collapsed.is_empty() {
+                            let font_size = Au::from(style.clone_font_size().computed_size());
+                            let context = crate::inline::InlineContext {
+                                text: &collapsed,
+                                font_size,
+                                line_height: crate::inline::line_height_of(&style),
+                                available: content_inline,
+                            };
+                            let (lines, height) = crate::inline::layout_lines(&mut tree, &context);
+                            while pending.len() <= tree.len() {
+                                pending.push(Vec::new());
+                                inline_sizes.push(Au(0));
+                                specified_block_sizes.push(None);
+                                inline_content_heights.push(Au(0));
+                                edges.push(Edges {
+                                    margin: LogicalEdges::ZERO,
+                                    border: LogicalEdges::ZERO,
+                                    padding: LogicalEdges::ZERO,
+                                });
+                            }
+                            if let Some(kids) = pending.get_mut(fragment.index()) {
+                                kids.extend_from_slice(&lines);
+                            }
+                            inline_content_heights[fragment.index()] = height;
+                        }
+                    }
+
                     // Children pushed in reverse so they are entered in document
                     // order once popped.
-                    for child in children_of(arena, node).into_iter().rev() {
+                    for child in element_kids.into_iter().rev() {
                         stack.push(Step::Enter {
                             node: child,
                             parent: fragment,
@@ -177,7 +218,12 @@ pub fn layout_document(
                     // collapsing yet: adjacent margins both apply, which is
                     // wrong per §8.3.1 and is a named gap rather than a silent
                     // approximation.
-                    let mut cursor = Au(0);
+                    // Inline content sits above any block children, and the line
+                    // fragments were already positioned relative to it.
+                    let mut cursor = inline_content_heights
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(Au(0));
                     let surround = edges
                         .get(fragment.index())
                         .map_or(Au(0), Edges::block_surround);
@@ -186,6 +232,16 @@ pub fn layout_document(
                     });
 
                     for kid in &kids {
+                        // Line fragments were already positioned by
+                        // `layout_lines`, and their height is already in `cursor`
+                        // via `inline_content_heights`. Stacking them again moves
+                        // them down by their own height and counts it twice --
+                        // which presented as every text block coming out exactly
+                        // double height, with its single line sitting one
+                        // line-height below the top.
+                        if tree.get(*kid).is_some_and(|f| f.kind == FragmentKind::Line) {
+                            continue;
+                        }
                         let kid_margin = edges
                             .get(kid.index())
                             .map_or(LogicalEdges::ZERO, |e| e.margin);
@@ -559,6 +615,59 @@ mod tests {
             fragment.size.inline,
             px(0),
             "margins wider than the containing block leave no content, not a negative width"
+        );
+    }
+    /// Text gives its container a height, which is what `height: auto` means for
+    /// a block whose content is inline.
+    ///
+    /// Before inline layout existed this returned zero — wrong rather than
+    /// incomplete, and the reason the reftest gate item could not be claimed.
+    #[test]
+    fn block_text_content_gives_the_container_a_height() {
+        let (tree, _arena) = layout(
+            "<html><body><div id=a>hello world</div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0;              font-size: 16px; line-height: 20px }",
+        );
+        let order = tree.in_layout_order();
+        let div = order
+            .iter()
+            .find(|(depth, _)| *depth == 3)
+            .expect("icb > html > body > div");
+        let fragment = tree.get(div.1).expect("resolves");
+        assert_eq!(
+            fragment.size.block,
+            px(20),
+            "one line of text at line-height 20px makes a 20px tall block"
+        );
+        assert_eq!(
+            tree.children(div.1).len(),
+            1,
+            "the text produced exactly one line fragment"
+        );
+    }
+
+    /// Text wider than its container wraps, and each line adds height.
+    #[test]
+    fn block_text_wraps_and_each_line_adds_height() {
+        let (tree, _arena) = layout(
+            "<html><body><div id=a>aaa bbb ccc ddd</div></body></html>",
+            "html, body { display: block; margin: 0; padding: 0 }              div { display: block; width: 60px; margin: 0; padding: 0;              font-size: 16px; line-height: 20px }",
+        );
+        let order = tree.in_layout_order();
+        let div = order
+            .iter()
+            .find(|(depth, _)| *depth == 3)
+            .expect("icb > html > body > div");
+        let lines = tree.children(div.1).len();
+        assert!(
+            lines > 1,
+            "four words in a 60px box must wrap, got {lines} line(s)"
+        );
+        let fragment = tree.get(div.1).expect("resolves");
+        assert_eq!(
+            fragment.size.block,
+            px(20) * i32::try_from(lines).expect("few lines"),
+            "the block is as tall as its lines"
         );
     }
 }

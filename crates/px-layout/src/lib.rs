@@ -8,3 +8,5 @@
 pub mod block;
 pub mod fragment;
 pub mod geom;
+pub mod inline;
+pub mod text;
