@@ -1341,12 +1341,27 @@ fn is_block_level(style: &ComputedValues) -> bool {
 /// `display: flow-root` exists to ask for exactly this and nothing else, which is
 /// why it is the clearest case: inside `flow-root`, outside anything.
 ///
-/// Floats and absolutely positioned boxes are BFC roots too, and so is anything
-/// with `overflow` other than `visible`. The first is here; the other two are not,
-/// and are named gaps rather than silent ones.
+/// Floats are BFC roots too, and so is a box whose `overflow` is anything but
+/// `visible` — a scroll container cannot let a float escape it, nor let a margin
+/// collapse out through a scrollbar. Absolutely positioned boxes are the third
+/// case and are not implemented at all; that one is still a named gap.
+///
+/// `overflow` is two properties, one per axis, and a computed value other than
+/// `visible` on *either* makes the box a root. Both are read even though one would
+/// do: css-overflow-3 §3.1 makes a `visible` computed value become `auto` when the
+/// other axis is not `visible`, so `overflow-y: scroll` alone already shows up in
+/// `overflow-x`. That is a rule about a property in another crate, and the test
+/// written to catch a single-axis read could not fail because of it -- so the
+/// second read stays and this paragraph is why, rather than a test that asserts
+/// nothing.
 fn establishes_formatting_context(style: &ComputedValues) -> bool {
+    use style::values::computed::Overflow;
     use style::values::specified::box_::DisplayInside;
-    matches!(style.clone_display().inside(), DisplayInside::FlowRoot) || float_side(style).is_some()
+
+    matches!(style.clone_display().inside(), DisplayInside::FlowRoot)
+        || float_side(style).is_some()
+        || style.clone_overflow_x() != Overflow::Visible
+        || style.clone_overflow_y() != Overflow::Visible
 }
 
 /// Resolve margins, borders and padding against the containing block's inline/// Resolve margins, borders and padding against the containing block's inline
@@ -2020,6 +2035,46 @@ mod tests {
         assert!(
             rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(40))),
             "the flow-root is as tall as the float inside it: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// §9.4.1: `overflow` other than `visible` establishes a formatting context.
+    ///
+    /// A scroll container cannot let a float escape it -- there would be nothing
+    /// to scroll to -- so `overflow: hidden` contains its floats for the same
+    /// reason `display: flow-root` does. It is the older way of asking for it, and
+    /// still the more common one in the wild.
+    #[test]
+    fn block_overflow_hidden_contains_its_floats() {
+        let (tree, _) = layout(
+            "<html><body><div id=r><div id=f></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 }              #r { overflow: hidden }              #f { float: left; width: 50px; height: 40px }",
+        );
+        assert!(
+            rects_of(&tree, FragmentKind::Block).contains(&(px(0), px(0), px(800), px(40))),
+            "the scroll container is as tall as the float inside it: {:?}",
+            rects_of(&tree, FragmentKind::Block)
+        );
+    }
+
+    /// And it stops margins collapsing through, which is the same rule.
+    ///
+    /// Written with `overflow-y` alone to catch a single-axis read, which it does
+    /// not do: css-overflow-3 §3.1 makes the other axis compute to `auto` when one
+    /// is not `visible`, so `overflow-x` already carries it. Kept because the
+    /// margin half of §9.4.1 is worth asserting on its own, and noted here so the
+    /// next person does not read it as coverage it does not give.
+    #[test]
+    fn block_overflow_y_stops_a_margin_collapsing_through() {
+        let (tree, _) = layout(
+            "<html><body><div id=outer><div id=inner></div></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 }              #outer { overflow-y: scroll }              #inner { margin-top: 20px; height: 10px }",
+        );
+        assert_eq!(
+            count_rect(&tree, (px(0), px(0), px(800), px(30))),
+            4,
+            "the scroll container contains the margin: {:?}",
             rects_of(&tree, FragmentKind::Block)
         );
     }
