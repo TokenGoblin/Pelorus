@@ -1,0 +1,18 @@
+WPT CSS2 reftest subset, vendored by ci/vendor-css2-reftests.sh.
+
+repository  https://github.com/web-platform-tests/wpt
+commit      b875b21fd9e6b688e37c10d1b6366cab7418f91e
+directories normal-flow floats floats-clear box-display visuren positioning linebox
+selection   .html files only, and only those with a matching -ref.html
+pairs       105
+files       210
+
+Why only .html: css/CSS2 holds 10,501 .xht files against 816 .html. px-dom has
+no XML path, and whether html5ever's HTML parser produces the tree an XML parser
+would is an empirical question about a parser this project did not write. ADR 029.
+
+Why these directories: they are §9 Phase 6's scope -- box tree, BFCs, inline,
+floats, positioned. generated-content, pagination, lists and tables each need a
+subsystem this phase does not build.
+
+Refresh by re-running the script. The diff is the record of what moved.
