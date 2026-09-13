@@ -176,6 +176,47 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[
 /// says the engine improved.
 const MATCH_FLOOR: usize = 54;
 
+/// Whether this test's meaning depends on script this engine cannot run.
+///
+/// A WPT reftest may mutate its own DOM before the comparison — `onload` handlers
+/// that insert or remove an element are how the CSS 2.1 suite tests dynamic box
+/// tree changes. Laying out the file as written and comparing it to a reference
+/// that shows the *result* is not a layout failure; it is the wrong input. Ten of
+/// this subset's pairs are like that, which is a fifth of everything still
+/// failing, and counting them as engine defects made the report point at work that
+/// cannot be done until Phase 10 brings a script host.
+///
+/// **Detected, not listed.** A hand-written list of these would go stale as the
+/// corpus is re-vendored, and — worse — would be a place to park a genuine layout
+/// failure. This asks the parsed document, so the only way to get a pair in here
+/// is to put script in the test file, which `ci/gate-layout.sh`'s pinned corpus
+/// count and PROVENANCE would both notice.
+///
+/// They stay in the denominator. ADR 019's pattern is that a conformance figure
+/// must not be met by removing tests, and "we cannot run this one" is exactly the
+/// argument that would remove it.
+fn needs_script(arena: &px_dom::Arena) -> bool {
+    let document = arena.document();
+    for id in core::iter::once(document).chain(arena.descendants(document)) {
+        let Some(node) = arena.get(id) else { continue };
+        let Some(name) = node.element_name() else {
+            continue;
+        };
+        if name.local == html5ever::local_name!("script") {
+            return true;
+        }
+        // An inline handler is script too, and is how most of these are written:
+        // `<body onload='doit()'>`.
+        if node
+            .attrs()
+            .is_some_and(|attrs| attrs.iter().any(|a| a.name.local.starts_with("on")))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// A layout with no more fragments than this has no content in it.
 ///
 /// The initial containing block, `<html>` and `<body>`. A pair that agrees at
@@ -289,6 +330,8 @@ fn geometry(tree: &FragmentTree) -> Vec<Geometry> {
 struct Laid {
     rectangles: Vec<Geometry>,
     fragments: usize,
+    /// Whether the document mutates itself on load — see [`needs_script`].
+    scripted: bool,
 }
 
 /// Parse, style and lay out one file.
@@ -316,6 +359,7 @@ fn layout_file(path: &Path) -> Option<Laid> {
     engine.resolve(&arena, &style_root)?;
     let tree = layout_document(&arena, &style_root, px(VIEWPORT_PX))?;
     Some(Laid {
+        scripted: needs_script(&arena),
         rectangles: geometry(&tree),
         fragments: tree.len(),
     })
@@ -354,6 +398,11 @@ fn inline_stylesheets(arena: &px_dom::Arena) -> Vec<String> {
 
 /// Lay out both halves of `pair` and say whether they agree.
 fn matches(pair: &Pair) -> bool {
+    outcome(pair).0
+}
+
+/// Whether `pair` agrees, and whether the test needs script to mean what it says.
+fn outcome(pair: &Pair) -> (bool, bool) {
     match (layout_file(&pair.test), layout_file(&pair.reference)) {
         (Some(test), Some(reference)) => {
             // Two *near*-empty layouts are trivially equal, and that is a false
@@ -367,9 +416,12 @@ fn matches(pair: &Pair) -> bool {
             // and pairs of those matched each other by producing nothing. After
             // the fixes it is 2. Requiring content is what stops that counting as
             // conformance.
-            test.fragments > TRIVIAL_FRAGMENTS && test.rectangles == reference.rectangles
+            (
+                test.fragments > TRIVIAL_FRAGMENTS && test.rectangles == reference.rectangles,
+                test.scripted,
+            )
         }
-        _ => false,
+        _ => (false, false),
     }
 }
 
@@ -528,10 +580,17 @@ fn layout_reftest_matches_at_or_above_the_pinned_floor() {
 
     let mut passed = 0usize;
     let mut total = 0usize;
-    for (name, ok) in results() {
+    let mut scripted = 0usize;
+    for pair in pairs() {
         total += 1;
-        if ok && !excluded.contains(name.as_str()) {
+        let (ok, needs_script) = outcome(&pair);
+        if ok && !excluded.contains(pair.name.as_str()) {
             passed += 1;
+        } else if needs_script {
+            scripted += 1;
+            if std::env::var("REPORT").is_ok() {
+                println!("    scripted: {}", pair.name);
+            }
         }
     }
 
@@ -545,6 +604,12 @@ fn layout_reftest_matches_at_or_above_the_pinned_floor() {
     for line in breakdown() {
         println!("  {line}");
     }
+    println!(
+        "  of the {} not matching, {scripted} need a script host (Phase 10) and \
+         {} are comparison-method exclusions",
+        total - passed,
+        EXPECTED_FAILURES.len()
+    );
     if std::env::var("REPORT").is_ok() || std::env::var("DIAG").is_ok() {
         report();
     }
