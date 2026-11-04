@@ -1,0 +1,54 @@
+The render corpus: 25 pages (ADR 033 (a)), rendered by `cargo xtask render` and
+compared exactly with tests/render/baselines/<id>.png. Listed in pages.toml.
+
+Text paints as placeholder blocks until Phase 9. Every baseline containing text
+(text-placeholder and most of the WPT pages) is regenerated then, in one reviewed
+`cargo xtask render --bless` commit.
+
+13 hand-written feature fixtures: tests/render/pages/*.html, one idea each.
+
+12 pages derived from the vendored WPT corpus (pinned commit
+b875b21fd9e6b688e37c10d1b6366cab7418f91e, see tests/wpt/*/PROVENANCE). They are used
+in place, not copied: pages.toml names the test and its reference, and the gate
+asserts they render to identical bytes (a pixel-level reftest).
+
+Selection rule (implemented as `select_every_kth` and `pair_eligible` in
+crates/px-xtask/src/gates/render.rs, reproduced by `cargo xtask render --select`):
+
+  1. Per suite, list every file carrying exactly one <link rel="match"> whose
+     target exists, in sorted path order.
+  2. Keep the pairs whose test and reference both render and produce byte-identical
+     PNGs, and whose bitmap has at least 400 ink pixels (pixels differing from its
+     most common colour). A page that paints one flat colour is not a test.
+  3. With n eligible pairs and quota q, k = n / q (at least 1); take the pairs at
+     positions 0, k, 2k, ... until q are taken.
+
+Nothing was chosen by how a page looks. Quotas: css2 6, css-flexbox 3, css-grid 3.
+
+  suite        pairs  eligible  k
+  css2            99        59   9
+  css-flexbox    543       209  69
+  css-grid       405       115  38
+
+Chosen (test -> reference):
+  css2/box-display/block-in-inline-at-start-with-margin-top-collapses-with-parent.html
+  css2/box-display/block-in-inline-margin-with-leading-text.html
+  css2/box-display/block-in-inline-self-collapsing-only-child.html
+  css2/box-display/nested-spans-with-block-in-inline-margin.html
+  css2/linebox/vertical-align-top-bottom-padding.html
+  css2/normal-flow/block-in-inline-margins-004.html
+  css-flexbox/abspos/flex-abspos-align-self-safe-outer-cb-003.tentative.html
+  css-flexbox/flexbox-break-request-horiz-001b.html
+  css-flexbox/flexbox_display.html
+  css-grid/abspos/grid-abspos-staticpos-align-self-img-001.html
+  css-grid/alignment/grid-justify-content-space-between-001.html
+  css-grid/grid-model/grid-container-scrollbars-sizing-001.html
+
+Known limits: several of these reference inline-box backgrounds or features the
+display-list builder does not paint yet (no inline-box backgrounds, no stacking
+contexts). The rule was applied as stated and not adjusted, so a chosen page may
+paint less than its CSS asks for; the test and reference agree anyway. The
+selection is a record of one run of the rule: re-running `--select` after layout or
+paint changes may choose differently, and doing so is a deliberate corpus change.
+
+Canvas: 800 px wide, max(600, document height) tall, capped at 2400.

@@ -84,6 +84,14 @@ pub struct Fragment {
     pub block_offset: Au,
     /// The border-box size.
     pub size: LogicalSize,
+    /// The DOM node whose box this fragment is, or `None` for fragments with no
+    /// element of their own: the initial containing block, anonymous blocks and
+    /// line boxes.
+    ///
+    /// This is the link paint needs to find a fragment's computed style. It is
+    /// `Option<NodeId>` and `NodeId` is `Copy`, so `Fragment` stays `Copy` and
+    /// `Drop` still cannot recurse. Layout itself never reads it.
+    pub node: Option<px_dom::NodeId>,
     /// This fragment's children, as a range into the tree's flat storage.
     first_child: u32,
     child_count: u32,
@@ -98,6 +106,7 @@ impl Fragment {
             inline_offset: Au(0),
             block_offset: Au(0),
             size,
+            node: None,
             first_child: 0,
             child_count: 0,
         }

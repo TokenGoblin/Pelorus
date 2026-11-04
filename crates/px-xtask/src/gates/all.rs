@@ -14,7 +14,7 @@
 //!   `cargo xtask build-and-hash /tmp/a > /tmp/a.txt`, the same into
 //!   `/tmp/some/deeper/path > /tmp/b.txt`, then
 //!   `cargo xtask compare-hashes /tmp/a.txt /tmp/b.txt`.
-//! - **The per-phase gates for layout, flex-grid and style, and the nightly
+//! - **The per-phase gates for layout, flex-grid, render and style, and the nightly
 //!   ones (miri, fuzz-smoke, sanitizers).** The script never listed them. They
 //!   are slow, need tools a laptop may not have, or run in their own CI jobs.
 //!   Add one here by adding its name to [`CHECKS`].

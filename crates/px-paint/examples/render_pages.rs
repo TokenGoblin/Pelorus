@@ -1,0 +1,197 @@
+//! The render corpus' renderer: `cargo xtask render` runs this to turn HTML pages
+//! into PNGs through the product path (parse, style, layout, display list,
+//! software raster, PNG encode). It lives here and not in `px-xtask` because the
+//! xtask crate is std-only and must not link the style engine.
+//!
+//! ```text
+//! render_pages [--twice] <out_dir> <root> <id>=<source> ...
+//! ```
+//!
+//! `source` is a path relative to `root` (the repository root). For each page it
+//! writes `<out_dir>/<id>.png` and prints one line on stdout:
+//!
+//! ```text
+//! OK <id> <width> <height> <ink_pixels>
+//! FAIL <id> <reason>
+//! ```
+//!
+//! `ink_pixels` is the number of pixels that differ from the most common colour of
+//! the bitmap, so a page that paints one flat colour has zero ink. With `--twice`
+//! each page is rendered a second time and a differing byte is a `FAIL`.
+//!
+//! The canvas is 800 px wide and `max(600, document height)` tall, capped at 2400
+//! (ADR 033 (a)).
+
+use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
+
+use px_layout::block::layout_document;
+use px_layout::geom::px;
+
+const WIDTH: u32 = 800;
+const MIN_HEIGHT: u32 = 600;
+const MAX_HEIGHT: u32 = 2400;
+/// Layout units per CSS pixel.
+const AU_PER_PX: i32 = 60;
+
+/// Enough of a user-agent stylesheet for block layout: the `display` values
+/// without which nothing lays out, and the default margins.
+const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
+     nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
+     table, form, fieldset, pre, hr { display: block } \
+     body { margin: 8px } \
+     p, blockquote, figure { margin: 1em 0 } \
+     h1 { margin: 0.67em 0; font-size: 2em } \
+     head, style, script, title, meta, link { display: none }";
+
+fn attr<'a>(node: &'a px_dom::Node, local: &str) -> Option<&'a str> {
+    node.attrs()?
+        .iter()
+        .find(|a| &*a.name.local == local)
+        .map(|a| &*a.value)
+}
+
+/// Resolve a stylesheet href: relative to the page, or `/css/<module>/...` into the
+/// vendored WPT tree.
+fn resolve(root: &Path, from: &Path, href: &str) -> Option<PathBuf> {
+    let href = href.split(['#', '?']).next().unwrap_or("");
+    if href.is_empty() || href.contains("://") || href.starts_with("//") {
+        return None;
+    }
+    if let Some(rest) = href.strip_prefix('/') {
+        let rest = rest.strip_prefix("css/")?;
+        return Some(root.join("tests/wpt").join(rest));
+    }
+    Some(from.parent()?.join(href))
+}
+
+fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
+    let mut out = Vec::new();
+    let document = arena.document();
+    for id in arena.descendants(document) {
+        let Some(node) = arena.get(id) else { continue };
+        let Some(name) = node.element_name() else {
+            continue;
+        };
+        if name.local.as_ref() == "style" {
+            out.push(px_layout::inline::collect_text(arena, id));
+        } else if name.local.as_ref() == "link" {
+            let rel = attr(node, "rel").unwrap_or("").to_ascii_lowercase();
+            if !rel.split_ascii_whitespace().any(|w| w == "stylesheet") {
+                continue;
+            }
+            let href = attr(node, "href").unwrap_or("");
+            if let Some(css) =
+                resolve(root, path, href).and_then(|p| std::fs::read_to_string(p).ok())
+            {
+                out.push(css);
+            }
+        }
+    }
+    out
+}
+
+fn render(root: &Path, path: &Path) -> Result<px_paint::Canvas, String> {
+    let source = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
+    let dom = px_dom::parse(&source);
+    if dom.abandoned {
+        return Err("parse abandoned".into());
+    }
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let arena = dom.arena;
+    let mut engine = px_css::engine::StyleEngine::new(WIDTH as f32, MIN_HEIGHT as f32, quirks);
+    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
+    for css in stylesheets(root, path, &arena) {
+        engine.add_author_stylesheet(&css, "https://corpus.invalid/page.css");
+    }
+    let style_root = engine.style_root_for(&arena);
+    engine
+        .resolve(&arena, &style_root)
+        .ok_or("style resolve failed")?;
+    let tree = layout_document(&arena, &style_root, px(WIDTH as i32)).ok_or("layout failed")?;
+
+    // Document height: the lowest fragment edge.
+    let mut bottom: i64 = 0;
+    for (_, id) in tree.in_layout_order() {
+        if let Some(f) = tree.get(id) {
+            bottom = bottom.max(f.block_offset.0 as i64 + f.size.block.0 as i64);
+        }
+    }
+    let doc_px = ((bottom + AU_PER_PX as i64 - 1) / AU_PER_PX as i64).max(0) as u32;
+    let height = doc_px.clamp(MIN_HEIGHT, MAX_HEIGHT);
+
+    let list = px_paint::build_with_viewport(
+        &arena,
+        &style_root,
+        &tree,
+        px(WIDTH as i32),
+        px(height as i32),
+    );
+    px_paint::rasterize(&list, WIDTH, height).map_err(|e| format!("raster: {e}"))
+}
+
+fn png_of(root: &Path, path: &Path) -> Result<(px_paint::Canvas, Vec<u8>), String> {
+    let canvas = catch_unwind(AssertUnwindSafe(|| render(root, path)))
+        .map_err(|_| "panicked".to_string())??;
+    let png = canvas.to_png().map_err(|e| format!("png: {e}"))?;
+    Ok((canvas, png))
+}
+
+fn ink(canvas: &px_paint::Canvas) -> usize {
+    let mut counts: HashMap<[u8; 4], usize> = HashMap::new();
+    for p in canvas.pixels.as_chunks::<4>().0 {
+        *counts.entry([p[0], p[1], p[2], p[3]]).or_insert(0) += 1;
+    }
+    let total = canvas.pixels.len() / 4;
+    total - counts.values().copied().max().unwrap_or(0)
+}
+
+fn main() {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let twice = args.first().is_some_and(|a| a == "--twice");
+    if twice {
+        args.remove(0);
+    }
+    if args.len() < 2 {
+        eprintln!("usage: render_pages [--twice] <out_dir> <root> <id>=<source> ...");
+        std::process::exit(2);
+    }
+    let out_dir = PathBuf::from(&args[0]);
+    let root = PathBuf::from(&args[1]);
+    if let Err(e) = std::fs::create_dir_all(&out_dir) {
+        eprintln!("cannot create {}: {e}", out_dir.display());
+        std::process::exit(2);
+    }
+    for spec in &args[2..] {
+        let Some((id, source)) = spec.split_once('=') else {
+            eprintln!("bad spec {spec}");
+            std::process::exit(2);
+        };
+        let path = root.join(source);
+        match png_of(&root, &path) {
+            Err(e) => println!("FAIL {id} {e}"),
+            Ok((canvas, png)) => {
+                if twice {
+                    match png_of(&root, &path) {
+                        Ok((_, again)) if again == png => {}
+                        _ => {
+                            println!("FAIL {id} nondeterministic: second render differs");
+                            continue;
+                        }
+                    }
+                }
+                if let Err(e) = std::fs::write(out_dir.join(format!("{id}.png")), &png) {
+                    println!("FAIL {id} write: {e}");
+                    continue;
+                }
+                println!(
+                    "OK {id} {} {} {}",
+                    canvas.width,
+                    canvas.height,
+                    ink(&canvas)
+                );
+            }
+        }
+    }
+}
