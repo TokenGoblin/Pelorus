@@ -22,6 +22,8 @@ px-net = { path = "../crates/px-net" }
 # that forces generation exhaustion, and ADR 018 chose a layout where four
 # billion generations makes it unreachable by churn.
 px-dom = { path = "../crates/px-dom", features = ["testing"] }
+# Phase 9: the shaper parses untrusted font bytes (ADR 036).
+px-text = { path = "../crates/px-text" }
 
 [[bin]]
 name = "frame_request"
@@ -110,6 +112,13 @@ bench = false
 [[bin]]
 name = "script_response"
 path = "fuzz_targets/script_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "shaper"
+path = "fuzz_targets/shaper.rs"
 test = false
 doc = false
 bench = false

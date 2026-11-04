@@ -9,6 +9,7 @@
 
 pub mod build;
 pub mod display_list;
+pub mod glyph;
 pub mod png;
 pub mod raster;
 
