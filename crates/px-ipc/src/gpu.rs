@@ -118,6 +118,13 @@ impl<T, const MAX: usize> Bounded<T, MAX> {
         }
     }
 
+    /// Wrap a vector, dropping what does not fit. For a producer that would
+    /// rather say less than refuse (a log).
+    pub fn truncated(mut items: Vec<T>) -> Self {
+        items.truncate(MAX);
+        Self(items)
+    }
+
     /// The elements.
     pub fn as_slice(&self) -> &[T] {
         &self.0
