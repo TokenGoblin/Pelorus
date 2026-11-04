@@ -294,7 +294,7 @@ impl Arena {
     /// There is deliberately **no release-artifact scan for this symbol yet.**
     /// §14.4 asks for one, and `cargo xtask sandbox` has a real one for
     /// `PX_TEST_FORCE_SANDBOX_UNAVAILABLE`, so the omission needs a reason.
-    /// The reason is the one `ci/gate-network.sh` already worked out and wrote
+    /// The reason is the one `cargo xtask network` already worked out and wrote
     /// down for `client_config_trusting`: no shipping binary links `px-dom`
     /// yet, so a scan would find nothing whether or not the feature was on. A
     /// check that cannot fail reads as assurance and provides none.

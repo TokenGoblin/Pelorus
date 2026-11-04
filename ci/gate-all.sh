@@ -30,7 +30,7 @@ structure:cargo xtask structure
 compat-list:cargo xtask compat-list
 ipc:cargo xtask ipc
 sandbox:cargo xtask sandbox
-network:bash ci/gate-network.sh
+network:cargo xtask network
 dom:cargo xtask dom
 "
 

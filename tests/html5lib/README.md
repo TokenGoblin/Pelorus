@@ -29,7 +29,7 @@ WPT is also where Phase 12 goes, so the tooling is not wasted.
 
 ## Vendored, not fetched
 
-Same reason `ci/gate-network.sh` replays recorded traffic: a gate that needs
+Same reason `cargo xtask network` replays recorded traffic: a gate that needs
 the internet is a gate that goes red when a third party has an outage, and one
 that has been red for a reason nobody controls is one people learn to ignore.
 Vendoring also fixes the target — "≥99%" means the same thing in a year.

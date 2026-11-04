@@ -12,6 +12,7 @@ pub mod dom;
 pub mod flex_grid;
 pub mod ipc;
 pub mod layout;
+pub mod network;
 pub mod not_serializable;
 pub mod sandbox;
 pub mod setup_build_python;
@@ -96,6 +97,11 @@ pub static GATES: &[GateSpec] = &[
         name: "layout",
         about: "Phase 6: CSS2 reftest subset, box-tree determinism, deep nesting, Au source scans",
         run: layout::run,
+    },
+    GateSpec {
+        name: "network",
+        about: "Phase 3: fetch/PSL/connection/partition suites, 200-response corpus, network confined to px-net and px-update, PSL versioned, HTTP framing fuzz targets",
+        run: network::run,
     },
     GateSpec {
         name: "not-serializable",

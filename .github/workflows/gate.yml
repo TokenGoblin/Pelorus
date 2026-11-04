@@ -212,7 +212,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Phase 3 gate
         shell: bash
-        run: ci/gate-network.sh
+        run: cargo xtask network
 
   # build-spec §4.5, ADR 022. Miri over px-dom, on the nightly ADR 006 pins.
   #

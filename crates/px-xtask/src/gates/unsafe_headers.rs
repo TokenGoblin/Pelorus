@@ -383,7 +383,7 @@ fn check_panic_lint_waivers(g: &mut Gate, root: &Path) {
 
 /// ADR 024's two counts, positively enforced.
 ///
-/// Duplicated from ci/gate-style.sh deliberately. That gate is Phase 5's and
+/// Duplicated from cargo xtask style deliberately. That gate is Phase 5's and
 /// phase gates are not run forever; this one is permanent, and the rule it
 /// encodes outlives the phase that needed it. A rule enforced only by the gate
 /// of the phase that introduced it stops being enforced when the phase closes.

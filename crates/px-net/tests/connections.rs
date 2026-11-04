@@ -17,7 +17,7 @@
 //! That is weaker than a capture in one specific way, and it should be said
 //! rather than glossed: it cannot see traffic to a host these tests never
 //! bind. The other half of invariant 4 is enforced structurally instead — the
-//! symbol audit in `ci/gate-network.sh` fails the build if any crate outside
+//! symbol audit in `cargo xtask network` fails the build if any crate outside
 //! `px-net` and `px-update` so much as names a socket type, and that keeps
 //! holding as the project grows, where a test only speaks for the code
 //! already written.
