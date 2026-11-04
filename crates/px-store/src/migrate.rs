@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn plain_names() {
-        assert!(name_is_plain("pelorus-old"));
+        assert!(name_is_plain("legacy-profile"));
         for bad in ["", ".", "..", "a/b", "a\\b", "C:x", "a\0b"] {
             assert!(!name_is_plain(bad), "{bad:?}");
         }

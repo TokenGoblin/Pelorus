@@ -18,6 +18,7 @@ mod leak {
     use std::time::Instant;
 
     const NAMESPACES: [Namespace; 2] = [Namespace::Storage, Namespace::Cookies];
+    type Seen = (u8, Vec<u8>, Option<Vec<u8>>);
     const KEYS: [&[u8]; 4] = [b"uid", b"session", b"", b"k\0with-nul"];
 
     fn key(top: &str, scheme: &str, host: &str, port: u16) -> PartitionKey {
@@ -32,7 +33,7 @@ mod leak {
     }
 
     /// Everything observable about one partition through the public API.
-    fn observe(s: &Store, p: &PartitionKey) -> Vec<(u8, Vec<u8>, Option<Vec<u8>>)> {
+    fn observe(s: &Store, p: &PartitionKey) -> Vec<Seen> {
         let mut seen = Vec::new();
         for (i, ns) in NAMESPACES.iter().enumerate() {
             for k in s.keys(p, *ns) {
@@ -44,11 +45,13 @@ mod leak {
                 }
             }
         }
+        seen.sort();
+        seen.dedup();
         seen
     }
 
     fn assert_never_contains(
-        seen: &[(u8, Vec<u8>, Option<Vec<u8>>)],
+        seen: &[Seen],
         needle: &[u8],
         context: &str,
     ) {
