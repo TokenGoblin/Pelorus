@@ -58,6 +58,7 @@ where
     let mut session = Session {
         out: Channel::new(std::io::empty(), writer),
         host: None,
+        limit: crate::watchdog::default_limit(),
         told_of_termination: false,
     };
     session.run(&inbox)
@@ -68,6 +69,9 @@ struct Session<W: Write> {
     /// Absent until the seed arrives: there is nothing a `RunScript` could run
     /// in before that.
     host: Option<Host>,
+    /// The watchdog's limit in milliseconds (ADR 040, layer 2); the testing
+    /// knob is the only writer.
+    limit: crate::watchdog::SharedLimit,
     /// Whether the broker has been told script is stopped.
     told_of_termination: bool,
 }
@@ -136,6 +140,11 @@ impl<W: Write> Session<W> {
                 };
                 let host = Host::with_options(options)
                     .map_err(|e| IpcError::Io(std::io::Error::other(e)))?;
+                // Script cannot run before this point, so the watchdog starts
+                // exactly when there is something to watch. If it cannot start,
+                // there is no host: running script unwatched is refused.
+                crate::watchdog::spawn(host.heartbeat(), std::sync::Arc::clone(&self.limit))
+                    .map_err(IpcError::Io)?;
                 self.host = Some(host);
                 Ok(Flow::Go)
             }
@@ -165,6 +174,15 @@ impl<W: Write> Session<W> {
                 };
                 let nanos = px_ipc::gpu::Bounded::truncated(host.clock_log());
                 self.out.send(&ScriptResponse::ClockLog { nanos })?;
+                Ok(Flow::Go)
+            }
+            #[cfg(feature = "testing")]
+            Ok(ScriptRequest::WatchdogMillis { millis }) => {
+                if self.host.is_none() || millis == 0 {
+                    return Err(IpcError::Malformed);
+                }
+                self.limit
+                    .store(u64::from(millis), std::sync::atomic::Ordering::SeqCst);
                 Ok(Flow::Go)
             }
             // A request this build does not serve: the testing-only variants reach

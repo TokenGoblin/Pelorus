@@ -25,6 +25,7 @@ use std::process::ExitCode;
 use px_ipc::{Channel, FrameId, IpcError, Request, Response};
 
 mod script;
+mod watchdog;
 
 fn main() -> ExitCode {
     let channel = Channel::new(BufReader::new(stdin()), BufWriter::new(stdout()));
