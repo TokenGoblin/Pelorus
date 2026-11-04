@@ -22,7 +22,7 @@ Full specification: `docs/build-spec.md`. Root working agreement:
 
 Miri runs over five of this crate's test suites — `parse`, `ranges`,
 `handles`, `snapshots`, `order` — on the nightly ADR 006 pins. See ADR 022 and
-`ci/gate-miri.sh`.
+`cargo xtask miri`.
 
 This file claimed Miri ran from Phase 0, when it did not. What it covers is
 narrower than "Miri runs on px-dom" suggests, so:

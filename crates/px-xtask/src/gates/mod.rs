@@ -5,6 +5,7 @@ pub mod brand_leak;
 pub mod flex_grid;
 pub mod layout;
 pub mod make_fetch_corpus;
+pub mod miri;
 pub mod structure;
 pub mod supply_chain;
 pub mod update_hsts;
@@ -50,6 +51,11 @@ pub static GATES: &[GateSpec] = &[
         name: "make-fetch-corpus",
         about: "TOOL: regenerate the synthetic response corpus in tests/net/corpus",
         run: make_fetch_corpus::run,
+    },
+    GateSpec {
+        name: "miri",
+        about: "Miri over px-dom's five ADR 022 suites on the pinned nightly",
+        run: miri::run,
     },
     GateSpec {
         name: "structure",

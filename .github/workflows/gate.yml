@@ -222,7 +222,7 @@ jobs:
           rustup toolchain install "$nightly" --component miri --profile minimal
       - name: Miri
         shell: bash
-        run: ci/gate-miri.sh
+        run: cargo xtask miri
 
   # Phase 4. Written failing before px-dom had an arena, and red for the length
   # of the phase — a gate added only once it passes has never been seen to

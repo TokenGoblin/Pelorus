@@ -24,7 +24,6 @@ ci/gate-build.sh           # -> cargo xtask build: runs cargo build/test; uses x
 ci/gate-compat-list.sh     # -> cargo xtask compat-list: wraps check_compat_sites.py
 ci/check_compat_sites.py   # -> folded into compat-list: parse tests/compat/sites.toml by hand
 ci/unsafe-audit.sh         # -> cargo xtask unsafe-audit: reads ci/unsafe-baseline.json
-ci/gate-miri.sh            # -> cargo xtask miri: runs cargo +nightly miri as a child
 ci/gate-all.sh             # -> cargo xtask all: run every registered gate in order
 
 # --- Medium: more logic, text scanning, or external tools --------------------
