@@ -40,7 +40,7 @@ fn order(list: &DisplayList) -> String {
     for item in list.items.iter().skip(1) {
         match item {
             Item::FillRect { color, .. } => out.push(color.r.to_string()),
-            Item::TextRun { .. } => out.push("T".to_owned()),
+            Item::TextRun { .. } | Item::GlyphRun { .. } => out.push("T".to_owned()),
             _ => {}
         }
     }

@@ -28,6 +28,9 @@ use std::path::{Path, PathBuf};
 
 use px_layout::block::layout_document;
 use px_layout::geom::px;
+use px_paint::FontId;
+use px_paint::glyph::{PathCmd, Pt};
+use px_paint::raster::GlyphSource;
 
 const WIDTH: u32 = 800;
 const MIN_HEIGHT: u32 = 600;
@@ -128,7 +131,39 @@ fn render(root: &Path, path: &Path) -> Result<px_paint::Canvas, String> {
         px(WIDTH as i32),
         px(height as i32),
     );
-    px_paint::rasterize(&list, WIDTH, height).map_err(|e| format!("raster: {e}"))
+    px_paint::raster::rasterize_with(&list, WIDTH, height, &LayoutFonts)
+        .map_err(|e| format!("raster: {e}"))
+}
+
+/// Glyph outlines from the registry layout shaped with (`FontRegistry::with_ahem`
+/// behind `px_layout::text::font_of`). Layout's `FontId` numbers are the display
+/// list's, so asking layout's own registry cannot disagree with the ids the
+/// builder wrote. `px-paint` stays free of any font crate; this example (a
+/// dev-dependency user of `px-text`) is the one place the two meet for the
+/// render corpus.
+struct LayoutFonts;
+
+impl GlyphSource for LayoutFonts {
+    fn units_per_em(&self, font: FontId) -> Option<u32> {
+        px_layout::text::font_of(px_text::FontId(font.0)).map(|f| u32::from(f.units_per_em()))
+    }
+
+    fn outline(&self, font: FontId, glyph: u32) -> Option<Vec<PathCmd>> {
+        let f = px_layout::text::font_of(px_text::FontId(font.0))?;
+        let o = f.outline(u16::try_from(glyph).ok()?).ok()?;
+        let p = |p: px_text::Pt| Pt { x: p.x, y: p.y };
+        Some(
+            o.commands
+                .iter()
+                .map(|c| match *c {
+                    px_text::PathCmd::MoveTo(a) => PathCmd::MoveTo(p(a)),
+                    px_text::PathCmd::LineTo(a) => PathCmd::LineTo(p(a)),
+                    px_text::PathCmd::QuadTo(a, b) => PathCmd::QuadTo(p(a), p(b)),
+                    px_text::PathCmd::Close => PathCmd::Close,
+                })
+                .collect(),
+        )
+    }
 }
 
 fn png_of(root: &Path, path: &Path) -> Result<(px_paint::Canvas, Vec<u8>), String> {

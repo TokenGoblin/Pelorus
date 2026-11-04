@@ -247,7 +247,12 @@ impl<'a> Lexer<'a> {
             self.bump_n_ascii(end);
             let raw = self.slice(start, self.pos);
             return Ok(if b0 == b'_' {
-                finish(self, TokenKind::Identifier, raw.get(1..).unwrap_or(""), true)
+                finish(
+                    self,
+                    TokenKind::Identifier,
+                    raw.get(1..).unwrap_or(""),
+                    true,
+                )
             } else {
                 finish(self, TokenKind::Identifier, raw, false)
             });
@@ -263,9 +268,7 @@ impl<'a> Lexer<'a> {
                         Some(_) => {
                             self.bump();
                             if self.pos - body > MAX_STRING_BYTES {
-                                return Err(
-                                    self.err_at(start_span, "string literal is too long")
-                                );
+                                return Err(self.err_at(start_span, "string literal is too long"));
                             }
                         }
                         None => {

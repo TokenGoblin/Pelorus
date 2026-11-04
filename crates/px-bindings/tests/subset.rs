@@ -34,7 +34,8 @@ fn sources() -> Vec<(String, String)> {
         .iter()
         .map(|p| {
             (
-                p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+                p.file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
                 std::fs::read_to_string(p).unwrap_or_else(|e| fail!("{e}")),
             )
         })
@@ -42,8 +43,13 @@ fn sources() -> Vec<(String, String)> {
 }
 
 fn model() -> Model {
-    Model::from_sources(&sources(), BuildOptions { require_exposed: true })
-        .unwrap_or_else(|e| fail!("{e:#?}"))
+    Model::from_sources(
+        &sources(),
+        BuildOptions {
+            require_exposed: true,
+        },
+    )
+    .unwrap_or_else(|e| fail!("{e:#?}"))
 }
 
 #[test]
@@ -52,8 +58,15 @@ fn subset_contains_the_gate_interfaces() {
     assert_eq!(names.len(), 8, "{names:?}");
     let m = model();
     for n in [
-        "EventTarget", "Event", "Node", "Element", "Document", "DOMTokenList", "Text",
-        "CharacterData", "NodeList",
+        "EventTarget",
+        "Event",
+        "Node",
+        "Element",
+        "Document",
+        "DOMTokenList",
+        "Text",
+        "CharacterData",
+        "NodeList",
     ] {
         assert!(m.container(n).is_some(), "{n} missing");
     }
@@ -66,7 +79,10 @@ fn subset_resolves_the_real_structure() {
     let m = model();
     let chain: Vec<_> = m.ancestors("Text").iter().map(|i| i.name.clone()).collect();
     assert_eq!(chain, ["CharacterData", "Node", "EventTarget"]);
-    assert_eq!(m.container("EventListener").expect("cb").kind, ContainerKind::CallbackInterface);
+    assert_eq!(
+        m.container("EventListener").expect("cb").kind,
+        ContainerKind::CallbackInterface
+    );
     // Mixins arrived: Element has ParentNode.children-less members and ChildNode.
     let has = |iface: &str, member: &str| {
         m.container(iface).expect("iface").members.iter().any(|x| {
@@ -86,8 +102,16 @@ fn subset_resolves_the_real_structure() {
 fn subset_lowers_with_the_expected_conversions() {
     let b = lower(&model()).unwrap_or_else(|e| fail!("{e}"));
     use px_bindings::ir::{Conv, IntMode};
-    let cd = b.interfaces.iter().find(|i| i.name == "CharacterData").expect("CharacterData");
-    let data = cd.attributes.iter().find(|a| a.name == "data").expect("data");
+    let cd = b
+        .interfaces
+        .iter()
+        .find(|i| i.name == "CharacterData")
+        .expect("CharacterData");
+    let data = cd
+        .attributes
+        .iter()
+        .find(|a| a.name == "data")
+        .expect("data");
     assert_eq!(
         data.conv,
         Conv::String {
@@ -95,14 +119,28 @@ fn subset_lowers_with_the_expected_conversions() {
             null_to_empty: true
         }
     );
-    let node = b.interfaces.iter().find(|i| i.name == "Node").expect("Node");
+    let node = b
+        .interfaces
+        .iter()
+        .find(|i| i.name == "Node")
+        .expect("Node");
     assert!(node.constants.len() >= 12);
     assert_eq!(node.parent.as_deref(), Some("EventTarget"));
-    let et = b.interfaces.iter().find(|i| i.name == "EventTarget").expect("EventTarget");
-    let add = et.operations.iter().find(|o| o.name.as_deref() == Some("addEventListener")).expect("add");
+    let et = b
+        .interfaces
+        .iter()
+        .find(|i| i.name == "EventTarget")
+        .expect("EventTarget");
+    let add = et
+        .operations
+        .iter()
+        .find(|o| o.name.as_deref() == Some("addEventListener"))
+        .expect("add");
     let opts = &add.overloads[0].args[2];
     assert!(opts.optional && opts.default.is_some());
-    let Conv::Union(u) = &opts.conv else { fail!("{:?}", opts.conv) };
+    let Conv::Union(u) = &opts.conv else {
+        fail!("{:?}", opts.conv)
+    };
     assert_eq!(u.members.len(), 2);
     let _ = IntMode::Wrap;
 }
@@ -110,7 +148,10 @@ fn subset_lowers_with_the_expected_conversions() {
 #[test]
 fn subset_generates_and_the_output_compiles() {
     let text = common::generate_from(
-        &sources().iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>(),
+        &sources()
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect::<Vec<_>>(),
         true,
     )
     .unwrap_or_else(|e| fail!("{e:#?}"));
@@ -142,7 +183,10 @@ fn every_host_method_is_fallible() {
     // The generational-handle rule, carried into the glue: no method may hand
     // back a value without a way to say the handle is stale.
     let text = common::generate_from(
-        &sources().iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>(),
+        &sources()
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect::<Vec<_>>(),
         true,
     )
     .expect("generates");
@@ -156,7 +200,10 @@ fn every_host_method_is_fallible() {
         } else if in_trait && line.trim_start().starts_with("fn ") {
             methods += 1;
             assert!(line.contains("&mut self"), "{line}");
-            assert!(line.ends_with(";") && line.contains("-> rt::HostResult<"), "{line}");
+            assert!(
+                line.ends_with(";") && line.contains("-> rt::HostResult<"),
+                "{line}"
+            );
         }
     }
     assert!(methods > 100, "only {methods} methods");

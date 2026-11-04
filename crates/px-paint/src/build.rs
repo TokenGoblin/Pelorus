@@ -39,8 +39,12 @@
 //! - `overflow` other than `visible` (including `clip`): [`Item::PushClip`] at the
 //!   padding box after the box's own background and border, [`Item::PopClip`]
 //!   after its last descendant.
-//! - Text: an [`Item::TextRun`] placeholder per line fragment, in the inherited
-//!   `color`, covering the line's extent.
+//! - Text: one [`Item::GlyphRun`] per text run of each line fragment, pen positions
+//!   in page space on the baseline (see `emit_line`), in the `color` of the run's
+//!   element. [`Item::TextRun`] is no longer emitted; the enum variant stays
+//!   because the IPC wire still carries it. The font id is the layout registry's
+//!   `px_text::FontId` number: whoever rasterizes must supply the same fonts under
+//!   the same ids.
 //! - `visibility: hidden | collapse`: the box's own background and border (and,
 //!   for lines, text) are skipped; descendants are still visited and paint if
 //!   their own computed `visibility` is `visible`.
@@ -56,7 +60,9 @@ use px_dom::{Arena, NodeId};
 use px_layout::fragment::{FragmentId, FragmentKind, FragmentTree};
 use px_layout::geom::Au;
 
-use crate::display_list::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect};
+use crate::display_list::{
+    BorderSide, BorderStyle, Color, DisplayList, FontId, Item, PositionedGlyph, Rect,
+};
 
 fn color(c: Rgba) -> Color {
     Color {
@@ -272,11 +278,12 @@ fn emit(
     facts: &Facts,
     mut units: Vec<Unit>,
     propagated: Option<NodeId>,
+    styles: &Styles<'_>,
 ) {
     let mut jobs = vec![Job::Unit(0)];
     while let Some(job) = jobs.pop() {
         match job {
-            Job::Ops(ops) => emit_ops(list, tree, facts, &ops, propagated),
+            Job::Ops(ops) => emit_ops(list, tree, facts, &ops, propagated, styles),
             Job::Unit(u) => {
                 let Some(unit) = units.get_mut(u).map(std::mem::take) else {
                     continue;
@@ -316,6 +323,7 @@ fn emit_ops(
     facts: &Facts,
     ops: &[Op],
     propagated: Option<NodeId>,
+    styles: &Styles<'_>,
 ) {
     let mut open: Vec<FragmentId> = Vec::new();
     for op in ops {
@@ -339,15 +347,7 @@ fn emit_ops(
         }
         let rect = frag_rect(fragment);
         match *op {
-            Op::Text(_) => {
-                let inherited = facts.inherited[id.index()];
-                if inherited.visible && inherited.color[3] > 0 {
-                    list.push(Item::TextRun {
-                        rect,
-                        color: color(inherited.color),
-                    });
-                }
-            }
+            Op::Text(_) => emit_line(list, tree, facts, id, styles),
             Op::Boxed(_) => {
                 if let Some(style) = facts.style[id.index()]
                     && style.visible
@@ -420,7 +420,9 @@ pub fn build_with_viewport(
 
         let facts = gather(tree, root, |n| paint_style(dom, n));
         let units = build_units(tree, &facts, root);
-        emit(&mut list, tree, &facts, units, propagated);
+        let style_of = |n| paint_style(dom, n);
+        let styles = Styles::new(&style_of);
+        emit(&mut list, tree, &facts, units, propagated, &styles);
     });
     list
 }
@@ -505,5 +507,78 @@ fn padding_box(rect: Rect, style: &PaintStyle) -> Rect {
         y: rect.y + top,
         width: (rect.width - left - right).max(Au(0)),
         height: (rect.height - top - bottom).max(Au(0)),
+    }
+}
+
+/// Computed paint styles by DOM node, memoised: a run names the element whose
+/// `color` paints it, and many runs share one element.
+struct Styles<'a> {
+    of: &'a dyn Fn(NodeId) -> Option<PaintStyle>,
+    memo: std::cell::RefCell<std::collections::BTreeMap<NodeId, Option<PaintStyle>>>,
+}
+
+impl<'a> Styles<'a> {
+    fn new(of: &'a dyn Fn(NodeId) -> Option<PaintStyle>) -> Self {
+        Self {
+            of,
+            memo: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        }
+    }
+
+    fn get(&self, node: NodeId) -> Option<PaintStyle> {
+        *self
+            .memo
+            .borrow_mut()
+            .entry(node)
+            .or_insert_with(|| (self.of)(node))
+    }
+}
+
+fn add(a: Au, b: Au) -> Au {
+    Au(a.0.saturating_add(b.0))
+}
+
+/// Emit one [`Item::GlyphRun`] per text run of a line fragment.
+///
+/// A glyph's pen position is the line fragment's origin plus the run's
+/// `inline_offset` plus the glyph's `x` (horizontal), and the line's origin plus
+/// the run's `baseline` plus the glyph's `y` (vertical, downward from the
+/// baseline). Layout hands glyphs over in visual order, left to right, so a
+/// right-to-left run needs no special handling here. The colour and visibility
+/// are those of the run's `node`; a run without a styled node takes what the line
+/// inherits.
+fn emit_line(
+    list: &mut DisplayList,
+    tree: &FragmentTree,
+    facts: &Facts,
+    line: FragmentId,
+    styles: &Styles<'_>,
+) {
+    let Some(fragment) = tree.get(line) else {
+        return;
+    };
+    let inherited = facts.inherited[line.index()];
+    let mut glyphs = Vec::new();
+    for run in tree.text_runs(line) {
+        let (rgba, visible) = match run.node.and_then(|n| styles.get(n)) {
+            Some(s) => (s.color, s.visible),
+            None => (inherited.color, inherited.visible),
+        };
+        if !visible || rgba[3] == 0 {
+            continue;
+        }
+        let origin_x = add(fragment.inline_offset, run.inline_offset);
+        let origin_y = add(fragment.block_offset, run.baseline);
+        glyphs.clear();
+        glyphs.extend(tree.glyphs(run).iter().map(|g| PositionedGlyph {
+            glyph_id: g.glyph_id,
+            x: add(origin_x, g.x),
+            y: add(origin_y, g.y),
+        }));
+        if glyphs.is_empty() {
+            continue;
+        }
+        // A run beyond the list's bounds is dropped, not truncated.
+        let _ = list.push_glyph_run(FontId(run.font.0), run.font_size, color(rgba), &glyphs);
     }
 }

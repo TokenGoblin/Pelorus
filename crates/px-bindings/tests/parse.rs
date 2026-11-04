@@ -15,14 +15,71 @@ macro_rules! fail {
 
 fn piece(rng: &mut Rng) -> &'static str {
     const PIECES: &[&str] = &[
-        "interface", "partial", "mixin", "namespace", "dictionary", "enum", "typedef",
-        "callback", "includes", "const", "attribute", "readonly", "static", "getter",
-        "setter", "stringifier", "iterable", "maplike", "setlike", "async_iterable",
-        "constructor", "optional", "required", "long", "unsigned", "DOMString",
-        "sequence", "record", "Promise", "any", "or", "null", "true", "Infinity",
-        "Foo", "x", "_y", "{", "}", "(", ")", "[", "]", "<", ">", ";", ",", ":", "=",
-        "?", "...", "*", "\"s\"", "\"", "/*", "*/", "//", "\n", " ", "0", "1.5", "-",
-        "0x", "\u{e9}", "\0",
+        "interface",
+        "partial",
+        "mixin",
+        "namespace",
+        "dictionary",
+        "enum",
+        "typedef",
+        "callback",
+        "includes",
+        "const",
+        "attribute",
+        "readonly",
+        "static",
+        "getter",
+        "setter",
+        "stringifier",
+        "iterable",
+        "maplike",
+        "setlike",
+        "async_iterable",
+        "constructor",
+        "optional",
+        "required",
+        "long",
+        "unsigned",
+        "DOMString",
+        "sequence",
+        "record",
+        "Promise",
+        "any",
+        "or",
+        "null",
+        "true",
+        "Infinity",
+        "Foo",
+        "x",
+        "_y",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        "<",
+        ">",
+        ";",
+        ",",
+        ":",
+        "=",
+        "?",
+        "...",
+        "*",
+        "\"s\"",
+        "\"",
+        "/*",
+        "*/",
+        "//",
+        "\n",
+        " ",
+        "0",
+        "1.5",
+        "-",
+        "0x",
+        "\u{e9}",
+        "\0",
     ];
     let i = usize::try_from(rng.next() % PIECES.len() as u64).unwrap_or(0);
     PIECES.get(i).copied().unwrap_or("")
@@ -53,7 +110,12 @@ fn iface(src: &str) -> Container {
 }
 
 fn first_member(src: &str) -> MemberKind {
-    iface(src).members.into_iter().next().unwrap_or_else(|| fail!("no member")).kind
+    iface(src)
+        .members
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| fail!("no member"))
+        .kind
 }
 
 fn ty_of_attr(src: &str) -> Type {
@@ -81,7 +143,9 @@ fn simple_interface_with_inheritance() {
 
 #[test]
 fn partial_interface_and_mixin_and_includes() {
-    let a = p("partial interface A { }; interface mixin M { }; partial interface mixin M { }; A includes M;");
+    let a = p(
+        "partial interface A { }; interface mixin M { }; partial interface mixin M { }; A includes M;",
+    );
     assert!(matches!(&a.definitions[0].kind, DefinitionKind::Interface(c) if c.partial));
     assert!(matches!(&a.definitions[1].kind, DefinitionKind::InterfaceMixin(c) if !c.partial));
     assert!(matches!(&a.definitions[2].kind, DefinitionKind::InterfaceMixin(c) if c.partial));
@@ -91,7 +155,9 @@ fn partial_interface_and_mixin_and_includes() {
 
 #[test]
 fn namespace_and_partial_namespace() {
-    let a = p("namespace N { readonly attribute long x; undefined f(); const long C = 1; }; partial namespace N { };");
+    let a = p(
+        "namespace N { readonly attribute long x; undefined f(); const long C = 1; }; partial namespace N { };",
+    );
     let DefinitionKind::Namespace(c) = &a.definitions[0].kind else {
         fail!()
     };
@@ -107,7 +173,9 @@ fn namespace_rejects_writable_attribute() {
 
 #[test]
 fn dictionary_members_required_default_inherit() {
-    let a = p("dictionary D : B { required long a; DOMString b = \"x\"; boolean c = true; sequence<long> d = []; E e = {}; double f = -Infinity; any g = null; };");
+    let a = p(
+        "dictionary D : B { required long a; DOMString b = \"x\"; boolean c = true; sequence<long> d = []; E e = {}; double f = -Infinity; any g = null; };",
+    );
     let DefinitionKind::Dictionary(d) = &a.definitions[0].kind else {
         fail!()
     };
@@ -144,7 +212,9 @@ fn enum_must_not_be_empty() {
 
 #[test]
 fn typedef_and_callback_and_callback_interface() {
-    let a = p("typedef (long or DOMString)? T; callback CB = undefined (long a, optional DOMString b = \"z\"); callback interface CI { const long X = 1; undefined handle(Event e); };");
+    let a = p(
+        "typedef (long or DOMString)? T; callback CB = undefined (long a, optional DOMString b = \"z\"); callback interface CI { const long X = 1; undefined handle(Event e); };",
+    );
     let DefinitionKind::Typedef(t) = &a.definitions[0].kind else {
         fail!()
     };
@@ -154,12 +224,16 @@ fn typedef_and_callback_and_callback_interface() {
     };
     assert_eq!(c.args.len(), 2);
     assert!(c.args[1].optional);
-    assert!(matches!(&a.definitions[2].kind, DefinitionKind::CallbackInterface(c) if c.members.len() == 2));
+    assert!(
+        matches!(&a.definitions[2].kind, DefinitionKind::CallbackInterface(c) if c.members.len() == 2)
+    );
 }
 
 #[test]
 fn const_members() {
-    let c = iface("interface I { const unsigned short A = 0x1F; const long B = -7; const double C = 1.5e3; const boolean D = false; const double E = NaN; const double F = Infinity; const octet G = 017; };");
+    let c = iface(
+        "interface I { const unsigned short A = 0x1F; const long B = -7; const double C = 1.5e3; const boolean D = false; const double E = NaN; const double F = Infinity; const octet G = 017; };",
+    );
     let vals: Vec<_> = c
         .members
         .iter()
@@ -184,7 +258,9 @@ fn const_members() {
 
 #[test]
 fn attributes_all_flavours() {
-    let c = iface("interface I { attribute long a; readonly attribute long b; inherit attribute long c; static attribute long d; static readonly attribute long e; stringifier attribute DOMString f; stringifier readonly attribute DOMString g; attribute long required; };");
+    let c = iface(
+        "interface I { attribute long a; readonly attribute long b; inherit attribute long c; static attribute long d; static readonly attribute long e; stringifier attribute DOMString f; stringifier readonly attribute DOMString g; attribute long required; };",
+    );
     let flags: Vec<_> = c
         .members
         .iter()
@@ -212,35 +288,94 @@ fn attributes_all_flavours() {
 
 #[test]
 fn operations_special_static_stringifier() {
-    let c = iface("interface I { constructor(); constructor(long a); undefined f(); static long g(); getter DOMString (unsigned long i); getter DOMString item(DOMString n); setter undefined (DOMString n, DOMString v); deleter undefined (DOMString n); stringifier; stringifier DOMString toS(); long includes(long x); };");
+    let c = iface(
+        "interface I { constructor(); constructor(long a); undefined f(); static long g(); getter DOMString (unsigned long i); getter DOMString item(DOMString n); setter undefined (DOMString n, DOMString v); deleter undefined (DOMString n); stringifier; stringifier DOMString toS(); long includes(long x); };",
+    );
     assert!(matches!(&c.members[0].kind, MemberKind::Constructor { args } if args.is_empty()));
     assert!(matches!(&c.members[1].kind, MemberKind::Constructor { args } if args.len() == 1));
-    assert!(matches!(&c.members[3].kind, MemberKind::Operation { is_static: true, name: Some(n), .. } if n == "g"));
-    assert!(matches!(&c.members[4].kind, MemberKind::Operation { special: Some(Special::Getter), name: None, .. }));
-    assert!(matches!(&c.members[5].kind, MemberKind::Operation { special: Some(Special::Getter), name: Some(n), .. } if n == "item"));
-    assert!(matches!(&c.members[6].kind, MemberKind::Operation { special: Some(Special::Setter), .. }));
-    assert!(matches!(&c.members[7].kind, MemberKind::Operation { special: Some(Special::Deleter), .. }));
+    assert!(
+        matches!(&c.members[3].kind, MemberKind::Operation { is_static: true, name: Some(n), .. } if n == "g")
+    );
+    assert!(matches!(
+        &c.members[4].kind,
+        MemberKind::Operation {
+            special: Some(Special::Getter),
+            name: None,
+            ..
+        }
+    ));
+    assert!(
+        matches!(&c.members[5].kind, MemberKind::Operation { special: Some(Special::Getter), name: Some(n), .. } if n == "item")
+    );
+    assert!(matches!(
+        &c.members[6].kind,
+        MemberKind::Operation {
+            special: Some(Special::Setter),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &c.members[7].kind,
+        MemberKind::Operation {
+            special: Some(Special::Deleter),
+            ..
+        }
+    ));
     assert!(matches!(&c.members[8].kind, MemberKind::Stringifier));
-    assert!(matches!(&c.members[9].kind, MemberKind::Operation { stringifier: true, .. }));
-    assert!(matches!(&c.members[10].kind, MemberKind::Operation { name: Some(n), .. } if n == "includes"));
+    assert!(matches!(
+        &c.members[9].kind,
+        MemberKind::Operation {
+            stringifier: true,
+            ..
+        }
+    ));
+    assert!(
+        matches!(&c.members[10].kind, MemberKind::Operation { name: Some(n), .. } if n == "includes")
+    );
 }
 
 #[test]
 fn iterable_maplike_setlike() {
-    let c = iface("interface I { iterable<long>; iterable<DOMString, long>; async_iterable<long>; async_iterable<DOMString, long>(optional long x); maplike<DOMString, long>; readonly maplike<DOMString, long>; setlike<long>; readonly setlike<long>; };");
+    let c = iface(
+        "interface I { iterable<long>; iterable<DOMString, long>; async_iterable<long>; async_iterable<DOMString, long>(optional long x); maplike<DOMString, long>; readonly maplike<DOMString, long>; setlike<long>; readonly setlike<long>; };",
+    );
     assert!(matches!(&c.members[0].kind, MemberKind::Iterable(d) if d.second.is_none()));
     assert!(matches!(&c.members[1].kind, MemberKind::Iterable(d) if d.second.is_some()));
-    assert!(matches!(&c.members[2].kind, MemberKind::AsyncIterable { args, .. } if args.is_empty()));
-    assert!(matches!(&c.members[3].kind, MemberKind::AsyncIterable { args, .. } if args.len() == 1));
-    assert!(matches!(&c.members[4].kind, MemberKind::Maplike { readonly: false, .. }));
-    assert!(matches!(&c.members[5].kind, MemberKind::Maplike { readonly: true, .. }));
-    assert!(matches!(&c.members[6].kind, MemberKind::Setlike { readonly: false, .. }));
-    assert!(matches!(&c.members[7].kind, MemberKind::Setlike { readonly: true, .. }));
+    assert!(
+        matches!(&c.members[2].kind, MemberKind::AsyncIterable { args, .. } if args.is_empty())
+    );
+    assert!(
+        matches!(&c.members[3].kind, MemberKind::AsyncIterable { args, .. } if args.len() == 1)
+    );
+    assert!(matches!(
+        &c.members[4].kind,
+        MemberKind::Maplike {
+            readonly: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &c.members[5].kind,
+        MemberKind::Maplike { readonly: true, .. }
+    ));
+    assert!(matches!(
+        &c.members[6].kind,
+        MemberKind::Setlike {
+            readonly: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &c.members[7].kind,
+        MemberKind::Setlike { readonly: true, .. }
+    ));
 }
 
 #[test]
 fn arguments_optional_variadic_default_keyword_names() {
-    let c = iface("interface I { undefined f(long a, optional long b, optional long c = 5, long... d, optional DOMString interface = \"x\", any async); };");
+    let c = iface(
+        "interface I { undefined f(long a, optional long b, optional long c = 5, long... d, optional DOMString interface = \"x\", any async); };",
+    );
     let MemberKind::Operation { args, .. } = &c.members[0].kind else {
         fail!()
     };
@@ -265,7 +400,9 @@ fn keyword_not_allowed_as_attribute_name() {
 fn underscore_escapes_keyword() {
     let c = iface("interface _interface { attribute long _attribute; };");
     assert_eq!(c.name, "interface");
-    assert!(matches!(&c.members[0].kind, MemberKind::Attribute { name, .. } if name == "attribute"));
+    assert!(
+        matches!(&c.members[0].kind, MemberKind::Attribute { name, .. } if name == "attribute")
+    );
 }
 
 #[test]
@@ -279,11 +416,30 @@ fn primitive_types() {
     assert_eq!(k("long"), TypeKind::Long { unsigned: false });
     assert_eq!(k("unsigned long"), TypeKind::Long { unsigned: true });
     assert_eq!(k("long long"), TypeKind::LongLong { unsigned: false });
-    assert_eq!(k("unsigned long long"), TypeKind::LongLong { unsigned: true });
-    assert_eq!(k("float"), TypeKind::Float { unrestricted: false });
-    assert_eq!(k("unrestricted float"), TypeKind::Float { unrestricted: true });
-    assert_eq!(k("double"), TypeKind::Double { unrestricted: false });
-    assert_eq!(k("unrestricted double"), TypeKind::Double { unrestricted: true });
+    assert_eq!(
+        k("unsigned long long"),
+        TypeKind::LongLong { unsigned: true }
+    );
+    assert_eq!(
+        k("float"),
+        TypeKind::Float {
+            unrestricted: false
+        }
+    );
+    assert_eq!(
+        k("unrestricted float"),
+        TypeKind::Float { unrestricted: true }
+    );
+    assert_eq!(
+        k("double"),
+        TypeKind::Double {
+            unrestricted: false
+        }
+    );
+    assert_eq!(
+        k("unrestricted double"),
+        TypeKind::Double { unrestricted: true }
+    );
     assert_eq!(k("bigint"), TypeKind::Bigint);
     assert_eq!(k("DOMString"), TypeKind::String(StringType::DOMString));
     assert_eq!(k("USVString"), TypeKind::String(StringType::USVString));
@@ -364,7 +520,9 @@ fn extended_attributes_on_types() {
     let t = ty_of_attr("[Clamp] long");
     assert_eq!(t.ext_attrs[0].name, "Clamp");
     let t = ty_of_attr("sequence<[EnforceRange] octet>");
-    let TypeKind::Sequence(i) = t.kind else { fail!() };
+    let TypeKind::Sequence(i) = t.kind else {
+        fail!()
+    };
     assert_eq!(i.ext_attrs[0].name, "EnforceRange");
     let t = ty_of_attr("([Clamp] long or DOMString)");
     let TypeKind::Union(m) = t.kind else { fail!() };
@@ -409,7 +567,15 @@ fn ext_attr_forms_all_five_and_extras() {
 fn ext_attr_multiple_and_whitespace() {
     let e = ext("[Exposed=Window, SecureContext,\n  LegacyUnforgeable, SameObject]");
     let names: Vec<_> = e.iter().map(|a| a.name.as_str()).collect();
-    assert_eq!(names, ["Exposed", "SecureContext", "LegacyUnforgeable", "SameObject"]);
+    assert_eq!(
+        names,
+        [
+            "Exposed",
+            "SecureContext",
+            "LegacyUnforgeable",
+            "SameObject"
+        ]
+    );
 }
 
 #[test]
@@ -443,7 +609,9 @@ fn ext_attr_errors() {
 
 #[test]
 fn ext_attrs_on_members_arguments_and_dictionary_members() {
-    let c = iface("[Exposed=Window] interface I { [SameObject] readonly attribute Foo f; undefined g([Clamp] long a); };");
+    let c = iface(
+        "[Exposed=Window] interface I { [SameObject] readonly attribute Foo f; undefined g([Clamp] long a); };",
+    );
     assert_eq!(c.members[0].ext_attrs[0].name, "SameObject");
     let MemberKind::Operation { args, .. } = &c.members[1].kind else {
         fail!()
@@ -459,7 +627,9 @@ fn ext_attrs_on_members_arguments_and_dictionary_members() {
 
 #[test]
 fn numbers_lexing_corner_cases() {
-    let c = iface("interface I { const double A = .5; const double B = 5.; const double C = 1E+2; const long D = 0; const long E = 0X1f; const double F = -0.0; };");
+    let c = iface(
+        "interface I { const double A = .5; const double B = 5.; const double C = 1E+2; const long D = 0; const long E = 0X1f; const double F = -0.0; };",
+    );
     let v: Vec<_> = c
         .members
         .iter()
@@ -553,14 +723,24 @@ fn deep_nesting_is_an_error_not_an_overflow() {
     let depth = 5000;
     let open = "sequence<".repeat(depth);
     let close = ">".repeat(depth);
-    let e = perr(&format!("interface I {{ attribute {open}long{close} x; }};"));
+    let e = perr(&format!(
+        "interface I {{ attribute {open}long{close} x; }};"
+    ));
     assert!(e.message.contains("nesting"), "{e}");
     let u = "(long or ".repeat(depth) + "DOMString" + &")".repeat(depth);
     assert!(perr(&format!("typedef {u} T;")).message.contains("nesting"));
     let br = "(".repeat(depth);
-    assert!(perr(&format!("[Foo={br}] interface I {{ }};")).message.contains("nesting"));
+    assert!(
+        perr(&format!("[Foo={br}] interface I {{ }};"))
+            .message
+            .contains("nesting")
+    );
     let br = "[".repeat(depth);
-    assert!(perr(&format!("[Foo {br}] interface I {{ }};")).message.contains("nesting"));
+    assert!(
+        perr(&format!("[Foo {br}] interface I {{ }};"))
+            .message
+            .contains("nesting")
+    );
     // At the limit it still parses.
     let n = (MAX_NESTING as usize) / 2 - 2;
     let ok = format!(

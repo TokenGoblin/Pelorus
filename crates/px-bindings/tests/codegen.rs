@@ -58,19 +58,53 @@ fn integer_modes_and_string_flavours() {
     assert_eq!(int(2), (8, false, IntMode::Wrap));
     assert_eq!(
         args[3].conv,
-        Conv::String { kind: StringType::DOMString, null_to_empty: true }
+        Conv::String {
+            kind: StringType::DOMString,
+            null_to_empty: true
+        }
     );
-    assert_eq!(args[4].conv, Conv::String { kind: StringType::USVString, null_to_empty: false });
-    assert_eq!(args[5].conv, Conv::String { kind: StringType::ByteString, null_to_empty: false });
-    assert_eq!(args[6].conv, Conv::Float { double: true, unrestricted: true });
-    assert_eq!(args[7].conv, Conv::Float { double: false, unrestricted: false });
+    assert_eq!(
+        args[4].conv,
+        Conv::String {
+            kind: StringType::USVString,
+            null_to_empty: false
+        }
+    );
+    assert_eq!(
+        args[5].conv,
+        Conv::String {
+            kind: StringType::ByteString,
+            null_to_empty: false
+        }
+    );
+    assert_eq!(
+        args[6].conv,
+        Conv::Float {
+            double: true,
+            unrestricted: true
+        }
+    );
+    assert_eq!(
+        args[7].conv,
+        Conv::Float {
+            double: false,
+            unrestricted: false
+        }
+    );
 }
 
 #[test]
 fn union_flattening_and_step_order() {
     let b = ir("interface Foo { }; dictionary D { }; callback CB = undefined ();
                 interface I { attribute (long or (DOMString or boolean) or Foo or sequence<long> or record<DOMString, long> or CB or ArrayBuffer)? u; };");
-    let Conv::Nullable(inner) = &b.interfaces.iter().find(|i| i.name == "I").expect("I").attributes[0].conv else {
+    let Conv::Nullable(inner) = &b
+        .interfaces
+        .iter()
+        .find(|i| i.name == "I")
+        .expect("I")
+        .attributes[0]
+        .conv
+    else {
         fail!()
     };
     let Conv::Union(u) = &**inner else { fail!() };
@@ -95,14 +129,26 @@ fn union_flattening_and_step_order() {
         .collect();
     assert_eq!(
         kinds,
-        ["nullish", "platform", "buffer", "callback", "sequence", "dictionary", "boolean", "numeric", "string"]
+        [
+            "nullish",
+            "platform",
+            "buffer",
+            "callback",
+            "sequence",
+            "dictionary",
+            "boolean",
+            "numeric",
+            "string"
+        ]
     );
 }
 
 #[test]
 fn dictionary_conversion_order_is_ancestors_first_then_lexicographic() {
-    let b = ir("dictionary A { long z; long b; }; dictionary B : A { long y; long a; };
-                dictionary C : B { long m; };");
+    let b = ir(
+        "dictionary A { long z; long b; }; dictionary B : A { long y; long a; };
+                dictionary C : B { long m; };",
+    );
     let c = b.dictionaries.iter().find(|d| d.name == "C").expect("C");
     let order: Vec<String> = c
         .conversion_order
@@ -121,14 +167,30 @@ fn defaults_lower_to_typed_values() {
                 dictionary D { long x = 3; double y = 2; unrestricted double z = -Infinity; E e = \"b\";
                   sequence<long> s = []; DOMString? n = null; (long or DOMString) u = \"hi\"; any a = undefined; };");
     let d = &b.dictionaries[0];
-    let get = |n: &str| d.members.iter().find(|m| m.name == n).expect("member").default.clone();
+    let get = |n: &str| {
+        d.members
+            .iter()
+            .find(|m| m.name == n)
+            .expect("member")
+            .default
+            .clone()
+    };
     assert_eq!(get("x"), Some(IrDefault::Int(3)));
     assert_eq!(get("y"), Some(IrDefault::Float(2.0)));
     assert_eq!(get("z"), Some(IrDefault::NegInfinity));
-    assert_eq!(get("e"), Some(IrDefault::EnumValue { enum_name: "E".into(), value: "b".into() }));
+    assert_eq!(
+        get("e"),
+        Some(IrDefault::EnumValue {
+            enum_name: "E".into(),
+            value: "b".into()
+        })
+    );
     assert_eq!(get("s"), Some(IrDefault::EmptySequence));
     assert_eq!(get("n"), Some(IrDefault::Null));
-    assert!(matches!(get("u"), Some(IrDefault::UnionMember { index: 1, .. })));
+    assert!(matches!(
+        get("u"),
+        Some(IrDefault::UnionMember { index: 1, .. })
+    ));
     assert_eq!(get("a"), Some(IrDefault::Undefined));
 }
 
@@ -137,9 +199,15 @@ fn bad_defaults_are_lowering_errors() {
     for (idl, needle) in [
         ("dictionary D { long x = \"a\"; };", "does not fit"),
         ("dictionary D { long x = 3000000000; };", "out of range"),
-        ("enum E { \"a\" }; dictionary D { E e = \"zz\"; };", "not a value of enum"),
+        (
+            "enum E { \"a\" }; dictionary D { E e = \"zz\"; };",
+            "not a value of enum",
+        ),
         ("dictionary D { long x = null; };", "`null` is not a value"),
-        ("dictionary R { required long r; }; dictionary D { R x = {}; };", "required members"),
+        (
+            "dictionary R { required long r; }; dictionary D { R x = {}; };",
+            "required members",
+        ),
         ("dictionary D { boolean b = 1; };", "does not fit"),
     ] {
         let m = Model::from_sources(&[("t.idl".into(), idl.into())], BuildOptions::default())
@@ -248,7 +316,10 @@ typedef sequence<(Base or long)> Bag;
     // Callback interfaces get a marker but no host trait; read-only collections
     // have no mutators.
     assert!(!text.contains("trait ListenerHost"));
-    assert!(!text.contains("fn rmaps_clear") && !text.contains("fn maplike_clear(&mut self, this: rt::Handle<RMaps>"));
+    assert!(
+        !text.contains("fn rmaps_clear")
+            && !text.contains("fn maplike_clear(&mut self, this: rt::Handle<RMaps>")
+    );
 }
 
 #[test]
@@ -293,8 +364,16 @@ fn generated_enum_round_trips_at_runtime() {
         .arg(&src)
         .output()
         .expect("rustc");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let run = std::process::Command::new(&exe).output().expect("run");
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
 }

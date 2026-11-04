@@ -113,3 +113,15 @@ reference = "tests/wpt/css-grid/alignment/grid-justify-content-space-between-001
 id = "wpt-grid-grid-container-scrollbars-sizing-001"
 source = "tests/wpt/css-grid/grid-model/grid-container-scrollbars-sizing-001.html"
 reference = "tests/wpt/css-grid/reference/grid-container-scrollbars-sizing-001-ref.html"
+
+[[page]]
+id = "text-rtl"
+source = "tests/render/pages/text-rtl.html"
+
+[[page]]
+id = "text-center-wrap"
+source = "tests/render/pages/text-center-wrap.html"
+
+[[page]]
+id = "text-mixed-direction"
+source = "tests/render/pages/text-mixed-direction.html"

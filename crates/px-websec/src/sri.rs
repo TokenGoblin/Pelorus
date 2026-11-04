@@ -265,7 +265,10 @@ mod tests {
 
     #[test]
     fn parse_accepts_and_ignores() {
-        let m = parse(&format!("sha256-{S256} sha384-{S384}?opt=1 md5-AAAA bogus sha512-short")).unwrap();
+        let m = parse(&format!(
+            "sha256-{S256} sha384-{S384}?opt=1 md5-AAAA bogus sha512-short"
+        ))
+        .unwrap();
         assert_eq!(m.hashes.len(), 2);
         assert_eq!(m.strongest(), Some(Algorithm::Sha384));
         assert!(parse("").unwrap().hashes.is_empty());
@@ -274,12 +277,21 @@ mod tests {
         assert!(parse(&format!("SHA256-{S256}")).unwrap().is_enforced());
         assert!(!parse(&format!("sha256-{S384}")).unwrap().is_enforced());
         // Whitespace variety.
-        assert_eq!(parse(&format!("\tsha256-{S256}\n\nsha256-{S256}  ")).unwrap().hashes.len(), 2);
+        assert_eq!(
+            parse(&format!("\tsha256-{S256}\n\nsha256-{S256}  "))
+                .unwrap()
+                .hashes
+                .len(),
+            2
+        );
     }
 
     #[test]
     fn parse_is_bounded_and_fails_closed() {
-        assert_eq!(parse(&"a".repeat(MAX_INTEGRITY_BYTES + 1)), Err(SriError::TooLarge));
+        assert_eq!(
+            parse(&"a".repeat(MAX_INTEGRITY_BYTES + 1)),
+            Err(SriError::TooLarge)
+        );
         let many = vec!["x"; MAX_TOKENS + 1].join(" ");
         assert_eq!(parse(&many), Err(SriError::TooLarge));
         let ok = vec!["x"; MAX_TOKENS].join(" ");
@@ -313,7 +325,10 @@ mod tests {
     #[test]
     fn opaque_responses_are_ineligible() {
         let m = parse(&format!("sha256-{S256}")).unwrap();
-        assert_eq!(verify(&m, Tainting::Opaque, b"abc"), Err(SriError::NotEligible));
+        assert_eq!(
+            verify(&m, Tainting::Opaque, b"abc"),
+            Err(SriError::NotEligible)
+        );
         // Without enforced metadata, nothing to validate.
         assert_eq!(verify(&Metadata::default(), Tainting::Opaque, b"x"), Ok(()));
         assert!(!eligible(Tainting::Opaque));
@@ -326,7 +341,10 @@ mod tests {
         let fake = |_: Algorithm, _: &[u8]| Algorithm::Sha256.digest(b"abc");
         assert_eq!(verify_with(&m, Tainting::Basic, b"anything", &fake), Ok(()));
         let broken = |_: Algorithm, _: &[u8]| Vec::new();
-        assert_eq!(verify_with(&m, Tainting::Basic, b"abc", &broken), Err(SriError::Mismatch));
+        assert_eq!(
+            verify_with(&m, Tainting::Basic, b"abc", &broken),
+            Err(SriError::Mismatch)
+        );
     }
 
     #[test]
