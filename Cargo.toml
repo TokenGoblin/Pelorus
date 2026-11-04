@@ -41,7 +41,7 @@ publish = false
 # by a process an attacker may fully control. The broker unwinds and is allowed
 # to; the crates that parse hostile input are not.
 #
-# ci/gate-unsafe-headers.sh scans this same set for per-site allow() waivers.
+# `cargo xtask unsafe-headers` scans this same set for per-site allow() waivers.
 # Adding a crate here means adding it there.
 [workspace.lints.clippy]
 unwrap_used = "deny"
@@ -56,7 +56,7 @@ lto = "fat"
 codegen-units = 1
 # Path remapping for invariant 7 is NOT here: Cargo's `trim-paths` profile
 # option is still unstable as of 1.98, and this project does not build on
-# nightly. ci/build-and-hash.sh sets --remap-path-prefix instead, which is
+# nightly. `cargo xtask build-and-hash` sets --remap-path-prefix instead, which is
 # stable and which knows the actual source and CARGO_HOME paths it must map.
 # Move it here the release Cargo stabilises the option.
 # Not stripped: cargo-auditable's SBOM lives in a section that stripping can

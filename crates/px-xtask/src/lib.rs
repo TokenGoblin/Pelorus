@@ -18,7 +18,9 @@ pub mod git;
 pub mod glob;
 pub mod json;
 pub mod proc;
+pub mod pybuild;
 pub mod sha256;
+pub mod tar;
 
 #[cfg(test)]
 pub mod testutil;

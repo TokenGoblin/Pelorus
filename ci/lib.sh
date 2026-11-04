@@ -44,7 +44,7 @@ done
 #
 # The claim that *does* need closing is the reproducibility one, because that is
 # the check which would otherwise print two matching hashes from an unpinned
-# generator. ci/build-and-hash.sh refuses to build without the pin, explicitly.
+# generator. `cargo xtask build-and-hash` refuses to build without the pin, explicitly.
 #
 # The setup script's stderr is shown rather than discarded. The first version of
 # this block sent it to /dev/null, and when the reproducible job failed on both
@@ -53,10 +53,12 @@ done
 # `git archive` extract with no .git, where `git rev-parse` exits under `set -e`.
 # A diagnostic nobody can see costs more than the noise it saves.
 PYTHON3="${PYTHON3:-}"
-if [ -f build-python/requirements.txt ] && [ -x ci/setup-build-python.sh ]; then
+if [ -f build-python/requirements.txt ] && [ -f crates/px-xtask/Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
     _python_log="$(mktemp)"
-    if _pinned_python="$(ci/setup-build-python.sh 2>"$_python_log")"; then
-        PYTHON3="$REPO_ROOT/$_pinned_python"
+    # `cargo xtask setup-build-python` (ported from ci/setup-build-python.sh)
+    # prints the absolute interpreter path alone on stdout.
+    if _pinned_python="$(cargo xtask setup-build-python 2>"$_python_log")"; then
+        PYTHON3="$_pinned_python"
     else
         printf '  note: the pinned Python environment could not be built, so a
 ' >&2

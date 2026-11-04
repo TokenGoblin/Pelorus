@@ -19,16 +19,15 @@
 //! dependency until Phase 3 brings the first one in. That is the right time
 //! to wire them and the wrong time to read a pass as assurance.
 //!
-//! The census itself is still `ci/unsafe-audit.sh` (a separate port); this
-//! gate runs it and reads its JSON on stdout.
+//! The unsafe census and its baseline comparison are the `unsafe-audit` gate
+//! (`ci/unsafe-baseline.json`; `cargo xtask unsafe-audit --write` regenerates
+//! it). This gate runs it as a child process, as the script ran
+//! `cargo xtask unsafe-audit`, so its own `FAIL` lines and verdict print
+//! unchanged and one more failure is counted here.
 
 use crate::Gate;
-use crate::json::{self, Value};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-
-const BASELINE: &str = "ci/unsafe-baseline.json";
+use std::process::Command;
 
 /// Into a separate target directory, always. Cargo will not re-link a binary
 /// that is already up to date, so if a plain `cargo build` ran first the
@@ -72,62 +71,6 @@ pub fn locate_binary(dir: &Path, stem: &str) -> Option<PathBuf> {
         .iter()
         .map(|n| dir.join(n))
         .find(|p| p.is_file())
-}
-
-pub type Census = BTreeMap<String, u64>;
-
-/// Parse the flat `{ "crate-version": count }` object the census emits.
-pub fn parse_census(text: &str) -> Result<Census, String> {
-    let Value::Object(pairs) = json::parse(text)? else {
-        return Err("not a JSON object".into());
-    };
-    let mut m = Census::new();
-    for (k, v) in pairs {
-        let Value::Num(n) = v else {
-            return Err(format!("`{k}` is not a number"));
-        };
-        let n: u64 = n.parse().map_err(|_| format!("`{k}`: bad count `{n}`"))?;
-        m.insert(k, n);
-    }
-    Ok(m)
-}
-
-/// The outcome of comparing the current census with the baseline.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Comparison {
-    /// Lines printed as `FAIL ...`; any entry fails the check.
-    pub failures: Vec<String>,
-    /// Lines printed as `note ...`; movement downwards, never fatal.
-    pub notes: Vec<String>,
-}
-
-/// Any increase fails and needs an ADR; a decrease only asks for the baseline
-/// to be regenerated.
-pub fn compare(base: &Census, cur: &Census) -> Comparison {
-    let mut c = Comparison::default();
-    for (krate, n) in cur {
-        match base.get(krate) {
-            None => c
-                .failures
-                .push(format!("new crate with unsafe: {krate} ({n})")),
-            Some(was) if n > was => c
-                .failures
-                .push(format!("{krate} unsafe count {was} -> {n}")),
-            Some(_) => {}
-        }
-    }
-    for (krate, n) in base {
-        match cur.get(krate) {
-            None => c.notes.push(format!(
-                "baseline crate no longer present: {krate} ({n}) \u{2014} regenerate the baseline"
-            )),
-            Some(now) if now < n => c.notes.push(format!(
-                "{krate} unsafe count fell {n} -> {now} \u{2014} regenerate the baseline"
-            )),
-            Some(_) => {}
-        }
-    }
-    c
 }
 
 // ---------------------------------------------------------------------------
@@ -198,53 +141,20 @@ pub fn check_binaries(g: &mut Gate, release: &Path) {
     }
 }
 
+/// `cargo xtask unsafe-audit || fail "dependency-tree unsafe count increased"`.
 fn unsafe_step(g: &mut Gate, root: &Path) {
-    let baseline_path = root.join(BASELINE);
-    if !baseline_path.is_file() {
-        g.fail(format!(
-            "{BASELINE} is missing \u{2014} there is no committed unsafe baseline to compare against"
-        ));
-        return;
-    }
-    g.info(format!("unsafe audit against {BASELINE}"));
-    let out = Command::new("bash")
-        .arg("ci/unsafe-audit.sh")
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .output();
-    let current = match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-        _ => {
-            g.fail("unsafe audit could not run");
-            return;
-        }
-    };
-    let parsed = std::fs::read_to_string(&baseline_path)
-        .map_err(|e| format!("cannot read {BASELINE}: {e}"))
-        .and_then(|t| parse_census(&t).map_err(|e| format!("{BASELINE}: {e}")))
-        .and_then(|b| {
-            parse_census(&current)
-                .map_err(|e| format!("census output: {e}"))
-                .map(|c| (b, c))
-        });
-    match parsed {
-        Ok((base, cur)) => {
-            let cmp = compare(&base, &cur);
-            for f in &cmp.failures {
-                eprintln!("FAIL {f}");
-            }
-            for n in &cmp.notes {
-                eprintln!("note {n}");
-            }
-            if !cmp.failures.is_empty() {
-                g.fail("dependency-tree unsafe count increased");
-            }
-        }
-        Err(e) => {
-            g.detail(e);
-            g.fail("dependency-tree unsafe count increased");
-        }
+    let ok = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            Command::new(exe)
+                .arg("unsafe-audit")
+                .current_dir(root)
+                .status()
+                .ok()
+        })
+        .is_some_and(|s| s.success());
+    if !ok {
+        g.fail("dependency-tree unsafe count increased");
     }
 }
 
@@ -278,10 +188,6 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
 mod tests {
     use super::*;
     use crate::testutil::Fixture;
-
-    fn census(pairs: &[(&str, u64)]) -> Census {
-        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
-    }
 
     #[test]
     fn sbom_marker_detection() {
@@ -321,62 +227,6 @@ mod tests {
         assert!(find_in_path("cargo-deny", &dirs).is_some());
         assert!(find_in_path("cargo-auditable", &dirs).is_none());
         assert!(find_in_path("cargo-vet", &[]).is_none());
-    }
-
-    #[test]
-    fn unsafe_comparison() {
-        let base = census(&[("a-1", 10), ("b-1", 5), ("gone-1", 3), ("same-1", 7)]);
-        let cur = census(&[("a-1", 12), ("b-1", 4), ("new-1", 1), ("same-1", 7)]);
-        let c = compare(&base, &cur);
-        assert_eq!(
-            c.failures,
-            [
-                "a-1 unsafe count 10 -> 12",
-                "new crate with unsafe: new-1 (1)"
-            ]
-        );
-        assert_eq!(
-            c.notes,
-            [
-                "b-1 unsafe count fell 5 -> 4 \u{2014} regenerate the baseline",
-                "baseline crate no longer present: gone-1 (3) \u{2014} regenerate the baseline"
-            ]
-        );
-        // Equal and shrinking-only censuses do not fail.
-        assert!(compare(&base, &base).failures.is_empty());
-        assert!(compare(&base, &census(&[])).failures.is_empty());
-        // Nothing to compare is not a failure either (Phase 0 workspace).
-        assert_eq!(compare(&census(&[]), &census(&[])), Comparison::default());
-    }
-
-    #[test]
-    fn census_parsing() {
-        let c = parse_census("{\n  \"a-1.0.0\": 3,\n  \"b-2\": 40\n}\n").unwrap();
-        assert_eq!(c, census(&[("a-1.0.0", 3), ("b-2", 40)]));
-        assert_eq!(parse_census("{}\n").unwrap(), census(&[]));
-        assert!(parse_census("[]").is_err());
-        assert!(parse_census("{\"a\": \"x\"}").is_err());
-        assert!(parse_census("{\"a\": -1}").is_err());
-        assert!(parse_census("").is_err());
-    }
-
-    #[test]
-    fn committed_baseline_parses() {
-        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ci/unsafe-baseline.json");
-        if let Ok(t) = std::fs::read_to_string(p) {
-            let c = parse_census(&t).unwrap();
-            assert!(!c.is_empty());
-            assert!(compare(&c, &c).failures.is_empty());
-        }
-    }
-
-    #[test]
-    fn missing_baseline_fails_closed() {
-        let f = Fixture::new("sc-nobase");
-        let mut g = Gate::new("t");
-        unsafe_step(&mut g, f.path());
-        assert_eq!(g.fail_count(), 1);
-        assert!(g.failures()[0].contains("is missing"));
     }
 
     #[test]

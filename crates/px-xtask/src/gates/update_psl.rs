@@ -175,10 +175,10 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         return;
     }
 
-    let new_sha = sha256::hex(&list);
+    let new_sha = sha256::hex_of(&list);
     let list_path = root.join(LIST);
     let old_sha = std::fs::read(&list_path)
-        .map(|b| sha256::hex(&b))
+        .map(|b| sha256::hex_of(&b))
         .unwrap_or_default();
 
     match decide(opts.check, &new_sha, &old_sha) {
@@ -291,7 +291,7 @@ mod tests {
         let mut g = Gate::new("t");
         run(&mut g, f.path(), &a(&[]));
         assert!(g.passed());
-        let sha = sha256::hex(fake_list(6000).as_bytes());
+        let sha = sha256::hex_of(fake_list(6000).as_bytes());
         let ver = std::fs::read_to_string(f.path().join(VERSION)).unwrap();
         assert!(ver.contains(&format!("sha256 = \"{sha}\"")));
         assert_eq!(

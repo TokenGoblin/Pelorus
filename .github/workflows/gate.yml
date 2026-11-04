@@ -42,7 +42,7 @@ jobs:
         run: rustc --version && cargo --version
       - name: Gate check 1
         shell: bash
-        run: ci/gate-build.sh
+        run: cargo xtask build
 
   reproducible:
     name: reproducible (${{ matrix.os }})
@@ -53,6 +53,15 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+
+      # The gate tool is built once, here, under the runner's own HOME and
+      # CARGO_HOME, and the builds below run the binary directly. `cargo xtask`
+      # would have to compile it again under each moved HOME (and, for build B,
+      # as a second user); the tool is not part of what is being hashed, and
+      # the scratch builds below never see this target directory.
+      - name: Build gate tool
+        shell: bash
+        run: cargo build --locked -p px-xtask
 
       # Build A and build B differ in checkout path, HOME and CARGO_HOME. On
       # Linux they additionally run as different users, which is the condition
@@ -74,7 +83,7 @@ jobs:
           export HOME="$TMP/home-a"
           export CARGO_HOME="$HOME/.cargo"
           mkdir -p "$CARGO_HOME"
-          ci/build-and-hash.sh "$TMP/short" > "$TMP/a.txt"
+          target/debug/px-xtask build-and-hash "$TMP/short" > "$TMP/a.txt"
           cat "$TMP/a.txt"
 
       - name: Build B (different user)
@@ -93,7 +102,7 @@ jobs:
             CARGO_HOME=/home/builder2/.cargo \
             RUSTUP_HOME="$RUSTUP_HOME" \
             PATH="$PATH" \
-            bash -c 'cd /home/builder2/work/a-considerably-longer-path && ci/build-and-hash.sh /home/builder2/work/build-b' \
+            bash -c 'cd /home/builder2/work/a-considerably-longer-path && target/debug/px-xtask build-and-hash /home/builder2/work/build-b' \
             > "$RUNNER_TEMP/b.txt"
           cat "$RUNNER_TEMP/b.txt"
 
@@ -106,14 +115,14 @@ jobs:
           export HOME="$TMP/home-b-with-a-longer-name"
           export CARGO_HOME="$HOME/.cargo"
           mkdir -p "$CARGO_HOME"
-          ci/build-and-hash.sh "$TMP/a/considerably/deeper/path" > "$TMP/b.txt"
+          target/debug/px-xtask build-and-hash "$TMP/a/considerably/deeper/path" > "$TMP/b.txt"
           cat "$TMP/b.txt"
 
       - name: Gate check 2
         shell: bash
         run: |
           TMP="$(cygpath -u "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")"
-          ci/compare-hashes.sh "$TMP/a.txt" "$TMP/b.txt"
+          cargo xtask compare-hashes "$TMP/a.txt" "$TMP/b.txt"
 
   supply-chain:
     name: supply-chain (${{ matrix.os }})
@@ -141,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Gate check 4
-        run: ci/gate-unsafe-headers.sh
+        run: cargo xtask unsafe-headers
 
   brand-leak:
     name: brand-leak
@@ -379,7 +388,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Forty-site compat list
-        run: ci/gate-compat-list.sh
+        run: cargo xtask compat-list
 
   structure:
     name: structure

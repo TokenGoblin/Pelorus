@@ -171,7 +171,7 @@ pub fn archive(index: usize) -> Value {
                             ("path", Value::str(path.clone())),
                             ("shape", Value::str(shape)),
                             ("framing", Value::str(framing)),
-                            ("body_sha256", Value::str(sha256::hex(&body))),
+                            ("body_sha256", Value::str(sha256::hex_of(&body))),
                         ]),
                     ),
                 ])]),

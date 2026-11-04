@@ -57,7 +57,7 @@
   "rayon-core-1.13.0": 89,
   "redox_syscall-0.5.18": 178,
   "ring-0.17.14": 230,
-  "rustls-0.23.44": 5,
+  "rustls-0.23.46": 5,
   "rustls-pki-types-1.15.1": 1,
   "rustversion-1.0.23": 3,
   "same-file-1.0.6": 3,

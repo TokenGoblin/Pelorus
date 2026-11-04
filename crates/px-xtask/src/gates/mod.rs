@@ -2,14 +2,24 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod build;
+pub mod build_and_hash;
+pub mod check_build_python_pin;
+pub mod compare_hashes;
+pub mod compat_list;
+pub mod count_lines;
 pub mod flex_grid;
 pub mod fuzz_smoke;
 pub mod layout;
 pub mod make_fetch_corpus;
 pub mod miri;
+pub mod not_serializable;
 pub mod sanitizers;
+pub mod setup_build_python;
 pub mod structure;
 pub mod supply_chain;
+pub mod unsafe_audit;
+pub mod unsafe_headers;
 pub mod update_hsts;
 pub mod update_psl;
 pub mod vendor_wpt;
@@ -40,6 +50,36 @@ pub static GATES: &[GateSpec] = &[
         run: brand_leak::run,
     },
     GateSpec {
+        name: "build",
+        about: "Phase 0: release build, clippy -D warnings and fmt --check, all --locked",
+        run: build::run,
+    },
+    GateSpec {
+        name: "build-and-hash",
+        about: "TOOL: reproducible build in a scratch dir; prints the SHA-256 manifest of the release binaries (invariant 7)",
+        run: build_and_hash::run,
+    },
+    GateSpec {
+        name: "check-build-python-pin",
+        about: "TOOL: a Python env holds exactly the pins in build-python/requirements.txt (ADR 023)",
+        run: check_build_python_pin::run,
+    },
+    GateSpec {
+        name: "compare-hashes",
+        about: "reproducible builds: two hash manifests (from build-and-hash) must be identical (invariant 7)",
+        run: compare_hashes::run,
+    },
+    GateSpec {
+        name: "compat-list",
+        about: "the forty-site compat list: forty entries, each with assertions, no urls (build-spec §8)",
+        run: compat_list::run,
+    },
+    GateSpec {
+        name: "count-lines",
+        about: "TOOL: regenerate the README size section (--check: fail if stale)",
+        run: count_lines::run,
+    },
+    GateSpec {
         name: "flex-grid",
         about: "Phase 7: flexbox/grid reftest and crashtest suites, corpus floors, grid-lanes excluded",
         run: flex_grid::run,
@@ -65,9 +105,19 @@ pub static GATES: &[GateSpec] = &[
         run: miri::run,
     },
     GateSpec {
+        name: "not-serializable",
+        about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
+        run: not_serializable::run,
+    },
+    GateSpec {
         name: "sanitizers",
         about: "ASAN (+ TSAN on Linux) over px-sandbox and px-broker; --self-check proves ASAN can still fail (ADR 011)",
         run: sanitizers::run,
+    },
+    GateSpec {
+        name: "setup-build-python",
+        about: "TOOL: build the pinned Python venv stylo's build.rs needs; prints the interpreter path (ADR 023)",
+        run: setup_build_python::run,
     },
     GateSpec {
         name: "structure",
@@ -78,6 +128,16 @@ pub static GATES: &[GateSpec] = &[
         name: "supply-chain",
         about: "cargo-deny, cargo-vet, cargo-auditable SBOM, and the unsafe baseline (build-spec §5, §4.5)",
         run: supply_chain::run,
+    },
+    GateSpec {
+        name: "unsafe-audit",
+        about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
+        run: unsafe_audit::run,
+    },
+    GateSpec {
+        name: "unsafe-headers",
+        about: "gate check 4: per-crate unsafe header rules, local waiver scans, px-css zero-unsafe counts",
+        run: unsafe_headers::run,
     },
     GateSpec {
         name: "update-hsts",
