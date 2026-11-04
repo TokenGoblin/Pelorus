@@ -14,7 +14,7 @@ cargo fuzz run frame_request -- -max_total_time=60
 
 The nightly in `rust-toolchain.toml` applies only inside this directory. If
 `rustup show active-toolchain` reports nightly at the repository root, the
-fence has leaked and `ci/gate-fuzz-smoke.sh` fails.
+fence has leaked and `cargo xtask fuzz-smoke` fails.
 
 ## Two cadences
 

@@ -1,7 +1,7 @@
 # ADR 006: cargo-fuzz needs -Z sanitizer and libFuzzer, both nightly-only.
 #
 # This override is scoped to fuzz/ by rustup's directory rules. Nothing outside
-# this directory sees it, ci/gate-fuzz-smoke.sh asserts the repository root
+# this directory sees it, `cargo xtask fuzz-smoke` asserts the repository root
 # still resolves to the stable pin, and nothing built here ever ships — so
 # invariant 7's "same source + same toolchain" is unaffected by construction.
 #

@@ -2,7 +2,7 @@
 #
 # Phase 1 gate (build-spec §9).
 #
-#   IPC deserializers fuzz clean for 24h        -> ci/gate-fuzz-smoke.sh
+#   IPC deserializers fuzz clean for 24h        -> cargo xtask fuzz-smoke
 #                                                  + the scheduled campaign
 #   broker rejects any message asserting        -> here
 #     its own identity

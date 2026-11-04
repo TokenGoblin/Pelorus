@@ -3,6 +3,7 @@
 pub mod all_rust;
 pub mod brand_leak;
 pub mod flex_grid;
+pub mod fuzz_smoke;
 pub mod layout;
 pub mod make_fetch_corpus;
 pub mod miri;
@@ -41,6 +42,11 @@ pub static GATES: &[GateSpec] = &[
         name: "flex-grid",
         about: "Phase 7: flexbox/grid reftest and crashtest suites, corpus floors, grid-lanes excluded",
         run: flex_grid::run,
+    },
+    GateSpec {
+        name: "fuzz-smoke",
+        about: "60 s of cargo-fuzz per target against the committed corpus; asserts the nightly fence (ADR 006)",
+        run: fuzz_smoke::run,
     },
     GateSpec {
         name: "layout",
