@@ -6,5 +6,21 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# Workspace path only: the tree is computed from the DOM and nothing else.
+# Style and layout reach this crate as plain data through the `StyleSource`
+# and `BoundsSource` traits, so the crate does not compile the style engine.
+# No third-party crate is added and none may be without an ADR; the wire
+# encoding of `A11yUpdate` belongs to px-ipc, not here.
+px-dom = { path = "../px-dom", version = "0.0.0" }
+
+[dev-dependencies]
+# Tests only: the end-to-end test parses, styles and lays out a real page and
+# feeds the results through the traits above. Workspace crates, no new
+# third-party crate.
+px-css = { path = "../px-css", version = "0.0.0" }
+px-layout = { path = "../px-layout", version = "0.0.0" }
+
+# The tree is built from hostile markup and handed to a more privileged
+# process, so it gets the same panic lints as the other hostile-input crates.
+[lints]
+workspace = true

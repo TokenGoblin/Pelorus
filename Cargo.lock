@@ -1353,6 +1353,11 @@ dependencies = [
 [[package]]
 name = "px-a11y"
 version = "0.0.0"
+dependencies = [
+ "px-css",
+ "px-dom",
+ "px-layout",
+]
 
 [[package]]
 name = "px-bindings"

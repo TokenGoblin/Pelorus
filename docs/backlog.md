@@ -1214,3 +1214,13 @@ follows.
   refusal, fail-at-every-step).
 - **Why deferred:** it needs a symbol-listing step over built artifacts and an allowlist
   per crate; that is gate work, not store work.
+
+## display: none is not reachable from px-css for the accessibility tree
+
+- **Found in:** phase 16 (px-a11y)
+- **Belongs to:** the unit that wires px-a11y to px-css and px-layout (with the UIA / AT-SPI bridges)
+- **What:** `px_css::paint::PaintStyle` carries `visible` (visibility) but not `display`, so a
+  style sheet's `display: none` cannot be passed to px-a11y as `StyleHints::display_none`.
+  `tests/layout.rs` in px-a11y has the reference adapter and shows the gap. The `hidden`
+  attribute, `aria-hidden` and the user-agent never-rendered elements already exclude nodes.
+- **Why deferred:** exposing `display` is a px-css change, outside the accessibility phase's crate.
