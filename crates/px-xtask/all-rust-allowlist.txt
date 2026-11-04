@@ -34,7 +34,6 @@ ci/count-lines.sh          # -> cargo xtask count-lines: line/unsafe counting
 ci/build-and-hash.sh       # -> cargo xtask build-and-hash: reproducible build + hashing (needs a SHA-256 by hand)
 ci/gate-fuzz-smoke.sh      # -> cargo xtask fuzz-smoke: runs cargo fuzz as a child
 ci/check_not_serializable.py # -> cargo xtask check-not-serializable, or a compile-fail test in px-ipc
-ci/update-hsts.sh          # -> cargo xtask update-hsts: HTTPS fetch + transform of the HSTS preload list
 
 # --- Hard: large, platform-sensitive, or tied to the named exception ---------
 ci/gate-dom.sh             # -> cargo xtask dom: 298 lines, many sub-checks
