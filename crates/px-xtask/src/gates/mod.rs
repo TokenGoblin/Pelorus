@@ -6,6 +6,7 @@ pub mod flex_grid;
 pub mod layout;
 pub mod make_fetch_corpus;
 pub mod structure;
+pub mod supply_chain;
 pub mod update_hsts;
 pub mod update_psl;
 pub mod vendor_wpt;
@@ -54,6 +55,11 @@ pub static GATES: &[GateSpec] = &[
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
+    },
+    GateSpec {
+        name: "supply-chain",
+        about: "cargo-deny, cargo-vet, cargo-auditable SBOM, and the unsafe baseline (build-spec §5, §4.5)",
+        run: supply_chain::run,
     },
     GateSpec {
         name: "update-hsts",

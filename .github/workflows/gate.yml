@@ -133,7 +133,7 @@ jobs:
         run: cargo install --locked cargo-deny cargo-vet cargo-auditable
       - name: Gate check 3
         shell: bash
-        run: ci/gate-supply-chain.sh
+        run: cargo xtask supply-chain
 
   unsafe-headers:
     name: unsafe-headers

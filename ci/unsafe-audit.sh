@@ -3,7 +3,7 @@
 # Unsafe-line accounting over the whole dependency tree (build-spec §4.5).
 #
 # Emits, on stdout, a stable JSON object mapping vendored crate name to a count
-# of `unsafe` tokens in its Rust sources. ci/gate-supply-chain.sh compares that
+# of `unsafe` tokens in its Rust sources. `cargo xtask supply-chain` compares that
 # against the committed baseline; any increase fails and needs an ADR.
 #
 # Why a script and not cargo-geiger: this is a security project, the count is a
