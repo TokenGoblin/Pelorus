@@ -28,6 +28,9 @@ px-text = { path = "../crates/px-text" }
 px-websec = { path = "../crates/px-websec" }
 # Phase 11: the WebIDL parser and generator sit in the build chain.
 px-bindings = { path = "../crates/px-bindings" }
+# Phase 20: the update manifest, signature file and Ed25519 verifier read
+# attacker-controlled bytes.
+px-update = { path = "../crates/px-update" }
 
 [[bin]]
 name = "frame_request"
@@ -137,6 +140,13 @@ bench = false
 [[bin]]
 name = "webidl_parse"
 path = "fuzz_targets/webidl_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "update_manifest"
+path = "fuzz_targets/update_manifest.rs"
 test = false
 doc = false
 bench = false

@@ -82,6 +82,9 @@ jobs:
           - { target: shaper, shard: 1 }
           # Phase 12: attacker-controlled CSP headers and <meta> content.
           - { target: csp_parse, shard: 1 }
+          # Phase 20: attacker-controlled update manifest, signature file,
+          # request audit and Ed25519 inputs.
+          - { target: update_manifest, shard: 1 }
           # Phase 11: arbitrary IDL text through parse, resolve, lower and emit.
           - { target: webidl_parse, shard: 1 }
           - { target: http_response, shard: 1 }
