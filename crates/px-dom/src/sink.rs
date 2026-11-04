@@ -420,7 +420,7 @@ impl TreeSink for Sink {
     /// `docs/research/stylo-requirements.md` says to avoid by doing this in
     /// Phase 4.
     ///
-    /// `ci/gate-dom.sh` checks the source for the shortcut, because this is a
+    /// `cargo xtask dom` checks the source for the shortcut, because this is a
     /// rule that erodes quietly: the direct version is correct in every
     /// observable way today.
     fn add_attrs_if_missing(&self, target: &NodeId, attrs: Vec<Attribute>) {

@@ -19,7 +19,7 @@ use core::num::NonZeroU32;
 ///
 /// That is the whole safety property, and it only holds if resolving a handle
 /// can fail. §4.1 puts it as a rule with no exceptions: **there is no
-/// infallible index API, not even a private one.** `ci/gate-dom.sh` checks the
+/// infallible index API, not even a private one.** `cargo xtask dom` checks the
 /// source for one, because a test can show that today's accessors return
 /// `Option` and cannot show that tomorrow's will.
 ///

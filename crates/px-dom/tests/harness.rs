@@ -13,7 +13,7 @@
 //! only ever been compiled — which is the shape of the Phase 1 campaign that
 //! ran for 24 hours and tested nothing.
 //!
-//! Requires `--features testing`; `ci/gate-dom.sh` runs the suite that way.
+//! Requires `--features testing`; `cargo xtask dom` runs the suite that way.
 
 #![cfg(feature = "testing")]
 

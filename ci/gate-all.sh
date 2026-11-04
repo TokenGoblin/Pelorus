@@ -31,7 +31,7 @@ compat-list:bash ci/gate-compat-list.sh
 ipc:bash ci/gate-ipc.sh
 sandbox:bash ci/gate-sandbox.sh
 network:bash ci/gate-network.sh
-dom:bash ci/gate-dom.sh
+dom:cargo xtask dom
 "
 
 failed=""

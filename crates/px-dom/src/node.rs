@@ -3,7 +3,7 @@
 //! A node holds five links and a payload. It does **not** hold its children:
 //! they live in the arena beside it and are named by handle. That is not a
 //! stylistic choice, it is what makes a 100,000-level document droppable —
-//! `ci/gate-dom.sh` checks the source for `Box<Node>`, `Vec<Node>`, `Rc<Node>`
+//! `cargo xtask dom` checks the source for `Box<Node>`, `Vec<Node>`, `Rc<Node>`
 //! and `Arc<Node>` for exactly this reason.
 //!
 //! The recursive `Drop` nobody writes on purpose is the classic

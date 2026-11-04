@@ -27,6 +27,36 @@ pub fn capture(prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Vec<u8>,
     }
 }
 
+/// Run `prog args` in `cwd` with stdout and stderr merged into one stream (what
+/// `cmd 2>&1` gave a pipeline); returns the combined text and whether the
+/// process exited successfully. Stdin is closed. The output is collected, not
+/// echoed.
+pub fn capture_merged(
+    prog: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+) -> Result<(String, bool), String> {
+    use std::io::Read;
+    let (mut recv, send) = std::io::pipe().map_err(|e| format!("cannot create a pipe: {e}"))?;
+    let send2 = send
+        .try_clone()
+        .map_err(|e| format!("cannot clone a pipe: {e}"))?;
+    let mut c = Command::new(prog);
+    c.args(args).stdin(Stdio::null()).stdout(send).stderr(send2);
+    if let Some(d) = cwd {
+        c.current_dir(d);
+    }
+    let mut child = c.spawn().map_err(|e| format!("cannot run `{prog}`: {e}"))?;
+    // Drop the Command so the parent's copies of the write end close.
+    drop(c);
+    let mut buf = Vec::new();
+    let _ = recv.read_to_end(&mut buf);
+    let status = child
+        .wait()
+        .map_err(|e| format!("cannot wait for `{prog}`: {e}"))?;
+    Ok((String::from_utf8_lossy(&buf).into_owned(), status.success()))
+}
+
 /// Run `cargo args` in `root` with inherited stdio (the user sees cargo's own
 /// output). Honours `$CARGO`, which cargo sets when it runs `cargo xtask`, so
 /// the child is the same toolchain as the parent.

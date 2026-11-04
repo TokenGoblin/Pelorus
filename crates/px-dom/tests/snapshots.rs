@@ -234,7 +234,7 @@ fn snapshots_record_attribute_removal() {
 /// This tests the **arena** method. It deliberately does not claim to test
 /// that the sink calls it — an earlier version of this test did claim that,
 /// and it was wrong: rewriting the sink to bypass the arena entirely left it
-/// passing. A test cannot see which path the sink took, so `ci/gate-dom.sh`
+/// passing. A test cannot see which path the sink took, so `cargo xtask dom`
 /// checks the source instead.
 #[test]
 fn snapshots_are_recorded_by_the_add_if_missing_path() {
@@ -384,7 +384,7 @@ fn snapshots_and_attribute_writes_refuse_what_they_cannot_do() {
 /// `<html>` or `<body>` start tag: the spec says to merge in the attributes
 /// that are not already present and ignore the rest. This asserts the
 /// behaviour end to end, which is the part a test *can* see; whether the sink
-/// reached it through the arena is `ci/gate-dom.sh`'s business.
+/// reached it through the arena is `cargo xtask dom`'s business.
 #[test]
 fn snapshots_the_sink_merges_duplicate_root_attributes_per_spec() {
     let dom = parse(r#"<html class="first" lang="en"><body><html class="second" dir="rtl">"#);

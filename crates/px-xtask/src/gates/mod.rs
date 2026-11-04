@@ -2,6 +2,7 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod dom;
 pub mod flex_grid;
 pub mod layout;
 pub mod structure;
@@ -32,6 +33,11 @@ pub static GATES: &[GateSpec] = &[
         name: "brand-leak",
         about: "the product name appears only where tests/brand/allowlist.txt permits (build-spec §2.2)",
         run: brand_leak::run,
+    },
+    GateSpec {
+        name: "dom",
+        about: "Phase 4: html5lib corpus, stale-handle/nesting suites, px-dom source scans, fuzz targets",
+        run: dom::run,
     },
     GateSpec {
         name: "flex-grid",

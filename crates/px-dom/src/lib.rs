@@ -6,7 +6,7 @@
 //!
 //! A [`NodeId`] names a slot *and a moment*. Resolving one can fail, always,
 //! and every accessor that takes one returns `Option` — §4.1 states it with no
-//! exceptions, including private ones, and `ci/gate-dom.sh` checks the source
+//! exceptions, including private ones, and `cargo xtask dom` checks the source
 //! rather than trusting that it stayed true.
 //!
 //! When a node is removed its slot's generation moves on and every outstanding

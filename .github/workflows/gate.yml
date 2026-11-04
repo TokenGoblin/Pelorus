@@ -247,7 +247,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Phase 4 gate
         shell: bash
-        run: ci/gate-dom.sh
+        run: cargo xtask dom
 
   # Phase 5. Required, as of the phase's last commit.
   #

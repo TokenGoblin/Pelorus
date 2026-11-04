@@ -137,7 +137,7 @@ fn parse_dat(file: &str, text: &str) -> Vec<Case> {
 /// Serialise a tree in the corpus's format.
 ///
 /// Iterative, like everything else that walks this tree — a recursive
-/// serialiser is one of the walks `ci/gate-dom.sh` exists to keep out, and a
+/// serialiser is one of the walks `cargo xtask dom` exists to keep out, and a
 /// test file is exactly where one would get written without anybody noticing.
 fn serialize(arena: &Arena, roots: &[NodeId]) -> String {
     let mut out = String::new();

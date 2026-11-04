@@ -1,7 +1,7 @@
 # HTML tree-construction conformance corpus
 
 62 `.dat` files, 622 KB. Read by `crates/px-dom/tests/html5lib.rs`, which is
-where the ≥99% figure in `ci/gate-dom.sh` comes from.
+where the ≥99% figure in `cargo xtask dom` comes from.
 
 ## Where these came from, and why the name says html5lib
 

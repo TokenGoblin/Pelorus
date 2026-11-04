@@ -354,7 +354,7 @@ impl Arena {
     ///
     /// `None` means the handle is stale: the slot was reused, or retired, or
     /// the handle names a slot that does not exist. There is no variant of
-    /// this that returns a `Node` directly, by §4.1 and by `ci/gate-dom.sh`.
+    /// this that returns a `Node` directly, by §4.1 and by `cargo xtask dom`.
     pub fn get(&self, id: NodeId) -> Option<&Node> {
         let slot = self.slots.get(id.index() as usize)?;
         if slot.generation != id.generation() {
