@@ -455,21 +455,37 @@ fn emit(acc: &mut [i32], w: usize, r: i64, dir: i32, p0: P, p1: P) {
 /// Composite `mask` onto `canvas` in `color`, with the mask's glyph origin at
 /// device pixel `(x, y)`. The effective alpha of a pixel is
 /// `(color.a * coverage + 127) / 255` (round half up), then the canvas's ordinary
-/// source-over rule applies. Pixels outside the canvas are skipped. Rectangular
-/// clipping is the caller's job (unit 4 wires it to the clip stack).
+/// source-over rule applies. Pixels outside the canvas are skipped. For a
+/// rectangular clip use [`composite_mask_clipped`].
 pub fn composite_mask(canvas: &mut Canvas, mask: &Mask, x: i32, y: i32, color: Color) {
+    let full = (0, 0, i64::from(canvas.width), i64::from(canvas.height));
+    composite_mask_clipped(canvas, mask, x, y, color, full);
+}
+
+/// As [`composite_mask`], also restricted to the half-open device rectangle
+/// `clip = (x0, y0, x1, y1)` (the rasterizer's current clip).
+pub fn composite_mask_clipped(
+    canvas: &mut Canvas,
+    mask: &Mask,
+    x: i32,
+    y: i32,
+    color: Color,
+    clip: (i64, i64, i64, i64),
+) {
     if color.a == 0 || mask.width == 0 || mask.height == 0 {
         return;
     }
     let (cw, ch) = (i64::from(canvas.width), i64::from(canvas.height));
+    let (cx0, cy0) = (clip.0.max(0), clip.1.max(0));
+    let (cx1, cy1) = (clip.2.min(cw), clip.3.min(ch));
     for my in 0..mask.height {
         let py = i64::from(y) + i64::from(mask.top) + i64::from(my);
-        if py < 0 || py >= ch {
+        if py < cy0 || py >= cy1 {
             continue;
         }
         for mx in 0..mask.width {
             let px = i64::from(x) + i64::from(mask.left) + i64::from(mx);
-            if px < 0 || px >= cw {
+            if px < cx0 || px >= cx1 {
                 continue;
             }
             let Some(cov) = mask.coverage(mx, my) else {

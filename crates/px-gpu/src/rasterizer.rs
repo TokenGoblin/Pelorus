@@ -10,7 +10,7 @@
 
 use std::fmt;
 
-use px_paint::raster::RasterError;
+use px_paint::raster::{GlyphSource, RasterError};
 use px_paint::{Canvas, DisplayList};
 
 /// Why a backend produced no frame.
@@ -43,12 +43,14 @@ impl From<RasterError> for RenderError {
 
 /// Something that turns a display list into pixels.
 pub trait Rasterizer {
-    /// Rasterize `list` onto a fresh white `width` by `height` canvas.
+    /// Rasterize `list` onto a fresh white `width` by `height` canvas, drawing
+    /// glyph runs with outlines from `fonts`.
     fn rasterize(
         &mut self,
         list: &DisplayList,
         width: u32,
         height: u32,
+        fonts: &dyn GlyphSource,
     ) -> Result<Canvas, RenderError>;
 
     /// A short name for logs.
@@ -65,8 +67,11 @@ impl Rasterizer for SoftwareRasterizer {
         list: &DisplayList,
         width: u32,
         height: u32,
+        fonts: &dyn GlyphSource,
     ) -> Result<Canvas, RenderError> {
-        Ok(px_paint::rasterize(list, width, height)?)
+        Ok(px_paint::raster::rasterize_with(
+            list, width, height, fonts,
+        )?)
     }
 
     fn name(&self) -> &'static str {
@@ -104,12 +109,13 @@ impl Rasterizer for FailingRasterizer {
         list: &DisplayList,
         width: u32,
         height: u32,
+        fonts: &dyn GlyphSource,
     ) -> Result<Canvas, RenderError> {
         self.calls = self.calls.saturating_add(1);
         if self.calls > self.succeed_first {
             return Err(RenderError::Backend("told to fail"));
         }
-        SoftwareRasterizer.rasterize(list, width, height)
+        SoftwareRasterizer.rasterize(list, width, height, fonts)
     }
 
     fn name(&self) -> &'static str {
@@ -121,6 +127,7 @@ impl Rasterizer for FailingRasterizer {
 mod tests {
     use super::*;
     use px_layout::geom::px;
+    use px_paint::raster::NoFonts;
     use px_paint::{Color, Item, Rect};
 
     fn list() -> DisplayList {
@@ -145,14 +152,16 @@ mod tests {
     #[test]
     fn the_software_backend_is_px_paint_rasterize() {
         let expected = px_paint::rasterize(&list(), 4, 4).expect("raster");
-        let got = SoftwareRasterizer.rasterize(&list(), 4, 4).expect("raster");
+        let got = SoftwareRasterizer
+            .rasterize(&list(), 4, 4, &NoFonts)
+            .expect("raster");
         assert_eq!(got, expected);
     }
 
     #[test]
     fn unrenderable_input_is_reported_as_input_not_as_a_backend_fault() {
         assert_eq!(
-            SoftwareRasterizer.rasterize(&list(), 0, 4),
+            SoftwareRasterizer.rasterize(&list(), 0, 4, &NoFonts),
             Err(RenderError::Input(RasterError::EmptyViewport))
         );
     }
@@ -160,14 +169,14 @@ mod tests {
     #[test]
     fn the_test_backend_fails_on_command() {
         let mut backend = FailingRasterizer::after(1);
-        assert!(backend.rasterize(&list(), 4, 4).is_ok());
+        assert!(backend.rasterize(&list(), 4, 4, &NoFonts).is_ok());
         assert!(matches!(
-            backend.rasterize(&list(), 4, 4),
+            backend.rasterize(&list(), 4, 4, &NoFonts),
             Err(RenderError::Backend(_))
         ));
         assert!(
             FailingRasterizer::always()
-                .rasterize(&list(), 4, 4)
+                .rasterize(&list(), 4, 4, &NoFonts)
                 .is_err()
         );
     }

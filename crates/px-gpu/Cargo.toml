@@ -20,6 +20,11 @@ path = "src/main.rs"
 px-ipc = { path = "../px-ipc", version = "0.0.0" }
 px-layout = { path = "../px-layout", version = "0.0.0" }
 px-paint = { path = "../px-paint", version = "0.0.0" }
+# Phase 9 unit 4: the GPU process parses the fonts the broker sends it, and the
+# session parses the same bytes for its software fallback. A workspace path:
+# the third-party closure (harfrust, skrifa) is px-text's, already authorised
+# by ADR 036; no crate is added to the lock.
+px-text = { path = "../px-text", version = "0.0.0" }
 # Stage two of the GPU profile (the process confines itself after startup) and
 # the verification of it live in the one crate permitted unsafe (ADR 008).
 px-sandbox = { path = "../px-sandbox", version = "0.0.0" }

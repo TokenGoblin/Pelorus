@@ -21,6 +21,7 @@ pub mod not_serializable;
 pub mod render;
 pub mod sandbox;
 pub mod sanitizers;
+pub mod script;
 pub mod setup_build_python;
 pub mod structure;
 pub mod style;
@@ -152,6 +153,11 @@ pub static GATES: &[GateSpec] = &[
         name: "sanitizers",
         about: "ASAN (+ TSAN on Linux) over px-sandbox and px-broker; --self-check proves ASAN can still fail (ADR 011)",
         run: sanitizers::run,
+    },
+    GateSpec {
+        name: "script",
+        about: "Phase 10: script host suites (eval over a real process, wire hostility, confinement, ordering, queue bounds, clock); lists unit 4 to 7 items as remaining",
+        run: script::run,
     },
     GateSpec {
         name: "setup-build-python",

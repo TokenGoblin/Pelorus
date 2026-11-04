@@ -279,6 +279,9 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      h1 { margin: 0.67em 0; font-size: 2em } \
      head, style, script, title, meta, link { display: none }";
 
+/// What WPT's `/fonts/ahem.css` contains.
+const AHEM_CSS: &str = "@font-face { font-family: Ahem; src: url(\"/fonts/Ahem.ttf\") }";
+
 /// Every absolute rectangle, sorted and deduplicated (ADR 029).
 fn geometry(tree: &FragmentTree) -> Vec<Geometry> {
     let mut rects: Vec<Geometry> = tree
@@ -314,6 +317,16 @@ fn stylesheets(suite: &Suite, path: &Path, arena: &px_dom::Arena) -> (Vec<String
                 continue;
             }
             let href = attr(node, "href").unwrap_or("");
+            // WPT's own `/fonts/ahem.css`, which lives outside the vendored
+            // `css/<module>` trees, is a single `@font-face` for Ahem. Layout
+            // resolves Ahem from its `FontRegistry` whether or not an
+            // `@font-face` names it (Phase 9 unit 3, `px_layout::text`), so the
+            // sheet is satisfied: a pair that links only this one is a document
+            // the engine can now lay out as written, and is graded.
+            if href == "/fonts/ahem.css" {
+                out.push(AHEM_CSS.to_owned());
+                continue;
+            }
             match resolve(suite, path, href).and_then(|p| std::fs::read_to_string(p).ok()) {
                 Some(css) => out.push(css),
                 None => missing = true,
