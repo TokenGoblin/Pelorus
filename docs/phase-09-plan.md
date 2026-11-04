@@ -147,3 +147,38 @@ crates and can be separate sessions; unit 3 is the integration point and is one.
   estimate). Plan for the upper end.
 - **Fonts as attack surface.** Parsing runs in the content and GPU processes, both
   sandboxed; the fuzz target is part of unit 2, not a follow-up.
+
+## Status, 2026-11-04 (built, not closed)
+
+Written from what is on `main`, verified by running it; nothing here has run in
+GitHub CI yet.
+
+| Unit | State |
+|---|---|
+| 1 font core, Ahem | **Done.** std-only sfnt reader (head, hhea, maxp, hmtx, cmap 4 and 12, loca, glyf with caps), hostile-input tests, Ahem committed verbatim with licence. CFF fonts and collections return `Unsupported` |
+| 2 shaper | **Done for structure, unproven for quality.** harfrust 0.15 + skrifa 0.49 behind a `Shaper` trait, integer font units, bounded. The parity tests skip unless font files are supplied, so **complex-script shaping has never been compared with a HarfBuzz reference** in this repo |
+| 3 layout integration | **Done, Ahem only.** Shaped runs, bidi reordering, CSS line breaking, real metrics. Reftests moved css2 54 to 55, flexbox 150 to 151, grid 71 to 67 (four pairs read, each in the floor's comment). Inline elements are still flattened into their block's run, so `<span style=color:...>` does not recolour glyphs |
+| 4 glyph runs, transport | **Done.** `Item::GlyphRun`, fonts cross the GPU boundary in bounded chunks, a malformed font kills only its process, fallback to software |
+| 5 glyph rasterizer | **Done.** Integer exact-area coverage, hand-derived expectations. Where contours cross inside one pixel the coverage is the clamped sum (an approximation); pixels fully inside or outside are exact |
+| 6 line breaking, 7 bidi | **Done** over data already in the lockfile plus `unicode-bidi` |
+| wiring into paint | **Done.** Text renders as real glyphs; 11 baselines re-blessed, each read; 3 new text fixtures (RTL, centered wrap, mixed direction) |
+| 8 system fonts | **Not started** |
+| 9 IME | **Not started.** Needs real Windows and Linux machines to prove |
+| 10 cross-OS baselines | **Not started.** One byte-identical set is the claim; Windows has never run it |
+| bundled Noto subsets | **Not started** (Cyrillic, CJK, Arabic, Hebrew, Devanagari) |
+
+### What the gate needs, and the honest distance
+
+The gate is six scripts baselined plus an IME composition test on both OSes.
+
+- **Latin:** the pipeline works end to end, but Ahem draws every letter as a solid
+  square, so today's baselines prove *geometry* (advances, baselines, wrapping,
+  direction), not glyph shapes. A real Latin face is needed for the claim.
+- **Cyrillic, CJK, Arabic, Hebrew, Devanagari:** blocked on bundled fonts. Hebrew
+  currently renders Ahem's hollow `.notdef` box. Nothing for these scripts is
+  baselined.
+- **IME:** not started and not provable in a container without a display or an
+  input method.
+
+Phase 9 is therefore **not closed**, and the number of gate items met is zero. What
+exists is the machinery the gate runs on.
