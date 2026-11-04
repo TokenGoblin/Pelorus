@@ -251,6 +251,23 @@ impl Url {
     pub fn strip_fragment(&mut self) {
         self.fragment = None;
     }
+    /// `http` -> `https` (port 80 becomes the default); `None` for any other
+    /// scheme. Mixed Content "upgrade a request to a potentially trustworthy
+    /// URL".
+    pub fn upgraded_to_https(&self) -> Option<Url> {
+        if self.scheme != "http" {
+            return None;
+        }
+        let mut u = self.clone();
+        u.scheme = "https".to_string();
+        if u.port == Some(80) {
+            u.port = None;
+        }
+        if u.port == Some(443) {
+            u.port = None;
+        }
+        Some(u)
+    }
     /// Remove the path (set to `/`) and query: the "origin-only" form.
     pub fn set_origin_only(&mut self) {
         self.path = "/".to_string();
