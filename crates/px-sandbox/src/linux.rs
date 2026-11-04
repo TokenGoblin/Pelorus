@@ -97,7 +97,7 @@ const AUDIT_ARCH: u32 = 0xc000_00b7;
 /// x86_64 numbers; the `cfg` on [`AUDIT_ARCH`] keeps the filter from being
 /// built at all on an architecture whose numbers are not listed here.
 #[cfg(target_arch = "x86_64")]
-const DENIED_SYSCALLS: &[u32] = &[
+pub(crate) const DENIED_SYSCALLS: &[u32] = &[
     101, // ptrace
     310, // process_vm_readv
     311, // process_vm_writev
@@ -118,7 +118,7 @@ const DENIED_SYSCALLS: &[u32] = &[
 ];
 
 #[cfg(target_arch = "aarch64")]
-const DENIED_SYSCALLS: &[u32] = &[
+pub(crate) const DENIED_SYSCALLS: &[u32] = &[
     117, // ptrace
     270, // process_vm_readv
     271, // process_vm_writev
@@ -151,11 +151,11 @@ const _: () = assert!(
 /// One BPF instruction, matching `struct sock_filter`.
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct SockFilter {
-    code: u16,
-    jt: u8,
-    jf: u8,
-    k: u32,
+pub(crate) struct SockFilter {
+    pub(crate) code: u16,
+    pub(crate) jt: u8,
+    pub(crate) jf: u8,
+    pub(crate) k: u32,
 }
 
 /// A BPF program, matching `struct sock_fprog`.
@@ -290,7 +290,7 @@ fn apply(program: &[SockFilter]) -> Result<(), PolicyError> {
 /// The read-back is the point. `prctl` returning 0 says the call was accepted;
 /// `PR_GET_NO_NEW_PRIVS` returning 1 says the bit is actually set, and only
 /// the second is evidence the process is confined.
-fn set_no_new_privs() -> Result<(), PolicyError> {
+pub(crate) fn set_no_new_privs() -> Result<(), PolicyError> {
     let failed = |detail| PolicyError::Failed {
         rung: Rung::NoNewPrivs,
         detail,
@@ -314,7 +314,7 @@ fn set_no_new_privs() -> Result<(), PolicyError> {
 }
 
 /// Install the seccomp filter, then confirm the mode actually changed.
-fn install_filter(program: &[SockFilter]) -> Result<(), PolicyError> {
+pub(crate) fn install_filter(program: &[SockFilter]) -> Result<(), PolicyError> {
     let failed = |detail| PolicyError::Failed {
         rung: Rung::Seccomp,
         detail,
@@ -361,8 +361,15 @@ fn install_filter(program: &[SockFilter]) -> Result<(), PolicyError> {
 /// unexpected ABI means the syscall numbers below do not mean what this filter
 /// thinks they mean — and a filter matching the wrong numbers is worse than no
 /// filter, since it reads as protection.
-fn build_filter() -> Vec<SockFilter> {
-    let mut program = Vec::with_capacity(DENIED_SYSCALLS.len() + 5);
+pub(crate) fn build_filter() -> Vec<SockFilter> {
+    build_filter_for(DENIED_SYSCALLS)
+}
+
+/// The same filter over any list of numbers shorter than 250. The caller owns
+/// that check: a `u8` jump offset cannot reach further, and a longer list
+/// would build a filter whose jumps land elsewhere.
+pub(crate) fn build_filter_for(denied_syscalls: &[u32]) -> Vec<SockFilter> {
+    let mut program = Vec::with_capacity(denied_syscalls.len() + 5);
 
     // Load seccomp_data.arch and require an exact match.
     program.push(stmt(BPF_LD | BPF_W | BPF_ABS, SECCOMP_DATA_ARCH_OFFSET));
@@ -374,8 +381,8 @@ fn build_filter() -> Vec<SockFilter> {
     // comparison.
     program.push(stmt(BPF_LD | BPF_W | BPF_ABS, SECCOMP_DATA_NR_OFFSET));
 
-    let denied = DENIED_SYSCALLS.len();
-    for (index, syscall) in DENIED_SYSCALLS.iter().enumerate() {
+    let denied = denied_syscalls.len();
+    for (index, syscall) in denied_syscalls.iter().enumerate() {
         // Jump distance to the deny instruction: every remaining comparison,
         // plus the allow that sits between them and it. Computed rather than
         // written as a constant so that editing DENIED_SYSCALLS cannot

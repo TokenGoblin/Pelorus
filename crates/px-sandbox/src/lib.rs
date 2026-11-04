@@ -37,7 +37,11 @@
 use std::fmt;
 
 #[cfg(target_os = "linux")]
+mod gpu_linux;
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(feature = "testing")]
+pub mod probe;
 pub mod roots;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -247,9 +251,11 @@ impl fmt::Display for Refusal {
 
 /// Detect what this machine offers.
 ///
-/// Contains no `unsafe`. Every Linux probe is a file read under `/proc` or
-/// `/sys`, which is the interface the kernel documents for exactly this, and it
-/// keeps detection — the part that decides whether to refuse — free of FFI.
+/// Nearly every Linux probe is a file read under `/proc` or `/sys`, the
+/// interface the kernel documents for it, which keeps the part that decides
+/// whether to refuse free of FFI. The one exception is Landlock, whose
+/// documented probe is a syscall that takes no pointer and changes nothing
+/// (`gpu_linux::landlock_abi`).
 pub fn detect() -> Capabilities {
     let mut caps = Capabilities::default();
 
@@ -299,13 +305,14 @@ fn detect_linux(caps: &mut Capabilities) {
         None => caps.deny(Rung::Seccomp, Restriction::Inconclusive),
     }
 
-    // Landlock advertises itself in the active LSM list.
-    match read_trimmed("/sys/kernel/security/lsm") {
-        Some(lsms) if lsms.split(',').any(|lsm| lsm.trim() == "landlock") => {
-            caps.offer(Rung::Landlock);
-        }
-        Some(_) => caps.deny(Rung::Landlock, Restriction::NotSupported),
-        None => caps.deny(Rung::Landlock, Restriction::Inconclusive),
+    // Landlock: ask the kernel for its ABI version, the documented probe. The
+    // active-LSM list under securityfs is not a substitute: securityfs is not
+    // mounted in every environment, and an unreadable list made Landlock look
+    // absent on kernels that enforce it. Inconclusive still counts as
+    // unavailable (ADR 007): the error to avoid is believing it is on.
+    match gpu_linux::landlock_abi() {
+        Ok(_) => caps.offer(Rung::Landlock),
+        Err(why) => caps.deny(Rung::Landlock, why),
     }
 
     detect_user_namespaces(caps);
@@ -476,6 +483,32 @@ impl SandboxedChild {
         }
     }
 
+    /// Ask the kernel whether this child is confined by both stages of the GPU
+    /// profile, and return the rungs it confirms.
+    ///
+    /// Call after the child has said it is ready and before sending it
+    /// anything derived from a page. The answer comes from the operating
+    /// system's own account of the process, not from the process (invariant 9).
+    /// `Err` means stage two is not in place or cannot be verified, and the
+    /// child must not be used.
+    ///
+    /// Linux only for now. On Windows this always refuses, so a Windows GPU
+    /// process is never used until its profile exists: the session renders in
+    /// software instead.
+    pub fn verify_gpu_profile(&self) -> Result<Vec<Rung>, PolicyError> {
+        #[cfg(target_os = "linux")]
+        {
+            gpu_linux::verify_pid(self.id())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(PolicyError::Failed {
+                rung: FLOOR[0],
+                detail: "the GPU profile has no implementation on this platform yet",
+            })
+        }
+    }
+
     /// Kill the child.
     ///
     /// On Windows this terminates the process; the job object it belongs to is
@@ -485,6 +518,53 @@ impl SandboxedChild {
     /// Phase 17's cgroup — see `docs/backlog.md`.
     pub fn kill(&mut self) -> std::io::Result<()> {
         self.inner.kill()
+    }
+}
+
+/// What a process that entered the GPU profile reports about itself.
+///
+/// For the process's own use and log. The broker's verdict is
+/// [`SandboxedChild::verify_gpu_profile`], never this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GpuProfile {
+    /// Rungs this process applied to itself.
+    pub applied: Vec<Rung>,
+    /// The Landlock ABI enforced, or 0 when the kernel has none.
+    pub landlock_abi: u32,
+}
+
+/// Stage two of the GPU profile, applied by the GPU process to itself.
+///
+/// Call it first thing in `main`, single-threaded, before reading anything from
+/// the channel. It denies opening files and creating or using sockets, and
+/// running other programs, for the rest of the process's life, and where the
+/// kernel has Landlock it also denies all filesystem access except read access
+/// to `read_only` (empty for the software rasterizer, which needs nothing).
+///
+/// Fails closed: any step that cannot be applied is an error, and the caller
+/// must exit rather than serve. See `gpu_linux.rs` for why this is a second
+/// stage and not part of [`spawn`].
+///
+/// Windows: refuses. The Windows profile (restricted token and job object at
+/// creation, which `spawn` already applies, plus the child-process mitigation)
+/// has not been written or run, and claiming it would be a claim without
+/// evidence.
+pub fn enter_gpu_profile(read_only: &[std::path::PathBuf]) -> Result<GpuProfile, PolicyError> {
+    #[cfg(target_os = "linux")]
+    {
+        let entered = gpu_linux::enter(read_only)?;
+        Ok(GpuProfile {
+            applied: entered.applied,
+            landlock_abi: entered.landlock_abi,
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = read_only;
+        Err(PolicyError::Failed {
+            rung: FLOOR[0],
+            detail: "the GPU profile has no implementation on this platform yet",
+        })
     }
 }
 

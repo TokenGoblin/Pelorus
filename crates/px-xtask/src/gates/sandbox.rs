@@ -35,6 +35,18 @@ pub const SUITES: &[Suite] = &[
         "crates/px-content/tests/sandbox.rs",
     ),
     ("ladder", "sandbox_ladder", "crates/px-sandbox/src/lib.rs"),
+    // Phase 8: the GPU process boundary, proven by spawning the real binary
+    // under the profile (docs/phase-08-plan.md, gate items 3 and 4).
+    (
+        "gpu-no-ambient-capability",
+        "gpu_process_denied_capabilities",
+        "crates/px-gpu/tests/process_boundary.rs",
+    ),
+    (
+        "gpu-kill-falls-back",
+        "gpu_kill_falls_back",
+        "crates/px-gpu/tests/process_boundary.rs",
+    ),
 ];
 
 /// A machine below the floor makes the policy tests skip, and a silent skip is
@@ -47,6 +59,11 @@ pub const REQUIRE_ENV: (&str, &str) = ("PX_REQUIRE_SANDBOX", "1");
 /// The override that exists only under `--features testing`. See the
 /// release-artifact scan.
 pub const OVERRIDE_ENV: &str = "PX_TEST_FORCE_SANDBOX_UNAVAILABLE";
+
+/// The marker `px_sandbox::probe` carries, which exists in a binary only if the
+/// probe of forbidden operations was compiled in. Phase 8's second test-only
+/// capability, scanned for the same way.
+pub const PROBE_MARKER: &str = "px-sandbox-testing-probe-of-forbidden-operations";
 
 /// The mechanisms a refusal must be able to name (section 14.5 requires the
 /// message to say what is missing). Matched case-insensitively.
@@ -192,7 +209,7 @@ fn check_release_artifacts(g: &mut Gate, root: &Path) {
         return;
     }
     let mut leaked = false;
-    for stem in ["px-browser", "px-content"] {
+    for stem in ["px-browser", "px-content", "px-gpu"] {
         let bin = proc::built_binary(root, "release", stem);
         let Ok(bytes) = std::fs::read(&bin) else {
             g.fail(format!("{stem} was not built for release"));
@@ -200,6 +217,10 @@ fn check_release_artifacts(g: &mut Gate, root: &Path) {
         };
         if contains_bytes(&bytes, OVERRIDE_ENV.as_bytes()) {
             g.fail(format!("{stem} contains the sandbox override symbol"));
+            leaked = true;
+        }
+        if contains_bytes(&bytes, PROBE_MARKER.as_bytes()) {
+            g.fail(format!("{stem} contains the forbidden-operations probe"));
             leaked = true;
         }
     }

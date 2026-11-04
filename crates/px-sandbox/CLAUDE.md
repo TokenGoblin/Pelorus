@@ -40,4 +40,12 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   detect a fault before a clean run is believed — this was written as an
   invariant here for a phase and a half before it was true, so it now
   points at the thing that makes it true.
+- The GPU profile (ADR 035) is two-stage: stage one is the creation-time
+  filter every child gets; stage two is `enter_gpu_profile`, applied by the
+  child to itself after startup, and only ever tightens. The broker verifies it
+  from the kernel's account (`verify_gpu_profile`), never from the child. The
+  stage-two deny list is a deny list and says so; the allow list is Phase 17's.
+  Windows refuses both calls until its profile exists. `probe` is
+  testing-only, carries a marker the release scan looks for, and is the only
+  place a socket is made.
 - Adversarial review required (§10).
