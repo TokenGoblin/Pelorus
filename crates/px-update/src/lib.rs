@@ -9,6 +9,7 @@
 pub mod ed25519;
 pub mod hex;
 pub mod manifest;
+pub mod request;
 pub mod sha2;
 pub mod trust;
 pub mod version;
