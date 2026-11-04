@@ -95,7 +95,7 @@ enum Step {
 /// reftest corpus exercises — 42 of the subset's failures were `block-in-inline`
 /// before it existed.
 #[derive(Debug)]
-enum Content {
+pub(crate) enum Content {
     /// A run of inline-level content: text, and the text of inline descendants.
     InlineRun(String),
     /// A block-level child, which becomes a box of its own.
@@ -331,10 +331,10 @@ struct AbsolutePlacement {
 /// four `Au`. Making it move would mean a `.clone()` at every point a box's edges
 /// are both stored and read, which is most of them.
 #[derive(Clone, Copy)]
-struct Edges {
-    margin: LogicalEdges,
-    border: LogicalEdges,
-    padding: LogicalEdges,
+pub(crate) struct Edges {
+    pub(crate) margin: LogicalEdges,
+    pub(crate) border: LogicalEdges,
+    pub(crate) padding: LogicalEdges,
 }
 
 impl Edges {
@@ -346,7 +346,7 @@ impl Edges {
     };
 
     /// Everything outside the content box, along the inline axis.
-    fn inline_surround(&self) -> Au {
+    pub(crate) fn inline_surround(&self) -> Au {
         self.margin.inline_sum() + self.border.inline_sum() + self.padding.inline_sum()
     }
 
@@ -387,6 +387,7 @@ pub fn layout_document(
     first_element(arena)?;
 
     let mut tables = Tables::new(viewport_inline_size);
+    let mut flex = crate::flex::FlexState::new();
 
     // The ICB is entered as a block container whose content is the document's.
     // Starting from the document node rather than from the root element is what
@@ -491,13 +492,22 @@ pub fn layout_document(
                     // is the auto-margin centring below, and that reads the width
                     // it is given.
                     let content_inline = inline_bounds(&style, containing).clamp(content_inline);
+                    let content_inline = flex.inline_size(
+                        dom,
+                        arena,
+                        node,
+                        &style,
+                        containing,
+                        &resolved,
+                        content_inline,
+                    );
 
                     // §9.5.1 rule 9: `auto` margins on a float are zero, not
                     // centring. A float is shifted to an edge; there is nothing
                     // for the leftover space to be shared between. An absolutely
                     // positioned box's auto margins are resolved by §10.3.7's own
                     // equation, which `absolute_inline_size` has already done.
-                    if side.is_none() && !absolute {
+                    if side.is_none() && !absolute && !flex.is_item(node) {
                         centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
                     }
 
@@ -527,9 +537,12 @@ pub fn layout_document(
                     tables.edges[fragment.index()] = resolved;
                     tables.clear_sides[fragment.index()] = clear_side(&style);
                     tables.formatting_context_roots[fragment.index()] =
-                        establishes_formatting_context(&style);
-                    tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
-                    tables.block_bounds[fragment.index()] = block_bounds(&style);
+                        establishes_formatting_context(&style) || flex.is_item(node);
+                    // A flex item's block size is the flex algorithm's to decide.
+                    if !flex.is_item(node) {
+                        tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
+                        tables.block_bounds[fragment.index()] = block_bounds(&style);
+                    }
                     if let Some(reserved) = tables
                         .pending
                         .get_mut(parent.index())
@@ -561,10 +574,23 @@ pub fn layout_document(
                     node,
                     containing_block,
                 } => {
-                    let items = partition_content(dom, arena, node);
+                    let flex_items = flex.begin(
+                        dom,
+                        arena,
+                        fragment,
+                        node,
+                        tables
+                            .inline_sizes
+                            .get(fragment.index())
+                            .copied()
+                            .unwrap_or(Au(0)),
+                    );
+                    let is_flex = flex_items.is_some();
+                    let items = flex_items.unwrap_or_else(|| partition_content(dom, arena, node));
                     // Only *in-flow* block-level content forces anonymous boxes
-                    // (§9.2.1.1); a float is block-level and does not.
-                    let has_block = items.iter().any(|i| matches!(i, Content::Block(_)));
+                    // (§9.2.1.1); a float is block-level and does not. Text in a
+                    // flex container is always wrapped: it is an anonymous item.
+                    let has_block = is_flex || items.iter().any(|i| matches!(i, Content::Block(_)));
                     let available = tables
                         .inline_sizes
                         .get(fragment.index())
@@ -671,6 +697,67 @@ pub fn layout_document(
                 }
 
                 Step::Exit { fragment } => {
+                    if flex.is_container(fragment) {
+                        let slots = tables
+                            .pending
+                            .get(fragment.index())
+                            .cloned()
+                            .unwrap_or_default();
+                        // Anonymous items hold text; lay it out at the width the
+                        // flex algorithm gave the item.
+                        for (slot, kid) in slots.iter().enumerate() {
+                            let Some(kid) = *kid else { continue };
+                            let Some(run) = tables
+                                .inline_runs
+                                .get_mut(kid.index())
+                                .and_then(Option::take)
+                            else {
+                                continue;
+                            };
+                            let width = flex.anonymous_width(fragment, slot).unwrap_or(Au(0));
+                            let mut wrapped = Vec::new();
+                            let height = place_run(
+                                &mut tree,
+                                &mut wrapped,
+                                &run,
+                                &crate::float::FloatContext::new(),
+                                width,
+                                Au(0),
+                                Au(0),
+                                Au(0),
+                            );
+                            tree.set_children(kid, &wrapped);
+                            if let Some(anonymous) = tree.get_mut(kid) {
+                                anonymous.size.block = height;
+                                anonymous.size.inline = width;
+                            }
+                        }
+                        let edges = tables
+                            .edges
+                            .get(fragment.index())
+                            .copied()
+                            .unwrap_or(Edges::ZERO);
+                        let origin = (
+                            edges.border.inline_start + edges.padding.inline_start,
+                            edges.border.block_start + edges.padding.block_start,
+                        );
+                        if let Some((content, kids)) =
+                            flex.finish(&mut tree, fragment, &slots, origin)
+                        {
+                            if let Some(slot) = tables.self_collapsing.get_mut(fragment.index()) {
+                                *slot = false;
+                            }
+                            // A flex container does not collapse with its items.
+                            if let Some(slot) = tables.collapsed_margins.get_mut(fragment.index()) {
+                                *slot = (edges.margin.block_start, edges.margin.block_end);
+                            }
+                            tree.set_children(fragment, &kids);
+                            if let Some(f) = tree.get_mut(fragment) {
+                                f.size.block = content + edges.block_surround();
+                            }
+                        }
+                        continue;
+                    }
                     // The content slots reserved when this container was
                     // partitioned, walked in document order. Three things happen
                     // in this loop and the order between them is the whole point:
@@ -1326,7 +1413,7 @@ fn place_run(
 /// and this phase has no scrolling for that difference to be visible in. Naming it
 /// rather than leaving it to fall through `_` is the point: it is wrong for a
 /// scrolled page and right for an unscrolled one.
-fn is_absolutely_positioned(style: &ComputedValues) -> bool {
+pub(crate) fn is_absolutely_positioned(style: &ComputedValues) -> bool {
     use style::computed_values::position::T as Position;
     matches!(style.clone_position(), Position::Absolute | Position::Fixed)
 }
@@ -1543,7 +1630,7 @@ fn flush_run(run: &mut String, out: &mut Vec<Content>) {
 }
 
 /// Every child of `node`, elements and text alike, in document order.
-fn children_in_order(arena: &Arena, node: NodeId) -> Vec<NodeId> {
+pub(crate) fn children_in_order(arena: &Arena, node: NodeId) -> Vec<NodeId> {
     let mut out = Vec::new();
     let Some(parent) = arena.get(node) else {
         return out;
@@ -1568,9 +1655,9 @@ fn children_in_order(arena: &Arena, node: NodeId) -> Vec<NodeId> {
 /// Both are border-box sizes — margins, borders and padding included — because
 /// that is what shrink-to-fit compares against the available width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Intrinsic {
-    min: Au,
-    max: Au,
+pub(crate) struct Intrinsic {
+    pub(crate) min: Au,
+    pub(crate) max: Au,
 }
 
 impl Intrinsic {
@@ -1587,6 +1674,29 @@ struct IntrinsicFrame {
     /// The widest contribution seen so far, from text or from a child.
     min: Au,
     max: Au,
+    /// A row flex container's items sit side by side, so their contributions
+    /// add (plus the gap between them) instead of taking the widest.
+    sum_min: bool,
+    sum_max: bool,
+    gap: Au,
+    count: u32,
+}
+
+impl IntrinsicFrame {
+    fn add(&mut self, min: Au, max: Au) {
+        let gap = if self.count > 0 { self.gap } else { Au(0) };
+        self.min = if self.sum_min {
+            self.min + min + gap
+        } else {
+            self.min.max(min)
+        };
+        self.max = if self.sum_max {
+            self.max + max + gap
+        } else {
+            self.max.max(max)
+        };
+        self.count += 1;
+    }
 }
 
 /// One visit in the intrinsic walk.
@@ -1604,7 +1714,7 @@ enum IntrinsicStep {
 /// Used for a float with `width: auto`, which is the only box in this phase that
 /// gets it — absolutely positioned boxes and inline-blocks are the other two and
 /// neither is implemented.
-fn shrink_to_fit(intrinsic: Intrinsic, available: Au) -> Au {
+pub(crate) fn shrink_to_fit(intrinsic: Intrinsic, available: Au) -> Au {
     let lower = if intrinsic.min > available {
         intrinsic.min
     } else {
@@ -1634,6 +1744,20 @@ fn shrink_to_fit(intrinsic: Intrinsic, available: Au) -> Au {
 /// popped when its children have all contributed, so `frames.last_mut()` is
 /// always the parent of whatever just finished.
 fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId) -> Intrinsic {
+    intrinsic_inline_size_with(dom, arena, root, false)
+}
+
+/// As [`intrinsic_inline_size`], optionally ignoring `root`'s own `width`.
+///
+/// A flex item's content-based minimum (css-flexbox-1 section 4.5) is its
+/// min-content size whatever its `width` says; the definite-width shortcut below
+/// would otherwise report the stated width as the minimum.
+pub(crate) fn intrinsic_inline_size_with(
+    dom: px_css::view::Dom<'_>,
+    arena: &Arena,
+    root: NodeId,
+    ignore_root_width: bool,
+) -> Intrinsic {
     let mut frames: Vec<IntrinsicFrame> = Vec::new();
     let mut stack = vec![IntrinsicStep::Descend(root)];
     let mut result = Intrinsic::ZERO;
@@ -1642,8 +1766,7 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
     fn contribute(frames: &mut [IntrinsicFrame], result: &mut Intrinsic, value: Intrinsic) {
         let target = match frames.last_mut() {
             Some(frame) => {
-                frame.min = frame.min.max(value.min);
-                frame.max = frame.max.max(value.max);
+                frame.add(value.min, value.max);
                 return;
             }
             None => result,
@@ -1668,7 +1791,9 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
 
                 // A definite width makes both figures the same and stops the
                 // walk: nothing inside can widen a box whose width is stated.
-                if let Some(width) = definite_inline_size(&style) {
+                if let Some(width) =
+                    definite_inline_size(&style).filter(|_| !(ignore_root_width && node == root))
+                {
                     let total = width + surround;
                     contribute(
                         &mut frames,
@@ -1682,10 +1807,15 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
                 }
 
                 let font_size = Au::from(style.clone_font_size().computed_size());
+                let (sum_min, sum_max, gap) = crate::flex::intrinsic_mode(&style);
                 let mut frame = IntrinsicFrame {
                     surround,
                     min: Au(0),
                     max: Au(0),
+                    sum_min,
+                    sum_max,
+                    gap,
+                    count: 0,
                 };
                 let mut blocks = Vec::new();
                 for item in partition_content(dom, arena, node) {
@@ -1704,8 +1834,10 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
                         // against the content around it).
                         Content::Absolute(_) => {}
                         Content::InlineRun(text) => {
-                            frame.max = frame.max.max(crate::text::measure(&text, font_size));
-                            frame.min = frame.min.max(widest_word(&text, font_size));
+                            frame.add(
+                                widest_word(&text, font_size),
+                                crate::text::measure(&text, font_size),
+                            );
                         }
                     }
                 }
@@ -1735,7 +1867,7 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
 /// The preferred minimum width of a run of text. Trailing spaces are excluded
 /// because §16.6.1 removes them at a break, so they never contribute to how narrow
 /// a line can be.
-fn widest_word(text: &str, font_size: Au) -> Au {
+pub(crate) fn widest_word(text: &str, font_size: Au) -> Au {
     crate::text::words(text, font_size)
         .into_iter()
         .map(|(word, _)| crate::text::width_without_trailing_spaces(word, font_size))
@@ -1800,7 +1932,7 @@ fn definite_inline_size(style: &ComputedValues) -> Option<Au> {
 }
 
 /// The computed style of `node`, if it is a styled element.
-fn computed_style(
+pub(crate) fn computed_style(
     dom: px_css::view::Dom<'_>,
     node: NodeId,
 ) -> Option<style::servo_arc::Arc<ComputedValues>> {
@@ -1816,7 +1948,7 @@ fn computed_style(
 /// an unimplemented formatting context still has *content*, and its text belongs
 /// to the inline run it sits in. `display: none` has none, and the difference is
 /// the whole of §9.2.4.
-fn is_display_none(style: &ComputedValues) -> bool {
+pub(crate) fn is_display_none(style: &ComputedValues) -> bool {
     use style::values::specified::box_::{DisplayInside, DisplayOutside};
     let display = style.clone_display();
     // Both halves, because `display: contents` is also outside `none` and is the
@@ -1849,14 +1981,18 @@ fn is_display_none(style: &ComputedValues) -> bool {
 ///
 /// The content of a box that is *not* block-level is still visited, flattened into
 /// the run around it by [`partition_content`]; only `display: none` is dropped.
-fn is_block_level(style: &ComputedValues) -> bool {
+pub(crate) fn is_block_level(style: &ComputedValues) -> bool {
     use style::values::specified::box_::{DisplayInside, DisplayOutside};
     let display = style.clone_display();
-    matches!(display.outside(), DisplayOutside::Block)
+    // `inline-flex` is treated as block-level too: this engine has no atomic
+    // inlines, so it breaks the line rather than sitting in it (see flex.rs).
+    (matches!(display.outside(), DisplayOutside::Block)
         && matches!(
             display.inside(),
-            DisplayInside::Flow | DisplayInside::FlowRoot
-        )
+            DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex
+        ))
+        || (matches!(display.outside(), DisplayOutside::Inline)
+            && matches!(display.inside(), DisplayInside::Flex))
 }
 
 /// Whether this box establishes a block formatting context (§9.4.1).
@@ -1882,8 +2018,10 @@ fn establishes_formatting_context(style: &ComputedValues) -> bool {
     use style::values::computed::Overflow;
     use style::values::specified::box_::DisplayInside;
 
-    matches!(style.clone_display().inside(), DisplayInside::FlowRoot)
-        || float_side(style).is_some()
+    matches!(
+        style.clone_display().inside(),
+        DisplayInside::FlowRoot | DisplayInside::Flex
+    ) || float_side(style).is_some()
         || style.clone_overflow_x() != Overflow::Visible
         || style.clone_overflow_y() != Overflow::Visible
 }
@@ -1894,7 +2032,7 @@ fn establishes_formatting_context(style: &ComputedValues) -> bool {
 /// Percentages on *all* of these resolve against the containing block's **inline**
 /// size, including the block-axis ones — §8.3 and §8.4, and it is the rule that
 /// surprises people: `margin-top: 10%` is ten percent of the *width*.
-fn resolve_edges(style: &ComputedValues, containing_inline: Au) -> Edges {
+pub(crate) fn resolve_edges(style: &ComputedValues, containing_inline: Au) -> Edges {
     let margin = style.get_margin();
     let padding = style.get_padding();
     let border = style.get_border();
