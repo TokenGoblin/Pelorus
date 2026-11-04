@@ -213,39 +213,39 @@ fn script_hostile_the_other_directions_bytes_do_not_decode() {
 
 #[test]
 fn script_hostile_unknown_variants_and_reasons_are_refused() {
-    for variant in [4u64, 5, 127, 128, 300, u64::from(u32::MAX)] {
+    for variant in [5u64, 6, 127, 128, 300, u64::from(u32::MAX)] {
         assert!(rejected::<ScriptRequest>(&framed(
             ScriptRequest::TAG,
             &varint(variant)
         )));
     }
-    // ScriptResponse::Result(Terminated) with reason 4 (there are four: 0..=3).
+    // ScriptResponse::Result(Terminated) with reason 6 (there are six: 0..=5).
     let mut bytes = varint(0);
     bytes.extend(varint(2));
-    bytes.extend(varint(4));
+    bytes.extend(varint(6));
     assert!(rejected::<ScriptResponse>(&framed(
         ScriptResponse::TAG,
         &bytes
     )));
-    // And reason 3 is the last valid one: MicrotaskBudget.
+    // And reason 5 is the last valid one: EnginePanic.
     let mut bytes = varint(0);
     bytes.extend(varint(2));
-    bytes.extend(varint(3));
+    bytes.extend(varint(5));
     assert_eq!(
         decode_frame::<ScriptResponse>(&framed(ScriptResponse::TAG, &bytes)).expect("decode"),
         ScriptResponse::Result(ScriptResult::Terminated {
-            reason: TerminateReason::MicrotaskBudget
+            reason: TerminateReason::EnginePanic
         })
     );
 }
 
-/// Variants 2 and 3 of `ScriptRequest` and 1 and 2 of `ScriptResponse` are the
+/// Variants 2, 3 and 4 of `ScriptRequest` and 1 and 2 of `ScriptResponse` are the
 /// testing vocabulary. A release build must not decode them: they would be a
 /// way for a peer to ask the content process for its internals.
 #[cfg(not(feature = "testing"))]
 #[test]
 fn script_hostile_the_testing_variants_do_not_exist_in_a_shipping_build() {
-    for variant in [2u64, 3] {
+    for variant in [2u64, 3, 4] {
         assert!(rejected::<ScriptRequest>(&framed(
             ScriptRequest::TAG,
             &varint(variant)

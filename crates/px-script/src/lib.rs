@@ -20,13 +20,16 @@
 pub mod clock;
 pub mod queue;
 mod runtime;
+pub mod watch;
 
 #[cfg(feature = "testing")]
 pub use runtime::MAX_CLOCK_LOG;
 
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
+use boa_engine::context::HostHooks;
 use boa_engine::module::IdleModuleLoader;
 use boa_engine::{Context, JsError, JsValue, Source, js_string};
 
@@ -37,6 +40,7 @@ use runtime::Shared;
 pub use queue::TerminateReason;
 #[cfg(feature = "testing")]
 pub use queue::{COUNTERS_MARKER, HighWater};
+pub use watch::Heartbeat;
 
 /// What running a script came to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,6 +68,58 @@ pub enum Step {
     Terminated(TerminateReason),
 }
 
+/// The engine-level limits on a runaway script: layer 1 of ADR 040.
+///
+/// Boa 0.22.0 has no interrupt, no deadline and no heap cap, so these are
+/// everything the engine itself can do, and they are not enough alone:
+///
+/// * the loop count is **per call frame** (a loop of calls to looping
+///   functions is not bounded by it),
+/// * native builtins (`/(a+)+$/`, `'x'.repeat(2**30)`, a huge `sort`) are not
+///   interrupted at all, and
+/// * nothing here caps the heap.
+///
+/// The content process's watchdog (layer 2) ends the first two; the third
+/// waits for Phase 17. A limit error is terminal: see [`Host::eval`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// Iterations one call frame's loops may run before the engine raises a
+    /// limit error. ADR 040: 10,000,000.
+    pub loop_iterations: u64,
+    /// Nested call depth. ADR 040: 256.
+    pub recursion: usize,
+    /// The VM value-stack size, in values. Boa's own default (10,240) is kept:
+    /// at the recursion depth above it is not the binding limit for ordinary
+    /// code, and it caps a function with a very large number of locals.
+    pub stack_size: usize,
+    /// The largest `ArrayBuffer` (and so typed array) one allocation may ask
+    /// for, in bytes. A request over it is an ordinary, catchable `RangeError`
+    /// to the script. ADR 040: 256 MiB.
+    pub max_buffer_bytes: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            loop_iterations: 10_000_000,
+            recursion: 256,
+            stack_size: 10 * 1024,
+            max_buffer_bytes: 256 * 1024 * 1024,
+        }
+    }
+}
+
+/// The host hooks: only the buffer cap differs from the engine's.
+struct Hooks {
+    max_buffer_bytes: u64,
+}
+
+impl HostHooks for Hooks {
+    fn max_buffer_size(&self, _context: &mut Context) -> u64 {
+        self.max_buffer_bytes
+    }
+}
+
 /// How a host is built.
 ///
 /// There is no `Default`: the seed comes from the broker, and a host built with
@@ -75,6 +131,8 @@ pub struct HostOptions {
     pub clock: Rc<dyn RawClock>,
     /// Entropy for the clock's jitter and `Math.random`, from the broker.
     pub seed: u64,
+    /// The engine's runtime limits (layer 1 of ADR 040).
+    pub limits: Limits,
     /// Unix milliseconds at the moment this host began, from the embedder (this
     /// crate reads no wall clock). `Date.now()` is this plus coarse elapsed time.
     pub wall_epoch_ms: i64,
@@ -87,6 +145,7 @@ impl HostOptions {
         Self {
             caps: Caps::default(),
             clock: Rc::new(StdClock::new()),
+            limits: Limits::default(),
             seed,
             wall_epoch_ms: 0,
         }
@@ -99,6 +158,7 @@ pub struct Host {
     // are collected objects, and must be released while the engine exists.
     shared: Rc<Shared>,
     id: u64,
+    limits: Limits,
     context: Context,
 }
 
@@ -139,6 +199,9 @@ impl Host {
             // `Atomics.wait` would block the thread; no script may.
             .can_block(false)
             .job_executor(Rc::clone(&shared))
+            .host_hooks(Rc::new(Hooks {
+                max_buffer_bytes: options.limits.max_buffer_bytes,
+            }))
             // Every time the engine reads is the coarse clock.
             .clock(Rc::new(runtime::BoaClock {
                 coarse: Rc::clone(&shared.coarse),
@@ -157,13 +220,23 @@ impl Host {
         let mut host = Self {
             shared,
             id,
+            limits: options.limits,
             context,
         };
+        host.apply_limits(options.limits);
         // Fail closed: a host whose `Math.random` is still the unseeded engine
         // one, or whose `SharedArrayBuffer` is still defined, does not exist.
         // (`host` is dropped on the way out, which unregisters it.)
         host.install_globals()?;
         Ok(host)
+    }
+
+    fn apply_limits(&mut self, limits: Limits) {
+        let runtime = self.context.runtime_limits_mut();
+        runtime.set_loop_iteration_limit(limits.loop_iterations);
+        runtime.set_recursion_limit(limits.recursion);
+        runtime.set_stack_size_limit(limits.stack_size);
+        self.limits = limits;
     }
 
     fn install_globals(&mut self) -> Result<(), HostError> {
@@ -186,6 +259,16 @@ impl Host {
         }
     }
 
+    /// The limits this host was built with.
+    pub fn limits(&self) -> Limits {
+        self.limits
+    }
+
+    /// The liveness signal for the process's watchdog (ADR 040, layer 2).
+    pub fn heartbeat(&self) -> Arc<watch::Heartbeat> {
+        Arc::clone(&self.shared.heartbeat)
+    }
+
     /// Why script was stopped, if it was.
     pub fn terminated(&self) -> Option<TerminateReason> {
         self.shared.core.borrow().terminated()
@@ -201,7 +284,14 @@ impl Host {
         if let Some(reason) = self.terminated() {
             return Outcome::Terminated(reason);
         }
+        let heartbeat = self.heartbeat();
+        let _running = heartbeat.enter();
         let result = self.context.eval(Source::from_bytes(source));
+        // An engine error (a runtime limit) ends script here, before anything
+        // else runs, whatever the script wrapped around it.
+        if let Err(error) = &result {
+            self.shared.note_error(error);
+        }
         // A job queued by this script runs now, before anything else: the
         // microtask checkpoint after a script (HTML "clean up after running
         // script").
@@ -209,9 +299,14 @@ impl Host {
         if let Some(reason) = self.terminated() {
             return Outcome::Terminated(reason);
         }
-        match result {
+        let outcome = match result {
             Ok(value) => Outcome::Value(self.describe(&value)),
             Err(error) => Outcome::Error(self.describe_error(error)),
+        };
+        // Describing runs script (`toString`): re-check.
+        match self.terminated() {
+            Some(reason) => Outcome::Terminated(reason),
+            None => outcome,
         }
     }
 
@@ -221,6 +316,8 @@ impl Host {
         if let Some(reason) = self.terminated() {
             return Step::Terminated(reason);
         }
+        let heartbeat = self.heartbeat();
+        let _running = heartbeat.enter();
         if let Some(Task::Timer(id)) = runtime::next_task(&self.shared) {
             self.shared.run_timer_task(id, &mut self.context);
             return match self.terminated() {
@@ -300,7 +397,12 @@ impl Host {
     fn describe(&mut self, value: &JsValue) -> String {
         match value.to_string(&mut self.context) {
             Ok(text) => text.to_std_string_escaped(),
-            Err(_) => value.display().to_string(),
+            // `ToString` runs script (a `toString` method): a limit hit there is
+            // as terminal as anywhere else.
+            Err(error) => {
+                self.shared.note_error(&error);
+                value.display().to_string()
+            }
         }
     }
 

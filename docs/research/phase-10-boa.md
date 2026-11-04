@@ -182,7 +182,7 @@ What Boa offers, `RuntimeLimits` on the context:
 
 | Limit | Default | What it really bounds |
 |---|---|---|
-| `loop_iteration_limit` | `u64::MAX` (off) | Counts **per call frame** (`frame.loop_iteration_count`), incremented by the `IncrementLoopIteration` opcode in `for/while/do`. Exceeding throws a *catchable* `RuntimeLimitError`. A script can catch it and loop again. Work done inside a callee frame starts a new count, so `for(;;){ f() }` where `f` loops 1000 times is not bounded by it. |
+| `loop_iteration_limit` | `u64::MAX` (off) | Counts **per call frame** (`frame.loop_iteration_count`), incremented by the `IncrementLoopIteration` opcode in `for/while/do`. Exceeding throws a `RuntimeLimitError`. **Correction (Phase 10 unit 4, run and read from source): this was written as catchable and is not: in 0.22.0 it is an `EngineError`, which the VM treats as uncatchable (`JsError::is_catchable`), so `try { } catch { }` never sees it.** Work done inside a callee frame starts a new count, so `for(;;){ f() }` where `f` loops 1000 times is not bounded by it. |
 | `recursion_limit` | 512 | call depth |
 | `stack_size_limit` | 10 KiB (stack slots) | VM value stack |
 | `backtrace_limit` | 50 | error traces |
