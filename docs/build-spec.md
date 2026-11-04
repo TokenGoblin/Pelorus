@@ -166,7 +166,7 @@ pelorus/                    ← directory name is cosmetic
 │  ├─ px-update/        signed manifest fetch, data-file updates
 │  └─ px-mcp/           MCP subsystem, feature- and runtime-gated
 ├─ data/                PSL, HSTS preload, root store — versioned, updatable
-├─ packaging/           installers, .desktop, icons, signing scripts
+├─ packaging/           installers, .desktop, icons, signing tooling (Rust, ADR 032)
 ├─ tests/
 │  ├─ wpt/              vendored WPT subset + runner + testdriver shim
 │  ├─ compat/           forty-site suite, recorded traffic archives
@@ -180,6 +180,8 @@ pelorus/                    ← directory name is cosmetic
 ### Dependency policy
 
 Write yourself: DOM, layout, compositor, networking *policy*, process model, sandbox, web security model, UI, storage.
+
+All first-party code, build logic, tests, and CI gates are Rust (ADR 032; `cargo xtask all-rust`). The one named exception is `stylo`'s own Python+Mako build step (ADR 023).
 
 Take from the ecosystem: `html5ever`, `stylo`, `rustls`, `swash`/`cosmic-text`, `wgpu`, `image`, `boa_engine`, `postcard`, `url`, `idna`.
 
