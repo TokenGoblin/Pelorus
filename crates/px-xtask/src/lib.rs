@@ -11,11 +11,14 @@
 //! `pub fn run(g: &mut Gate, root: &Path, args: &[String])`, add a line to
 //! `gates::GATES`, add tests next to it. See `CLAUDE.md` in this crate.
 
+pub mod clock;
 pub mod gate;
 pub mod gates;
 pub mod git;
 pub mod glob;
+pub mod json;
 pub mod proc;
+pub mod sha256;
 
 #[cfg(test)]
 pub mod testutil;

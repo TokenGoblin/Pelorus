@@ -4,6 +4,7 @@ pub mod all_rust;
 pub mod brand_leak;
 pub mod flex_grid;
 pub mod layout;
+pub mod make_fetch_corpus;
 pub mod structure;
 pub mod vendor_wpt;
 
@@ -41,6 +42,11 @@ pub static GATES: &[GateSpec] = &[
         name: "layout",
         about: "Phase 6: CSS2 reftest subset, box-tree determinism, deep nesting, Au source scans",
         run: layout::run,
+    },
+    GateSpec {
+        name: "make-fetch-corpus",
+        about: "TOOL: regenerate the synthetic response corpus in tests/net/corpus",
+        run: make_fetch_corpus::run,
     },
     GateSpec {
         name: "structure",

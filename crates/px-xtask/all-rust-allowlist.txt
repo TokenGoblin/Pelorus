@@ -36,7 +36,6 @@ ci/gate-fuzz-smoke.sh      # -> cargo xtask fuzz-smoke: runs cargo fuzz as a chi
 ci/check_not_serializable.py # -> cargo xtask check-not-serializable, or a compile-fail test in px-ipc
 ci/update-psl.sh           # -> cargo xtask update-psl: HTTPS fetch + transform of the public suffix list
 ci/update-hsts.sh          # -> cargo xtask update-hsts: HTTPS fetch + transform of the HSTS preload list
-ci/make-fetch-corpus.py    # -> cargo xtask make-fetch-corpus: HAR -> corpus generator (sha256, JSON by hand)
 
 # --- Hard: large, platform-sensitive, or tied to the named exception ---------
 ci/gate-dom.sh             # -> cargo xtask dom: 298 lines, many sub-checks

@@ -98,7 +98,7 @@ cargo test --workspace --locked || fail "tests failed"
 # therefore required files that can never exist in CI.
 ARCHIVE="tests/net/corpus"
 if [ ! -d "$ARCHIVE" ]; then
-    fail "$ARCHIVE does not exist; run ci/make-fetch-corpus.py"
+    fail "$ARCHIVE does not exist; run cargo xtask make-fetch-corpus"
 else
     count="$(find "$ARCHIVE" -name '*.har' 2>/dev/null | wc -l | tr -d ' ')"
     if [ "${count:-0}" -lt 200 ]; then
