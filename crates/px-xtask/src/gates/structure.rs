@@ -5,10 +5,13 @@
 //!   - px-brand does not hold the update URL or signing key (section 14.1)
 //!   - scripts CI executes are executable in the index
 //!   - no personal identity in git metadata
-//!   - no session URLs in commit messages
 //!   - every fuzz target's corpus is accounted for in the git index
 //!
 //! OS-independent. CI runs it on Linux only.
+//!
+//! Relaxed by user decision (2026-11-04, ADR 032 addendum): commit messages may
+//! carry session links, and `noreply@anthropic.com` is an allowed identity. Both
+//! are generic and name no person. Personal addresses remain forbidden.
 
 use crate::Gate;
 use crate::git;
@@ -41,9 +44,13 @@ pub fn brand_src_holds_endpoint(content: &str) -> bool {
 /// A commit identity must use a GitHub noreply address. Two forms: the
 /// `<id>+<user>@users.noreply.github.com` address GitHub provides, and
 /// `noreply@github.com`, which GitHub itself sets as committer for web-UI
-/// commits and which carries no identity.
+/// commits and which carries no identity. `noreply@anthropic.com` is also allowed
+/// (user decision, 2026-11-04): it is the generic address used by Claude Code
+/// commits and names no person.
 pub fn is_noreply(email: &str) -> bool {
-    email.ends_with("@users.noreply.github.com") || email == "noreply@github.com"
+    email.ends_with("@users.noreply.github.com")
+        || email == "noreply@github.com"
+        || email == "noreply@anthropic.com"
 }
 
 /// Fuzz target names from `fuzz/Cargo.toml`: every `name = "..."` line,
@@ -176,25 +183,6 @@ fn check_identities(g: &mut Gate, root: &Path) {
     }
 }
 
-/// Session links are account-scoped, useless to anyone reading the public repo,
-/// and tie the history to a particular person's activity.
-///
-/// The shell version piped `git log | grep -q` under `pipefail`: grep exits at
-/// the first match, git can die of SIGPIPE, and the pipeline then reads as
-/// "no match". This reads the whole log, so a match is always seen.
-fn check_session_urls(g: &mut Gate, root: &Path) {
-    match git::git(root, &["log", "--format=%B"]) {
-        Ok(l) => {
-            if String::from_utf8_lossy(&l).contains("claude.ai/code/session") {
-                g.fail("a commit message contains a Claude session URL");
-            } else {
-                g.ok("no session URLs in commit messages");
-            }
-        }
-        Err(e) => g.fail(format!("cannot read git history: {e}")),
-    }
-}
-
 /// Every fuzz target's committed corpus is checked through the git index, not
 /// through the filesystem. An empty directory is invisible to git, so a corpus
 /// directory that exists only on one machine is not a corpus: the `dom` job was
@@ -246,7 +234,6 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
     check_brand_endpoint(g, root);
     check_exec_bits(g, root);
     check_identities(g, root);
-    check_session_urls(g, root);
     check_fuzz_corpus(g, root);
 }
 
@@ -272,7 +259,8 @@ mod tests {
     fn noreply_shapes() {
         assert!(is_noreply("12345+someone@users.noreply.github.com"));
         assert!(is_noreply("noreply@github.com"));
-        assert!(!is_noreply("noreply@anthropic.com"));
+        assert!(is_noreply("noreply@anthropic.com"));
+        assert!(!is_noreply("noreply@anthropic.com.evil.example"));
         assert!(!is_noreply("me@example.org"));
         assert!(!is_noreply(""));
         assert!(!is_noreply("noreply@github.com.evil.example"));
@@ -413,21 +401,18 @@ mod tests {
     }
 
     #[test]
-    fn session_url_in_a_commit_message_fails() {
+    fn session_url_in_a_commit_message_is_allowed() {
         let fx = Fixture::new("structure-session");
         healthy(&fx);
-        fx.git_init().stage_all().commit_as(
-            GOOD_EMAIL,
-            "subject\n\nSession: https://claude.ai/code/session_abc",
-        );
+        fx.git_init()
+            .stage_all()
+            .git(&["update-index", "--chmod=+x", "ci/ok.sh"])
+            .commit_as(
+                GOOD_EMAIL,
+                "subject\n\nSession: https://claude.ai/code/session_abc",
+            );
         let g = run_on(&fx);
-        assert!(
-            g.failures()
-                .iter()
-                .any(|f| f.contains("Claude session URL")),
-            "{:?}",
-            g.failures()
-        );
+        assert!(g.passed(), "{:?}", g.failures());
     }
 
     #[test]

@@ -112,3 +112,17 @@ the gate. Adding to the allowlist requires amending this ADR.
 wrong if the allowlist cannot shrink (a script proves un-portable without
 losing a check), or if gate logic migrates into YAML `run:` blocks to dodge the
 ratchet.
+
+## Addendum, 2026-11-04: the structure gate's session-link and identity rules are relaxed
+
+The Rust port of the structure gate reads the whole git log, which the shell
+version did not (its `git log | grep -q` under `pipefail` could die of SIGPIPE
+and read as "no match"). The port therefore reported what was already true on
+`main`: commits made with Claude Code carry a `claude.ai/code/session` link and
+the author address `noreply@anthropic.com`, which the gate forbade.
+
+Decided by the user (2026-11-04), from three options (check only new commits,
+relax the rule, rewrite history): **relax the rule**. The structure gate now
+permits session links in commit messages and treats `noreply@anthropic.com` as
+an allowed identity alongside GitHub's noreply addresses. Both are generic and
+name no person; personal email addresses in git metadata remain forbidden.
