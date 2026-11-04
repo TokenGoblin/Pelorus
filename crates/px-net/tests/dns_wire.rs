@@ -104,7 +104,7 @@ fn net_dns_label_limit_is_63_and_name_limit_is_255_encoded_bytes() {
     );
 
     // Four 63-byte labels encode to 4*64 + 1 = 257 > 255.
-    let four = vec![l63.as_str(); 4].join(".");
+    let four = [l63.as_str(); 4].join(".");
     assert_eq!(
         build_query(&four, RecordType::A),
         Err(DnsError::TooLarge("name"))
