@@ -81,6 +81,27 @@ skip = [
     # costs nothing to check at each stylo bump -- and ADR 023 already requires a
     # TElement review at every bump, so there is a natural place to look.
     { name = "syn" },
+    # ADR 040 (boa_engine =0.22.0), Phase 10. Boa's closure resolves eight crates
+    # to a second version beside the one stylo's closure already locks, and
+    # neither side is ours to unify (both pins are inside dependencies of
+    # dependencies, and Boa is pinned exactly). Measured from Cargo.lock, old
+    # version first:
+    #   getrandom 0.2.17 / 0.4.3 (Boa's `rand` 0.10)
+    #   hashbrown 0.17.1 / 0.14.5 (`boa_gc`, `boa_interner`)
+    #   itertools 0.14.0 / 0.15.0
+    #   phf, phf_shared, phf_generator, phf_macros 0.13.1 / 0.14.0
+    #   synstructure 0.13.2 / 0.14.0 (a proc-macro dependency, build-host only)
+    # The cost is the one the windows-sys skip names: two audit surfaces each.
+    # Revisit at each Boa bump and at each stylo bump; a skip that no longer has
+    # a duplicate behind it should be deleted.
+    { name = "getrandom" },
+    { name = "hashbrown" },
+    { name = "itertools" },
+    { name = "phf" },
+    { name = "phf_generator" },
+    { name = "phf_macros" },
+    { name = "phf_shared" },
+    { name = "synstructure" },
 ]
 
 [sources]

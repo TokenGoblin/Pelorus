@@ -99,3 +99,17 @@ path = "fuzz_targets/gpu_response.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "script_request"
+path = "fuzz_targets/script_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "script_response"
+path = "fuzz_targets/script_response.rs"
+test = false
+doc = false
+bench = false

@@ -51,6 +51,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 pub mod gpu;
 pub mod message;
+pub mod script;
 
 pub use message::{FrameHost, FrameId, Request, Response};
 
