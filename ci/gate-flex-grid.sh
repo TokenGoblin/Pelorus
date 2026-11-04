@@ -94,10 +94,12 @@ check_corpus() {
 check_corpus "the flexbox crashtests" "tests/wpt/css-flexbox-crashtests" '\.html$' 20
 check_corpus "the grid crashtests"    "tests/wpt/css-grid-crashtests"    '\.html$' 25
 
-# The reftest subsets are not vendored yet. Floors are set when they are, from the
-# first measured run (ADR 031 item 4), not guessed here.
-check_corpus "the flexbox reftest subset" "tests/wpt/css-flexbox" '-ref\.html$' 1
-check_corpus "the grid reftest subset"    "tests/wpt/css-grid"    '-ref\.html$' 1
+# The reftest subsets (ADR 031): tests, references and the few support files they
+# need, 993 and 731 .html/.htm files. The pair counts are pinned separately by the
+# harnesses (540 and 400); these floors catch the files themselves going missing.
+# They sit a little below the counts so a re-vendor can drop a few.
+check_corpus "the flexbox reftest subset" "tests/wpt/css-flexbox" '\.html\?$' 950
+check_corpus "the grid reftest subset"    "tests/wpt/css-grid"    '\.html\?$' 700
 
 # ADR 031 item 2: grid-lanes must stay out of the graded subset.
 if [ -n "$(git ls-files tests/wpt/css-grid | grep 'grid-lanes' | head -n 1)" ]; then
