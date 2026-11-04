@@ -335,6 +335,13 @@ criteria = "safe-to-deploy"
 version = "3.1.0"
 criteria = "safe-to-deploy"
 
+# ADR 036 (UAX #9). Audited by Mozilla, Google and Bytecode Alliance per the
+# ADR's research; exempted until `cargo vet` (not installed here) confirms the
+# imported set covers 0.3.18.
+[[exemptions.unicode-bidi]]
+version = "0.3.18"
+criteria = "safe-to-deploy"
+
 [[exemptions.url]]
 version = "2.5.8"
 criteria = "safe-to-deploy"

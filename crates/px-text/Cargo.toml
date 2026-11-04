@@ -18,3 +18,10 @@ skrifa = { version = "0.49.0", default-features = false, features = ["std"] }
 # are the ones the lock already compiles (compiled_data; auto, which brings the
 # LSTM models for Thai, Lao, Khmer and Myanmar).
 icu_segmenter = "2.3.0"
+# Bidi_Mirroring_Glyph (UAX #9 L4). Also already locked at 2.3.0 (stylo, url);
+# compiled data only, no new crate.
+icu_properties = "2.3.0"
+# UAX #9 (ADR 036, user decision 2026-11-04: take the crate rather than write
+# 1,000 lines). Default features: `hardcoded-data` is its own bidi-class table
+# (~50 KB), which `BidiInfo::new` reads; `std`. Zero dependencies.
+unicode-bidi = "0.3.18"
