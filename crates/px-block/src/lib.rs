@@ -114,4 +114,8 @@ pub mod referrer;
 pub mod stats;
 
 #[cfg(test)]
+mod conformance_tests;
+#[cfg(test)]
+mod hostile_tests;
+#[cfg(test)]
 mod matcher_tests;
