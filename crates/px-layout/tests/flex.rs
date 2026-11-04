@@ -92,7 +92,12 @@ fn layout_flex_row_items_sit_side_by_side() {
     );
     assert_eq!(
         got,
-        vec![p(0, 0, 400, 20), p(0, 0, 50, 20), p(50, 0, 100, 20), p(150, 0, 150, 20)]
+        vec![
+            p(0, 0, 400, 20),
+            p(0, 0, 50, 20),
+            p(50, 0, 100, 20),
+            p(150, 0, 150, 20)
+        ]
     );
 }
 
@@ -121,7 +126,10 @@ fn layout_flex_shrink_is_weighted_by_base_size() {
         "#f { width: 200px } #a { width: 100px; height: 10px } \
          #b { width: 300px; height: 10px }",
     );
-    assert_eq!(got, vec![p(0, 0, 200, 10), p(0, 0, 50, 10), p(50, 0, 150, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 200, 10), p(0, 0, 50, 10), p(50, 0, 150, 10)]
+    );
 }
 
 /// A flex-shrink of 0 keeps the item at its base size, which then overflows.
@@ -133,7 +141,10 @@ fn layout_flex_shrink_zero_item_overflows() {
          #b { width: 150px; height: 10px }",
     );
     // Total 300, overflow 100; only b shrinks: 150 - 100 = 50.
-    assert_eq!(got, vec![p(0, 0, 200, 10), p(0, 0, 150, 10), p(150, 0, 50, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 200, 10), p(0, 0, 150, 10), p(150, 0, 50, 10)]
+    );
 }
 
 /// 9.2.3: a definite `flex-basis` beats `width` as the base size.
@@ -144,7 +155,10 @@ fn layout_flex_basis_overrides_width() {
         "#f { width: 400px } #a { width: 300px; flex-basis: 100px; height: 10px } \
          #b { width: 50px; height: 10px }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 100, 10), p(100, 0, 50, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 100, 10), p(100, 0, 50, 10)]
+    );
 }
 
 /// `flex: 1` is `1 1 0%`: four items split 400 into four 100s.
@@ -176,7 +190,10 @@ fn layout_flex_max_width_freezes_and_redistributes() {
         "#f { width: 400px } #a { flex: 1 1 0; max-width: 50px; height: 10px } \
          #b { flex: 1 1 0; height: 10px }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 350, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 350, 10)]
+    );
 }
 
 /// 9.7 step 4d, min violation. First pass 200 each; a has min-width 250
@@ -188,7 +205,10 @@ fn layout_flex_min_width_freezes_and_redistributes() {
         "#f { width: 400px } #a { flex: 1 1 0; min-width: 250px; height: 10px } \
          #b { flex: 1 1 0; height: 10px }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 250, 10), p(250, 0, 150, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 250, 10), p(250, 0, 150, 10)]
+    );
 }
 
 /// 4.5: `min-width: auto` is the content-based minimum. a is 80 wide but holds ten
@@ -205,7 +225,10 @@ fn layout_flex_content_based_minimum_stops_shrinking() {
         "<div id=a>xxxxxxxxxx</div><div id=b></div>",
         "#f { width: 100px } #a { width: 80px } #b { width: 120px; min-width: 0 }",
     );
-    assert_eq!(got, vec![p(0, 0, 100, 20), p(0, 0, 50, 20), p(50, 0, 50, 20)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 100, 20), p(0, 0, 50, 20), p(50, 0, 50, 20)]
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -218,28 +241,43 @@ const JC: &str = "#f { width: 400px } #a, #b, #c { width: 50px; height: 10px }";
 #[test]
 fn layout_flex_justify_flex_end() {
     let got = run(THREE, &format!("{JC} #f {{ justify-content: flex-end }}"));
-    assert_eq!(got[1..], [p(250, 0, 50, 10), p(300, 0, 50, 10), p(350, 0, 50, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(250, 0, 50, 10), p(300, 0, 50, 10), p(350, 0, 50, 10)]
+    );
 }
 
 /// Half of 250 at each end.
 #[test]
 fn layout_flex_justify_center() {
     let got = run(THREE, &format!("{JC} #f {{ justify-content: center }}"));
-    assert_eq!(got[1..], [p(125, 0, 50, 10), p(175, 0, 50, 10), p(225, 0, 50, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(125, 0, 50, 10), p(175, 0, 50, 10), p(225, 0, 50, 10)]
+    );
 }
 
 /// Two gaps of 125 between three items.
 #[test]
 fn layout_flex_justify_space_between() {
-    let got = run(THREE, &format!("{JC} #f {{ justify-content: space-between }}"));
-    assert_eq!(got[1..], [p(0, 0, 50, 10), p(175, 0, 50, 10), p(350, 0, 50, 10)]);
+    let got = run(
+        THREE,
+        &format!("{JC} #f {{ justify-content: space-between }}"),
+    );
+    assert_eq!(
+        got[1..],
+        [p(0, 0, 50, 10), p(175, 0, 50, 10), p(350, 0, 50, 10)]
+    );
 }
 
 /// 250 / 3 = 83.33 per item, half either side: 41.67 = 2500 app units. The
 /// second item starts at 2500 + 3000 (item) + 5000 (two half gaps) = 10500.
 #[test]
 fn layout_flex_justify_space_around() {
-    let got = run(THREE, &format!("{JC} #f {{ justify-content: space-around }}"));
+    let got = run(
+        THREE,
+        &format!("{JC} #f {{ justify-content: space-around }}"),
+    );
     assert_eq!(
         got[1..],
         [
@@ -253,7 +291,10 @@ fn layout_flex_justify_space_around() {
 /// Four equal spaces of 250 / 4 = 62.5 = 3750 app units.
 #[test]
 fn layout_flex_justify_space_evenly() {
-    let got = run(THREE, &format!("{JC} #f {{ justify-content: space-evenly }}"));
+    let got = run(
+        THREE,
+        &format!("{JC} #f {{ justify-content: space-evenly }}"),
+    );
     assert_eq!(
         got[1..],
         [
@@ -291,7 +332,10 @@ fn layout_flex_justify_center_overflows_both_ways() {
 #[test]
 fn layout_flex_column_gap_separates_row_items() {
     let got = run(THREE, &format!("{JC} #f {{ column-gap: 10px }}"));
-    assert_eq!(got[1..], [p(0, 0, 50, 10), p(60, 0, 50, 10), p(120, 0, 50, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(0, 0, 50, 10), p(60, 0, 50, 10), p(120, 0, 50, 10)]
+    );
 }
 
 /// Gaps come out of the free space before `space-between` splits it:
@@ -302,7 +346,10 @@ fn layout_flex_gap_is_subtracted_before_distributing() {
         THREE,
         &format!("{JC} #f {{ column-gap: 10px; justify-content: space-between }}"),
     );
-    assert_eq!(got[1..], [p(0, 0, 50, 10), p(175, 0, 50, 10), p(350, 0, 50, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(0, 0, 50, 10), p(175, 0, 50, 10), p(350, 0, 50, 10)]
+    );
 }
 
 /// Gaps also reduce what grow can hand out: 400 - 2 * 20 = 360, three equals of 120.
@@ -312,14 +359,20 @@ fn layout_flex_gap_reduces_growable_space() {
         THREE,
         "#f { width: 400px; column-gap: 20px } #a, #b, #c { flex: 1; height: 10px }",
     );
-    assert_eq!(got[1..], [p(0, 0, 120, 10), p(140, 0, 120, 10), p(280, 0, 120, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(0, 0, 120, 10), p(140, 0, 120, 10), p(280, 0, 120, 10)]
+    );
 }
 
 /// `row-reverse` starts at the right edge and lays items leftwards, in order.
 #[test]
 fn layout_flex_row_reverse_starts_at_the_end_edge() {
-    let got = run(TWO, "#f { width: 400px; flex-direction: row-reverse } \
-         #a { width: 50px; height: 10px } #b { width: 100px; height: 10px }");
+    let got = run(
+        TWO,
+        "#f { width: 400px; flex-direction: row-reverse } \
+         #a { width: 50px; height: 10px } #b { width: 100px; height: 10px }",
+    );
     assert_eq!(got[1..], [p(350, 0, 50, 10), p(250, 0, 100, 10)]);
 }
 
@@ -331,7 +384,10 @@ fn layout_flex_order_reorders_items() {
         "#f { width: 400px } #a { width: 10px; height: 10px } \
          #b { width: 20px; height: 10px; order: -1 } #c { width: 30px; height: 10px }",
     );
-    assert_eq!(got[1..], [p(0, 0, 20, 10), p(20, 0, 10, 10), p(30, 0, 30, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(0, 0, 20, 10), p(20, 0, 10, 10), p(30, 0, 30, 10)]
+    );
 }
 
 /// Items with equal `order` keep document order; a positive order goes last.
@@ -342,20 +398,27 @@ fn layout_flex_order_ties_keep_document_order() {
         "#f { width: 400px } #a { width: 10px; height: 10px; order: 1 } \
          #b { width: 20px; height: 10px } #c { width: 30px; height: 10px }",
     );
-    assert_eq!(got[1..], [p(0, 0, 20, 10), p(20, 0, 30, 10), p(50, 0, 10, 10)]);
+    assert_eq!(
+        got[1..],
+        [p(0, 0, 20, 10), p(20, 0, 30, 10), p(50, 0, 10, 10)]
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Wrapping: 9.3
 // ---------------------------------------------------------------------------
 
-const FIVE: &str = "<div id=a></div><div id=a></div><div id=a></div><div id=a></div><div id=a></div>";
+const FIVE: &str =
+    "<div id=a></div><div id=a></div><div id=a></div><div id=a></div><div id=a></div>";
 
 /// Five 80-wide items in 200: two fit (160), three would not (240). Lines of
 /// 2, 2, 1; line cross size 10 each; container height 30.
 #[test]
 fn layout_flex_wrap_breaks_into_lines() {
-    let got = run(FIVE, "#f { width: 200px; flex-wrap: wrap } #a { width: 80px; height: 10px }");
+    let got = run(
+        FIVE,
+        "#f { width: 200px; flex-wrap: wrap } #a { width: 80px; height: 10px }",
+    );
     assert_eq!(
         got,
         vec![
@@ -392,14 +455,22 @@ fn layout_flex_each_line_flexes_independently() {
     // 120 + 120 > 200 so every item is on its own line and grows to 200.
     assert_eq!(
         got,
-        vec![p(0, 0, 200, 30), p(0, 0, 200, 10), p(0, 10, 200, 10), p(0, 20, 200, 10)]
+        vec![
+            p(0, 0, 200, 30),
+            p(0, 0, 200, 10),
+            p(0, 10, 200, 10),
+            p(0, 20, 200, 10)
+        ]
     );
 }
 
 /// `flex-flow: row wrap` is the two longhands together.
 #[test]
 fn layout_flex_flow_shorthand_sets_direction_and_wrap() {
-    let got = run(FIVE, "#f { width: 200px; flex-flow: row wrap } #a { width: 80px; height: 10px }");
+    let got = run(
+        FIVE,
+        "#f { width: 200px; flex-flow: row wrap } #a { width: 80px; height: 10px }",
+    );
     assert_eq!(got[0], p(0, 0, 200, 30));
     assert_eq!(got[5], p(0, 20, 80, 10));
 }
@@ -420,7 +491,12 @@ fn layout_flex_wrap_reverse_stacks_lines_from_the_bottom() {
     );
     assert_eq!(
         got,
-        vec![p(0, 0, 200, 100), p(0, 90, 80, 10), p(80, 90, 80, 10), p(0, 40, 80, 10)]
+        vec![
+            p(0, 0, 200, 100),
+            p(0, 90, 80, 10),
+            p(80, 90, 80, 10),
+            p(0, 40, 80, 10)
+        ]
     );
 }
 
@@ -480,7 +556,10 @@ fn layout_flex_auto_height_is_the_tallest_item() {
         "#f { width: 200px; align-items: center } #a { width: 50px; height: 20px } \
          #b { width: 50px; height: 40px }",
     );
-    assert_eq!(got, vec![p(0, 0, 200, 40), p(0, 10, 50, 20), p(50, 0, 50, 40)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 200, 40), p(0, 10, 50, 20), p(50, 0, 50, 40)]
+    );
 }
 
 /// Item content reflows at the flexed width, and the item's height follows it.
@@ -492,7 +571,10 @@ fn layout_flex_item_content_is_laid_out_at_the_used_width() {
         "<div id=a><div id=n></div></div>",
         "#f { width: 400px } #a { flex: 0 0 200px } #n { height: 30px }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 30), p(0, 0, 200, 30), p(0, 0, 200, 30)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 30), p(0, 0, 200, 30), p(0, 0, 200, 30)]
+    );
 }
 
 const ML: &str = "#f { width: 200px; height: 100px; flex-wrap: wrap } \
@@ -523,7 +605,10 @@ fn layout_flex_align_content_center() {
 
 #[test]
 fn layout_flex_align_content_space_between() {
-    let got = run(THREE, &format!("{ML} #f {{ align-content: space-between }}"));
+    let got = run(
+        THREE,
+        &format!("{ML} #f {{ align-content: space-between }}"),
+    );
     assert_eq!(got[1], p(0, 0, 80, 10));
     assert_eq!(got[3], p(0, 90, 80, 10));
 }
@@ -633,7 +718,8 @@ fn layout_flex_padding_and_border_widen_the_border_box() {
          border: 5px solid } #b { width: 50px; height: 10px }",
     );
     assert_eq!(got[1], p(0, 0, 130, 40));
-    assert_eq!(got[2], p(130, 0, 50, 40));
+    // b has a definite height, so it is not stretched to the 40px line.
+    assert_eq!(got[2], p(130, 0, 50, 10));
 }
 
 /// `box-sizing: border-box` makes `width` the border box.
@@ -644,7 +730,9 @@ fn layout_flex_border_box_sizing_applies_to_flex_basis() {
         "#f { width: 400px } #a { width: 100px; height: 10px; padding: 10px; \
          box-sizing: border-box } #b { width: 50px; height: 10px }",
     );
-    assert_eq!(got[1], p(0, 0, 100, 10));
+    // Height 10 border-box cannot be smaller than the 20px of padding, so the
+    // content box is 0 and the border box 20.
+    assert_eq!(got[1], p(0, 0, 100, 20));
     assert_eq!(got[2], p(100, 0, 50, 10));
 }
 
@@ -661,7 +749,10 @@ fn layout_flex_column_stacks_and_stretches() {
         TWO,
         &format!("{COL} #f {{ height: 300px }} #a {{ height: 50px }} #b {{ height: 100px }}"),
     );
-    assert_eq!(got, vec![p(0, 0, 200, 300), p(0, 0, 200, 50), p(0, 50, 200, 100)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 200, 300), p(0, 0, 200, 50), p(0, 50, 200, 100)]
+    );
 }
 
 /// Free space 300 - 150 = 150 shared 1:2 -> +50, +100.
@@ -684,7 +775,10 @@ fn layout_flex_column_auto_height_is_the_sum_of_items() {
         TWO,
         &format!("{COL} #a {{ height: 50px }} #b {{ height: 100px }}"),
     );
-    assert_eq!(got, vec![p(0, 0, 200, 150), p(0, 0, 200, 50), p(0, 50, 200, 100)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 200, 150), p(0, 0, 200, 50), p(0, 50, 200, 100)]
+    );
 }
 
 /// 9.2 step 3 and 9.7: an auto-height column raised by `min-height` has free space
@@ -723,7 +817,10 @@ fn layout_flex_column_align_items_center() {
              #b {{ width: 100px; height: 20px }}"
         ),
     );
-    assert_eq!(got, vec![p(0, 0, 200, 40), p(75, 0, 50, 20), p(50, 20, 100, 20)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 200, 40), p(75, 0, 50, 20), p(50, 20, 100, 20)]
+    );
 }
 
 /// `column-reverse` starts at the bottom: a occupies 80..100, b 50..80.
@@ -749,7 +846,12 @@ fn layout_flex_column_wrap_makes_lines_of_columns() {
     );
     assert_eq!(
         got,
-        vec![p(0, 0, 300, 100), p(0, 0, 50, 60), p(100, 0, 50, 60), p(200, 0, 50, 60)]
+        vec![
+            p(0, 0, 300, 100),
+            p(0, 0, 50, 60),
+            p(100, 0, 50, 60),
+            p(200, 0, 50, 60)
+        ]
     );
 }
 
@@ -783,7 +885,10 @@ fn layout_flex_whitespace_between_items_generates_nothing() {
         "\n  <div id=a></div>\n  <div id=b></div>\n",
         "#f { width: 400px } #a, #b { width: 50px; height: 10px }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]
+    );
 }
 
 /// A `display: none` child is not an item.
@@ -793,7 +898,10 @@ fn layout_flex_display_none_child_generates_no_item() {
         THREE,
         "#f { width: 400px } #a, #b, #c { width: 50px; height: 10px } #b { display: none }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]
+    );
 }
 
 /// An inline child of a flex container is blockified: it is an item with its own
@@ -804,7 +912,10 @@ fn layout_flex_inline_child_is_blockified() {
         "<span id=a>abcd</span><span id=b>xy</span>",
         "#f { width: 400px } span { display: inline }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 20), p(0, 0, 20, 20), p(20, 0, 10, 20)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 20), p(0, 0, 20, 20), p(20, 0, 10, 20)]
+    );
 }
 
 /// 4.1: an absolutely positioned child is out of flow. It takes no part in the
@@ -816,7 +927,10 @@ fn layout_flex_absolute_child_is_not_an_item() {
         "#f { width: 400px; position: relative } #a { width: 50px; height: 10px } \
          #b { position: absolute; left: 10px; top: 5px; width: 30px; height: 30px }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(10, 5, 30, 30)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(10, 5, 30, 30)]
+    );
 }
 
 /// A flex container inside a flex item. The inner one fills its item (`flex: 1`
@@ -830,7 +944,12 @@ fn layout_flex_nested_containers() {
     );
     assert_eq!(
         got,
-        vec![p(0, 0, 400, 10), p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]
+        vec![
+            p(0, 0, 400, 10),
+            p(0, 0, 400, 10),
+            p(0, 0, 50, 10),
+            p(50, 0, 50, 10)
+        ]
     );
 }
 
@@ -864,7 +983,10 @@ fn layout_flex_inline_flex_shrinks_to_fit() {
         "#f { display: inline-flex } #a { width: 50px; height: 20px } \
          #b { width: 100px; height: 20px }",
     );
-    assert_eq!(got, vec![p(0, 0, 150, 20), p(0, 0, 50, 20), p(50, 0, 100, 20)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 150, 20), p(0, 0, 50, 20), p(50, 0, 100, 20)]
+    );
 }
 
 /// The container's own padding and border offset the items and add to its size.
@@ -890,7 +1012,8 @@ fn layout_flex_container_margins_do_not_collapse_with_items() {
     );
     // The item's margin stays inside the container: the container sits at 10 and
     // its item at 10 + 20.
-    assert_eq!(got, vec![p(0, 10, 400, 30), p(0, 30, 400, 10)]);
+    // The item is a row item with no width, so it is zero wide.
+    assert_eq!(got, vec![p(0, 10, 400, 30), p(0, 30, 0, 10)]);
 }
 
 /// Floats do not apply to flex items (3): the item is laid out in the line.
@@ -900,7 +1023,10 @@ fn layout_flex_float_has_no_effect_on_an_item() {
         TWO,
         "#f { width: 400px } #a, #b { width: 50px; height: 10px } #a { float: left }",
     );
-    assert_eq!(got, vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]);
+    assert_eq!(
+        got,
+        vec![p(0, 0, 400, 10), p(0, 0, 50, 10), p(50, 0, 50, 10)]
+    );
 }
 
 /// Margins on the container are not auto-resolved to centring the way a block's are
@@ -926,10 +1052,11 @@ fn layout_flex_is_deterministic() {
     assert_eq!(run(THREE, css), run(THREE, css));
 }
 
-/// Flex containers nested 2,000 deep lay out without overflowing a small stack.
+/// Flex containers nested past the DOM's depth limit lay out without overflowing a small stack.
 #[test]
 fn layout_flex_deep_nesting_does_not_overflow_the_stack() {
-    let depth = 2000;
+    // px-dom stops nesting at 512, so ask for a little more and expect that many.
+    let depth = 600;
     let handle = std::thread::Builder::new()
         .stack_size(256 * 1024)
         .spawn(move || {
@@ -942,7 +1069,7 @@ fn layout_flex_deep_nesting_does_not_overflow_the_stack() {
             }
             html.push_str("</body></html>");
             let got = run_page(&html, ".n { display: flex }");
-            assert!(got.len() >= depth - 3);
+            assert!(got.len() >= 500, "only {} fragments", got.len());
         })
         .expect("the thread spawns");
     handle.join().expect("no stack overflow, no panic");

@@ -6,6 +6,7 @@
 //! see docs/build-spec.md §9 and this crate's CLAUDE.md.
 
 pub mod block;
+pub mod flex;
 pub mod float;
 pub mod fragment;
 pub mod geom;
