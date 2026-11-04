@@ -10,6 +10,14 @@ capability; killing it falls back to software without losing the session.
 
 Per /CLAUDE.md the gate tests are written first and fail. Unit 0 does that.
 
+## Status
+
+ADR 034 is decided (software rasterizer inside the GPU process; wgpu later by
+its own ADR), so unit 6 is deferred. Units 4 and 5 are built on branch
+`phase8/gpu-process`, on Linux, with the software rasterizer; see the status
+lines under each. Units 0 to 3 are other branches. The gate is not "passed": the
+Windows half of unit 5 does not exist, and the real-GPU half cannot run here.
+
 ## Units, in order
 
 **Unit 0: gate tests, failing.** `cargo xtask render` (reads
@@ -53,6 +61,14 @@ backend that fails on command exercises fallback without a process.
 failure renders the same list in software. `--disable-gpu` selects software
 without spawning.
 Gate item: fallback. Risk, low.
+**Status: built; run and tested on Linux only.** `Rasterizer`,
+`SoftwareRasterizer` and a `FailingRasterizer` test backend are in `px-gpu`;
+`GpuSession` is in `px-gpu` rather than `px-broker` (it needs no broker state, and
+the broker would otherwise link `px-paint` and layout into every build). It does
+not hold the display list between frames: `render` takes it, which is the same
+guarantee with less state. `GpuConfig::software_only()` is `--disable-gpu`; the
+flag itself is not wired into `px-browser`, which has no renderer yet.
+Restart bound: 8 replacements over the session's life, as `ContentProcess`.
 
 **Unit 5: the GPU process** (`px-gpu` binary, `px-sandbox`, `px-broker`).
 - `px-sandbox`: a stricter profile for the GPU child (deny `open*`, `socket`,
@@ -72,6 +88,17 @@ stage only tightens). Prototype it before building anything around it. It is the
 unit most likely to overrun, and the new unsafe goes in the crate with the
 highest review cost. Today Linux applies only `no_new_privs` and a 17-syscall
 denylist, so none of this exists yet.
+**Status: built on Linux; not on Windows.** ADR 035 records the design: the two-
+stage policy (the process applies stage two to itself before reading anything;
+the broker verifies it from `/proc/<pid>/status`, not from the process). The real
+`px-gpu` binary starts under it, renders, and every probed operation (open a
+system file, open the working directory, `socket(AF_INET)`, `connect`, `bind`,
+`execve`) is refused with `EPERM`. Strips: 256 KiB, reassembled and checked by the
+receiver's own arithmetic. Landlock (ABI 7 here) is entered by the process; its
+effect is not separately verifiable from outside. Windows: the profile refuses, so
+a Windows session renders in software; the restricted token, job object and
+child-process mitigation work remains. The three Linux unsafe areas new in
+`px-sandbox` are Landlock, the version probe and the testing probe.
 
 **Unit 6: `WgpuRasterizer`. Only if ADR 034 is decided as option A.** Adds `wgpu`
 in its own dependency commit, with the unsafe baseline raised in the same commit;

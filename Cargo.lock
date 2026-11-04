@@ -835,6 +835,14 @@ dependencies = [
 [[package]]
 name = "px-gpu"
 version = "0.0.0"
+dependencies = [
+ "px-broker",
+ "px-gpu",
+ "px-ipc",
+ "px-layout",
+ "px-paint",
+ "px-sandbox",
+]
 
 [[package]]
 name = "px-ipc"
