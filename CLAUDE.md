@@ -12,7 +12,7 @@ start of a phase. Do not load the whole spec every session.
     requires it — `forbid` rejects *implementing* an unsafe method, which is
     why the lint cannot stay. It contains **zero** `unsafe` blocks and **zero**
     `unsafe impl`. An `unsafe fn` body needs neither, so nothing in the crate
-    does anything the compiler is not checking. `ci/gate-style.sh` enforces
+    does anything the compiler is not checking. `cargo xtask style` enforces
     both halves. This is narrower than an exemption; do not read it as one, and
     do not quote it as precedent for anything broader than a trait signature we
     do not control.

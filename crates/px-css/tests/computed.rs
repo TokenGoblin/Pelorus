@@ -1,7 +1,7 @@
 //! Phase 5 gate item 1: computed-style fixtures across the defined property set.
 //!
 //! The property set is `crates/px-css/tests/properties.toml`, and
-//! `ci/gate-style.sh` holds it to a pinned floor so it cannot shrink to fit an
+//! `cargo xtask style` holds it to a pinned floor so it cannot shrink to fit an
 //! implementation that is struggling.
 //!
 //! Every test here goes through the *product* path — parse HTML with `px-dom`,

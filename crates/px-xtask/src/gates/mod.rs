@@ -6,6 +6,7 @@ pub mod dom;
 pub mod flex_grid;
 pub mod layout;
 pub mod structure;
+pub mod style;
 pub mod suites;
 pub mod vendor_wpt;
 
@@ -53,6 +54,11 @@ pub static GATES: &[GateSpec] = &[
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
+    },
+    GateSpec {
+        name: "style",
+        about: "Phase 5: computed-style/cascade suites, property-set floor, stylo decision ADR, ADR 021 tripwire, px-css unsafe rule",
+        run: style::run,
     },
     GateSpec {
         name: "vendor-wpt",

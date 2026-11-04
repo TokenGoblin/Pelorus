@@ -39,7 +39,6 @@ ci/update-hsts.sh          # -> cargo xtask update-hsts: HTTPS fetch + transform
 ci/make-fetch-corpus.py    # -> cargo xtask make-fetch-corpus: HAR -> corpus generator (sha256, JSON by hand)
 
 # --- Hard: large, platform-sensitive, or tied to the named exception ---------
-ci/gate-style.sh           # -> cargo xtask style: 353 lines, enforces ADR 024 on px-css
 ci/gate-ipc.sh             # -> cargo xtask ipc: process spawn, two build profiles
 ci/gate-sandbox.sh         # -> cargo xtask sandbox: OS-specific, runs under seccomp/job objects
 ci/gate-network.sh         # -> cargo xtask network: symbol audit of release artifacts

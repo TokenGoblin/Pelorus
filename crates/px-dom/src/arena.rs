@@ -269,7 +269,7 @@ impl Arena {
     /// names three things whose change would falsify it — the arena's slot
     /// layout, `NodeId`'s representation, and the opaque packing — and a
     /// visibility keyword is none of them. `tests/layout.rs` and
-    /// `tests/opaque.rs` are untouched, which is what `ci/gate-style.sh` checks
+    /// `tests/opaque.rs` are untouched, which is what `cargo xtask style` checks
     /// rather than taking this paragraph's word for it.
     pub fn slot_count(&self) -> usize {
         self.slots.len()

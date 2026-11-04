@@ -48,7 +48,7 @@
 //! `ElementData` in an `UnsafeCell` and hands out both `&` and `&mut` from
 //! `&self`. That is stylo's unsafe, in stylo's crate, reviewed by stylo — and it
 //! is the reason `px-css` needs **no `unsafe` block of its own**, which ADR 024
-//! requires and `ci/gate-style.sh` checks.
+//! requires and `cargo xtask style` checks.
 //!
 //! `has_data` and `clear_data` need one bit of per-element state that is
 //! settable through `&self`, and that is a [`Cell<bool>`] — safe, and the whole

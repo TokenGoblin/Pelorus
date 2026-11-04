@@ -2,7 +2,7 @@
 //! are held to each other.
 //!
 //! `crates/px-css/tests/properties.toml` defines the property set §9 Phase 5's
-//! first gate item asks for, and `ci/gate-style.sh` holds it to a floor so it
+//! first gate item asks for, and `cargo xtask style` holds it to a floor so it
 //! cannot shrink. This file is the other half: it declares a value for every
 //! property in that set, resolves it, and reads the computed value back.
 //!
@@ -237,7 +237,7 @@ fn computed_value(property: &str, declaration: Option<&str>) -> Vec<String> {
 /// The fixture table and the manifest must agree, in both directions.
 ///
 /// Without this the gate's floor could be met by a manifest full of properties
-/// nothing exercises — which `ci/gate-style.sh`'s own comments call worse than not
+/// nothing exercises — which `cargo xtask style`'s own comments call worse than not
 /// listing them, because it reads as coverage.
 #[test]
 fn properties_cover_the_whole_manifest() {
@@ -262,7 +262,7 @@ fn properties_cover_the_whole_manifest() {
     assert_eq!(
         declared.len(),
         64,
-        "the manifest's property count changed; ci/gate-style.sh pins the floor \
+        "the manifest's property count changed; cargo xtask style pins the floor \
          and this pins the number, so both have to move deliberately"
     );
 }

@@ -269,13 +269,13 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      # fetch-depth matters: ci/gate-style.sh resolves ADR 021's tripwire by
+      # fetch-depth matters: `cargo xtask style` resolves ADR 021's tripwire by
       # comparing two px-dom test files against pinned blob hashes through
       # `git rev-parse HEAD:<path>`, which needs the objects present. A shallow
       # checkout of one commit still has them, but a sparse one would not.
       - name: Phase 5 gate
         shell: bash
-        run: ci/gate-style.sh
+        run: cargo xtask style
 
   # Phase 6, and red on purpose until the phase closes.
   #

@@ -25,7 +25,7 @@
 //! `GenericAtomIdent` — is covered by stylo's own safe `cast`, so the unsafe
 //! stays in the crate that reviewed it.
 //!
-//! `ci/gate-unsafe-headers.sh` and `ci/gate-style.sh` both enforce the two
+//! `ci/gate-unsafe-headers.sh` and `cargo xtask style` both enforce the two
 //! zero-counts, and both were verified to fail on a deliberately added unsafe
 //! block before this line was removed.
 //!
