@@ -1,0 +1,12 @@
+[Exposed=Window]
+interface Node : EventTarget {
+  const unsigned short ELEMENT_NODE = 1;
+  readonly attribute DOMString? nodeName;
+  [CEReactions] Node appendChild(Node node);
+  undefined f(optional (DOMString or long) x = 1, long... rest);
+};
+partial interface Node { attribute [Clamp] long extra; };
+dictionary D : E { required long a; sequence<DOMString> b = []; };
+enum Mode { "a", "b" };
+interface mixin M { undefined m(); };
+Node includes M;

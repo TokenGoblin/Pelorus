@@ -1,0 +1,4 @@
+// Not from the DOM Standard. DOM IDL uses this type from High Resolution
+// Time (https://w3c.github.io/hr-time/#dom-domhighrestimestamp), which is
+// outside the subset; its definition there is exactly this typedef.
+typedef double DOMHighResTimeStamp;
