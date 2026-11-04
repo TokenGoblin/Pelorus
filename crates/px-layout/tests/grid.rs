@@ -1110,3 +1110,17 @@ fn layout_grid_deep_nesting_does_not_overflow_the_stack() {
     let count = handle.join().expect("no stack overflow, no panic");
     assert!(count >= 480);
 }
+
+/// Many items spanning thousands of auto tracks: the work budget stops the
+/// algorithm instead of letting it run for minutes. Only termination is asserted.
+#[test]
+fn layout_grid_spanning_items_across_huge_grids_are_bounded() {
+    let items = boxes(3000, "grid-column:1 / span 5000;height:1px");
+    let started = std::time::Instant::now();
+    let tree = lay(
+        &wrap(&items),
+        "#g { grid-template-columns: repeat(5000, auto); grid-template-rows: repeat(3000, auto) }",
+    );
+    assert_eq!(grid(&tree).1.len(), 3000);
+    assert!(started.elapsed() < std::time::Duration::from_secs(60));
+}

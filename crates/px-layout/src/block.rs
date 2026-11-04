@@ -2075,30 +2075,27 @@ pub(crate) fn intrinsic_inline_size_with(
                 if let Some(g) = frame.grid.take()
                     && let Some(style) = computed_style(dom, node)
                 {
-                    {
-                        let measured: std::collections::BTreeMap<NodeId, Intrinsic> = g
-                            .order
-                            .iter()
-                            .copied()
-                            .zip(g.results.iter().copied())
-                            .collect();
-                        let inputs = grid::Inputs {
-                            dom,
-                            style: &style,
-                            content_inline: None,
-                            inline_definite: false,
-                            definite_block: None,
-                            min_block: Au(0),
-                            max_block: None,
-                            font_size: g.font_size,
-                        };
-                        let (min, max) =
-                            grid::Container::intrinsic(&inputs, &g.contents, &mut |n| {
-                                measured.get(&n).copied().unwrap_or(Intrinsic::ZERO)
-                            });
-                        frame.min = min;
-                        frame.max = max;
-                    }
+                    let measured: std::collections::BTreeMap<NodeId, Intrinsic> = g
+                        .order
+                        .iter()
+                        .copied()
+                        .zip(g.results.iter().copied())
+                        .collect();
+                    let inputs = grid::Inputs {
+                        dom,
+                        style: &style,
+                        content_inline: None,
+                        inline_definite: false,
+                        definite_block: None,
+                        min_block: Au(0),
+                        max_block: None,
+                        font_size: g.font_size,
+                    };
+                    let (min, max) = grid::Container::intrinsic(&inputs, &g.contents, &mut |n| {
+                        measured.get(&n).copied().unwrap_or(Intrinsic::ZERO)
+                    });
+                    frame.min = min;
+                    frame.max = max;
                 }
                 let value = Intrinsic {
                     min: frame.min + frame.surround,
