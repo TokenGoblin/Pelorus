@@ -29,7 +29,7 @@
 //! launch, and fails closed — so Phase 17 tightens a filter that is already
 //! load-bearing rather than introducing one nothing was written against.
 
-use crate::{PolicyError, Rung};
+use crate::{MemoryLimit, Policy, PolicyError, Rung};
 
 /// `prctl(2)`: set the calling process's `no_new_privs` bit.
 const PR_SET_NO_NEW_PRIVS: i32 = 38;
@@ -184,6 +184,86 @@ pub(crate) struct Spawned {
     pub(crate) stdin: std::fs::File,
     pub(crate) stdout: std::fs::File,
     pub(crate) applied: Vec<Rung>,
+    /// The address-space cap the kernel confirmed for the child.
+    pub(crate) memory: MemoryLimit,
+}
+
+/// The row of `/proc/<pid>/limits` for `RLIMIT_AS`.
+pub(crate) const ADDRESS_SPACE_ROW: &str = "Max address space";
+
+/// Read `row` of a `/proc/<pid>/limits` table as `(soft, hard)`, with
+/// "unlimited" as `u64::MAX`. `None` if the row is absent or malformed, which
+/// every caller treats as "not confirmed".
+pub(crate) fn parse_limit(text: &str, row: &str) -> Option<(u64, u64)> {
+    let rest = text.lines().find_map(|line| line.strip_prefix(row))?;
+    // The label is followed by whitespace: a row that merely begins with the
+    // label's text (a longer name) must not match.
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut fields = rest.split_whitespace();
+    let mut value = || match fields.next()? {
+        "unlimited" => Some(u64::MAX),
+        digits => digits.parse::<u64>().ok(),
+    };
+    let soft = value()?;
+    let hard = value()?;
+    Some((soft, hard))
+}
+
+/// Judge a `/proc/<pid>/limits` table against the cap that was requested: both
+/// the soft and the hard limit must equal it. A hard limit above the soft one
+/// would let the process raise its own cap.
+pub(crate) fn judge_address_space(text: &str, want: MemoryLimit) -> Result<(), &'static str> {
+    match parse_limit(text, ADDRESS_SPACE_ROW) {
+        None => Err("the kernel does not report an address-space limit"),
+        Some((soft, hard)) if soft == want.bytes() && hard == want.bytes() => Ok(()),
+        Some(_) => Err("the kernel reports an address-space limit other than the one requested"),
+    }
+}
+
+/// Ask the kernel what limit `pid` is under, and judge it.
+fn confirm_address_space(pid: u32, want: MemoryLimit) -> Result<(), PolicyError> {
+    let failed = |detail| PolicyError::Failed {
+        rung: Rung::MemoryCap,
+        detail,
+    };
+    let text = std::fs::read_to_string(format!("/proc/{pid}/limits"))
+        .map_err(|_| failed("the process's limits could not be read from the kernel"))?;
+    judge_address_space(&text, want).map_err(failed)
+}
+
+/// Set both the soft and the hard `RLIMIT_AS` of the calling process to
+/// `bytes`, with the raw `setrlimit` system call.
+///
+/// Runs in the forked child, so it allocates nothing and takes no lock. The
+/// system call is used directly rather than libc's wrapper so that the only
+/// thing this does between `fork` and `exec` is one syscall. Both limits are
+/// set: an unprivileged process can lower a hard limit but never raise it, so
+/// the child cannot lift its own cap.
+fn limit_address_space(bytes: u64) -> std::io::Result<()> {
+    let limit = libc::rlimit {
+        rlim_cur: bytes,
+        rlim_max: bytes,
+    };
+    // SAFETY: setrlimit(2) takes a resource number and a pointer to a
+    // `struct rlimit`, which it reads and does not retain. `limit` is a live,
+    // fully initialised libc::rlimit on this stack frame, and the pointer is
+    // valid for the call. The raw syscall is async-signal-safe: it touches no
+    // libc state, and errno is read straight after it on the same thread.
+    let set = unsafe {
+        libc::syscall(
+            libc::SYS_setrlimit,
+            libc::RLIMIT_AS as libc::c_ulong,
+            std::ptr::addr_of!(limit),
+        )
+    };
+    if set == 0 {
+        Ok(())
+    } else {
+        // `last_os_error` builds an error from errno without allocating.
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 /// Spawn `executable` with the policy applied between `fork` and `exec`.
@@ -203,10 +283,12 @@ pub(crate) struct Spawned {
 /// The broker is multi-threaded by design, so this is a live hazard rather
 /// than a theoretical one. Building the program up here means the closure only
 /// reads memory that already exists and makes two `prctl` calls.
-pub(crate) fn spawn(executable: &std::path::Path) -> Result<Spawned, PolicyError> {
+pub(crate) fn spawn(executable: &std::path::Path, policy: &Policy) -> Result<Spawned, PolicyError> {
     use std::os::unix::process::CommandExt;
 
     let program = build_filter();
+    let memory = policy.memory;
+    let cap = memory.bytes();
 
     let mut command = std::process::Command::new(executable);
     command
@@ -224,10 +306,14 @@ pub(crate) fn spawn(executable: &std::path::Path) -> Result<Spawned, PolicyError
     // async-signal-safe operations are permitted. It allocates nothing, takes
     // no lock, and touches no memory beyond `program` — which was built before
     // the fork and is owned by the closure, so it is fully initialised and
-    // stays alive for the call. Both `prctl` operations are async-signal-safe:
-    // they are single syscalls that touch no libc state.
+    // stays alive for the call. Both `prctl` operations and the `setrlimit`
+    // (`limit_address_space`) are async-signal-safe: each is a single raw
+    // syscall that touches no libc state. The limit is applied first so that
+    // it is in force before the filter, and so that a failure to apply it
+    // stops the launch before the child runs any of its own code.
     unsafe {
         command.pre_exec(move || {
+            limit_address_space(cap)?;
             apply(&program).map_err(|error| match error {
                 PolicyError::Failed { detail, .. } => std::io::Error::other(detail),
                 PolicyError::Refused(_) => {
@@ -241,6 +327,16 @@ pub(crate) fn spawn(executable: &std::path::Path) -> Result<Spawned, PolicyError
         rung: Rung::Seccomp,
         detail: "the content process could not be created under a policy",
     })?;
+
+    // Do not trust the closure's silence: ask the kernel what the child is
+    // actually under. `Command::spawn` returns only after `exec`, and rlimits
+    // survive `exec`, so the table already shows the cap. A child whose cap
+    // cannot be confirmed is killed before it is ever handed to the broker.
+    if let Err(error) = confirm_address_space(child.id(), memory) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
 
     // A failure inside pre_exec makes `spawn` fail, so reaching here means the
     // policy was applied. Taking the pipes cannot fail — both were requested
@@ -268,7 +364,8 @@ pub(crate) fn spawn(executable: &std::path::Path) -> Result<Spawned, PolicyError
         child,
         stdin,
         stdout,
-        applied: vec![Rung::NoNewPrivs, Rung::Seccomp],
+        applied: vec![Rung::NoNewPrivs, Rung::Seccomp, Rung::MemoryCap],
+        memory,
     })
 }
 
@@ -459,6 +556,72 @@ mod tests {
             program[3].k, SECCOMP_DATA_NR_OFFSET,
             "only then may it load the syscall number"
         );
+    }
+
+    const LIMITS: &str = "Limit                     Soft Limit           Hard Limit           Units     \n\
+Max cpu time              unlimited            unlimited            seconds   \n\
+Max data size             unlimited            unlimited            bytes     \n\
+Max address space         1073741824           1073741824           bytes     \n\
+Max locked memory         8388608              8388608              bytes     \n";
+
+    #[test]
+    fn sandbox_memory_cap_the_limits_table_is_read_as_soft_and_hard() {
+        assert_eq!(
+            parse_limit(LIMITS, ADDRESS_SPACE_ROW),
+            Some((1 << 30, 1 << 30))
+        );
+        assert_eq!(
+            parse_limit(LIMITS, "Max data size"),
+            Some((u64::MAX, u64::MAX))
+        );
+        assert_eq!(parse_limit(LIMITS, "Max nonsense"), None);
+        assert_eq!(parse_limit("", ADDRESS_SPACE_ROW), None);
+        // A longer label that merely begins with ours is not our row.
+        assert_eq!(
+            parse_limit("Max address spacey 1 1 bytes\n", ADDRESS_SPACE_ROW),
+            None
+        );
+        // Malformed values are not a limit.
+        assert_eq!(
+            parse_limit("Max address space many few bytes\n", ADDRESS_SPACE_ROW),
+            None
+        );
+        assert_eq!(
+            parse_limit("Max address space 5\n", ADDRESS_SPACE_ROW),
+            None
+        );
+    }
+
+    /// Only a table showing exactly the requested cap, soft and hard, counts as
+    /// confirmation. Everything else fails closed.
+    #[test]
+    fn sandbox_memory_cap_only_the_requested_limit_is_confirmed() {
+        let want = MemoryLimit::from_bytes(1 << 30).expect("a limit");
+        assert_eq!(judge_address_space(LIMITS, want), Ok(()));
+
+        let other = MemoryLimit::from_bytes(1 << 29).expect("a limit");
+        assert!(judge_address_space(LIMITS, other).is_err());
+
+        // Unlimited, soft-only and hard-only are all refusals.
+        for table in [
+            "Max address space unlimited unlimited bytes\n",
+            "Max address space 1073741824 unlimited bytes\n",
+            "Max address space unlimited 1073741824 bytes\n",
+            "Max cpu time unlimited unlimited seconds\n",
+            "",
+        ] {
+            assert!(
+                judge_address_space(table, want).is_err(),
+                "confirmed from {table:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sandbox_memory_cap_zero_and_unlimited_are_not_limits() {
+        assert_eq!(MemoryLimit::from_bytes(0), None);
+        assert_eq!(MemoryLimit::from_bytes(u64::MAX), None);
+        assert_eq!(MemoryLimit::from_bytes(1).map(MemoryLimit::bytes), Some(1));
     }
 
     #[test]
