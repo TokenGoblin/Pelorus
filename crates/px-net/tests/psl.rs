@@ -65,7 +65,7 @@ fn psl_version_matches_the_list_on_disk() {
         actual, recorded,
         "data/public_suffix_list.dat does not match the sha256 in its version \
          file. Either the list was edited by hand, or it was refreshed without \
-         ci/update-psl.sh rewriting both files together."
+         `cargo xtask update-psl` rewriting both files together."
     );
 }
 
@@ -122,7 +122,7 @@ fn psl_version_is_not_stale() {
     assert!(
         now_year - year <= 1,
         "the PSL was fetched in {year} and is more than a year old. \
-         Partition boundaries are drawn from it; refresh with ci/update-psl.sh."
+         Partition boundaries are drawn from it; refresh with `cargo xtask update-psl`."
     );
 }
 

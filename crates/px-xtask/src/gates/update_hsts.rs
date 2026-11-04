@@ -1,0 +1,355 @@
+//! `cargo xtask update-hsts` -- refresh the HSTS preload list and its version
+//! file, together. Port of `ci/update-hsts.sh`.
+//!
+//! Same discipline as `update-psl`, for the same reason: the version file is
+//! what makes "stale" answerable, and a list refreshed without it reads as
+//! though somebody checked.
+//!
+//! ```text
+//! cargo xtask update-hsts                   fetch, convert, write both files
+//! cargo xtask update-hsts --check           report whether upstream differs; change nothing
+//! cargo xtask update-hsts --from-file <f>   convert <f> (Chromium's JSON) instead of fetching
+//! ```
+//!
+//! # Why a compact form rather than the upstream JSON
+//!
+//! Chromium publishes 94,644 entries as a 10.5 MB JSON file with comments.
+//! Every entry is `mode: force-https` -- the field is constant across the whole
+//! list -- and the only other thing this browser needs is whether subdomains
+//! are included. So the shipped form is one host per line, prefixed with `.`
+//! when it covers subdomains: 1.5 MB, sorted, and readable without a JSON
+//! parser.
+//!
+//! The conversion is lossy on purpose and the loss is stated: pinsets, report
+//! URIs and expect-ct data are dropped. This project does not implement key
+//! pinning, and shipping data for a feature that does not exist would invite
+//! somebody to assume it does.
+//!
+//! # Why the list matters
+//!
+//! Without it, the first request to a preloaded host over plaintext is
+//! interceptable -- the classic sslstrip position. The list is the only thing
+//! that makes a *first* visit safe, which is precisely the visit no dynamic
+//! HSTS header can protect.
+//!
+//! Fetch is `curl` as a child; the JSON is parsed by `crate::json`.
+
+use super::update_psl::{Action, decide, fetch, parse_args};
+use crate::Gate;
+use crate::clock;
+use crate::json::{self, Value};
+use crate::sha256;
+use std::path::Path;
+
+const SOURCE: &str = "https://raw.githubusercontent.com/chromium/chromium/main/net/http/transport_security_state_static.json";
+const LIST: &str = "data/hsts_preload.txt";
+const VERSION: &str = "data/hsts_preload.version";
+
+/// Fewer force-https entries than this is not the list.
+const MIN_HOSTS: usize = 10_000;
+
+/// The upstream file is JSON with `//` comment lines, which a JSON parser
+/// refuses. Drops every line whose first non-blank characters are `//`
+/// (the script's `re.sub(r"^\s*//.*$", "", raw, flags=re.M)`); the newline
+/// stays, so the rest of the document is untouched.
+pub fn strip_comments(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for line in raw.split_inclusive('\n') {
+        if line.trim_start().starts_with("//") {
+            if line.ends_with('\n') {
+                out.push('\n');
+            }
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// Chromium JSON (with comments) to the sorted compact host list.
+pub fn convert(raw: &str) -> Result<Vec<String>, String> {
+    let doc = json::parse(&strip_comments(raw))?;
+    let entries: &[Value] = match doc.get("entries") {
+        Some(Value::Array(a)) => a,
+        None => &[],
+        Some(_) => return Err("`entries` is not an array".into()),
+    };
+    let mut hosts = Vec::new();
+    for entry in entries {
+        if entry.get("mode") != Some(&Value::str("force-https")) {
+            continue;
+        }
+        let Some(Value::Str(name)) = entry.get("name") else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let sub = entry.get("include_subdomains").is_some_and(Value::truthy);
+        hosts.push(format!("{}{name}", if sub { "." } else { "" }));
+    }
+    if hosts.len() < MIN_HOSTS {
+        return Err(format!(
+            "only {} force-https entries; that is not the list",
+            hosts.len()
+        ));
+    }
+    hosts.sort();
+    Ok(hosts)
+}
+
+/// One host per line, LF, trailing newline.
+pub fn list_text(hosts: &[String]) -> String {
+    let mut s = hosts.join("\n");
+    s.push('\n');
+    s
+}
+
+/// The version file, byte for byte what the script's heredoc wrote.
+pub fn version_text(sha: &str, fetched: &str, count: usize, source: &str) -> String {
+    format!(
+        "\
+# HSTS preload list version.
+#
+# The list carries no version of its own, so this file is the version: the
+# SHA-256 of the converted list and the date it was fetched. Both are asserted
+# by crates/px-net/tests/hsts.rs.
+#
+# Converted from Chromium's transport_security_state_static.json to one host
+# per line, prefixed with '.' when it covers subdomains. The conversion is
+# lossy on purpose: pinsets and report URIs are dropped, because this browser
+# does not implement key pinning and shipping data for a feature that does not
+# exist would invite somebody to assume it does.
+#
+# A stale list is not a broken feature, it is a quiet one. Hosts added upstream
+# since this was fetched get no protection on a first visit, which is exactly
+# the visit no dynamic HSTS header can cover.
+#
+# Generated by `cargo xtask update-hsts`. Editing either file by hand defeats
+# the assertion that they describe each other.
+
+sha256 = \"{sha}\"
+fetched = \"{fetched}\"
+hosts = {count}
+source = \"{source}\"
+"
+    )
+}
+
+pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
+    let opts = match parse_args(args) {
+        Ok(o) => o,
+        Err(e) => {
+            g.fail(e);
+            return;
+        }
+    };
+    let raw = match &opts.from_file {
+        Some(p) => match std::fs::read(p) {
+            Ok(b) => b,
+            Err(e) => {
+                g.fail(format!("cannot read {}: {e}", p.display()));
+                return;
+            }
+        },
+        None => match fetch(g, SOURCE) {
+            Some(b) => b,
+            None => return,
+        },
+    };
+    let hosts = match String::from_utf8(raw)
+        .map_err(|_| "the fetched file is not UTF-8".to_string())
+        .and_then(|s| convert(&s))
+    {
+        Ok(h) => h,
+        Err(e) => {
+            g.fail(e);
+            return;
+        }
+    };
+    g.info(format!("{} hosts", hosts.len()));
+    let text = list_text(&hosts);
+    if hosts.is_empty() {
+        g.fail("the conversion produced nothing");
+        return;
+    }
+
+    let new_sha = sha256::hex_of(text.as_bytes());
+    let list_path = root.join(LIST);
+    let old_sha = std::fs::read(&list_path)
+        .map(|b| sha256::hex_of(&b))
+        .unwrap_or_default();
+
+    match decide(opts.check, &new_sha, &old_sha) {
+        Action::CheckMatches => g.ok("the shipped list matches upstream"),
+        Action::CheckDiffers => {
+            g.fail("upstream differs from the shipped list; run `cargo xtask update-hsts`")
+        }
+        Action::AlreadyCurrent => g.ok(format!("already current ({new_sha})")),
+        Action::Install => {
+            if let Err(e) = std::fs::write(&list_path, &text) {
+                g.fail(format!("cannot write {LIST}: {e}"));
+                return;
+            }
+            // `wc -l`: the number of newline-terminated lines in what was written.
+            let count = text.bytes().filter(|b| *b == b'\n').count();
+            let fetched = clock::today_utc();
+            if let Err(e) = std::fs::write(
+                root.join(VERSION),
+                version_text(&new_sha, &fetched, count, SOURCE),
+            ) {
+                g.fail(format!("cannot write {VERSION}: {e}"));
+                return;
+            }
+            g.ok("updated");
+            g.info(format!("  was {old_sha}"));
+            g.info(format!("  now {new_sha}"));
+            g.info(format!("  {count} hosts, fetched {fetched}"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::Fixture;
+
+    /// An upstream-shaped document with `n` distinct hosts; every third has
+    /// include_subdomains, one in seven is not force-https.
+    fn upstream(n: usize) -> String {
+        let mut s = String::from("// Copyright header\n// more comment\n{\n  \"entries\": [\n");
+        for i in 0..n {
+            let mode = if i % 7 == 0 { "" } else { "force-https" };
+            let sub = if i % 3 == 0 {
+                "\"include_subdomains\": true, "
+            } else {
+                ""
+            };
+            s.push_str(&format!(
+                "    {{ \"name\": \"h{i}.example\", {sub}\"mode\": \"{mode}\", \"pins\": \"x\" }},\n"
+            ));
+            if i % 50 == 0 {
+                s.push_str("    // a comment between entries\n");
+            }
+        }
+        s.push_str("    { \"name\": \"last.example\", \"mode\": \"force-https\" }\n  ]\n}\n");
+        s
+    }
+
+    #[test]
+    fn comments_are_blanked_not_deleted() {
+        assert_eq!(strip_comments("a\n  // x\nb\n// y"), "a\n\nb\n");
+        assert_eq!(
+            strip_comments("{\"u\":\"http://x\"}"),
+            "{\"u\":\"http://x\"}"
+        );
+    }
+
+    #[test]
+    fn converts_filters_prefixes_and_sorts() {
+        let hosts = convert(&upstream(30_000)).unwrap();
+        // 30_000 entries, ceil(30000/7) = 4286 not force-https, plus "last".
+        assert_eq!(hosts.len(), 30_000 - 4_286 + 1);
+        assert!(hosts.windows(2).all(|w| w[0] <= w[1]));
+        // i = 3: subdomains, force-https. i = 4: plain. i = 0, 7: dropped.
+        assert!(hosts.contains(&".h3.example".to_string()));
+        assert!(hosts.contains(&"h4.example".to_string()));
+        assert!(!hosts.contains(&"h7.example".to_string()));
+        assert!(hosts.contains(&"last.example".to_string()));
+    }
+
+    #[test]
+    fn small_or_nameless_or_malformed_is_refused() {
+        let e = convert(&upstream(20)).unwrap_err();
+        assert!(e.contains("that is not the list"), "{e}");
+        assert!(convert("{").is_err());
+        assert!(convert("{\"entries\": 3}").is_err());
+        // Missing `entries` is an empty list, which is too short.
+        assert!(convert("{}").unwrap_err().starts_with("only 0"));
+        // Entries without a usable name or mode are skipped.
+        let mut s = String::from(
+            "{\"entries\":[{\"mode\":\"force-https\"},{\"name\":\"\",\"mode\":\"force-https\"},{\"name\":\"a\"},",
+        );
+        s.push_str(&"{\"name\":\"b\",\"mode\":\"force-https\"},".repeat(10_000));
+        s.push_str("{}]}");
+        assert_eq!(convert(&s).unwrap().len(), 10_000);
+    }
+
+    #[test]
+    fn version_text_matches_the_committed_file() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/hsts_preload.version");
+        let Ok(committed) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let field = |k: &str| -> String {
+            let line = committed
+                .lines()
+                .find(|l| l.starts_with(&format!("{k} = ")))
+                .unwrap();
+            line.split_once(" = ")
+                .unwrap()
+                .1
+                .trim_matches('"')
+                .to_string()
+        };
+        let got = version_text(
+            &field("sha256"),
+            &field("fetched"),
+            field("hosts").parse().unwrap(),
+            &field("source"),
+        );
+        // Only the line naming the retired script differs.
+        let want = committed.replace(
+            "# Generated by ci/update-hsts.sh. Editing either file by hand defeats the\n# assertion that they describe each other.",
+            "# Generated by `cargo xtask update-hsts`. Editing either file by hand defeats\n# the assertion that they describe each other.",
+        );
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn install_check_and_nothing_written_on_bad_input() {
+        let f = Fixture::new("hsts");
+        f.write("data/hsts_preload.txt", "old\n");
+        f.write("in.json", &upstream(12_000));
+        f.write("bad.json", &upstream(5));
+        let input = f.path().join("in.json").display().to_string();
+        let args = |extra: &[&str]| -> Vec<String> {
+            let mut v = vec!["--from-file".to_string(), input.clone()];
+            v.extend(extra.iter().map(|s| s.to_string()));
+            v
+        };
+
+        let mut g = Gate::new("t");
+        run(&mut g, f.path(), &args(&["--check"]));
+        assert_eq!(g.fail_count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(f.path().join(LIST)).unwrap(),
+            "old\n"
+        );
+
+        let mut g = Gate::new("t");
+        run(&mut g, f.path(), &args(&[]));
+        assert!(g.passed());
+        let list = std::fs::read_to_string(f.path().join(LIST)).unwrap();
+        assert_eq!(list, list_text(&convert(&upstream(12_000)).unwrap()));
+        let ver = std::fs::read_to_string(f.path().join(VERSION)).unwrap();
+        assert!(ver.contains(&format!("hosts = {}\n", list.lines().count())));
+        assert!(ver.contains(&format!("sha256 = \"{}\"", sha256::hex_of(list.as_bytes()))));
+
+        let mut g = Gate::new("t");
+        run(&mut g, f.path(), &args(&["--check"]));
+        assert!(g.passed());
+
+        let mut g = Gate::new("t");
+        run(
+            &mut g,
+            f.path(),
+            &[
+                "--from-file".into(),
+                f.path().join("bad.json").display().to_string(),
+            ],
+        );
+        assert_eq!(g.fail_count(), 1);
+        assert_eq!(std::fs::read_to_string(f.path().join(LIST)).unwrap(), list);
+    }
+}

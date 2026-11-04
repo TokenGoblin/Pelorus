@@ -134,7 +134,7 @@ fn check_corpus(g: &mut Gate, root: &Path) {
     let dir = root.join(ARCHIVE);
     if !dir.is_dir() {
         g.fail(format!(
-            "{ARCHIVE} does not exist; run ci/make-fetch-corpus.py"
+            "{ARCHIVE} does not exist; run cargo xtask make-fetch-corpus"
         ));
         return;
     }

@@ -142,7 +142,7 @@ jobs:
         run: cargo install --locked cargo-deny cargo-vet cargo-auditable
       - name: Gate check 3
         shell: bash
-        run: ci/gate-supply-chain.sh
+        run: cargo xtask supply-chain
 
   unsafe-headers:
     name: unsafe-headers
@@ -231,7 +231,7 @@ jobs:
           rustup toolchain install "$nightly" --component miri --profile minimal
       - name: Miri
         shell: bash
-        run: ci/gate-miri.sh
+        run: cargo xtask miri
 
   # Phase 4. Written failing before px-dom had an arena, and red for the length
   # of the phase — a gate added only once it passes has never been seen to
@@ -326,7 +326,7 @@ jobs:
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
   # explicitly rather than by directory override, so the fence assertion in
-  # ci/gate-fuzz-smoke.sh keeps passing unmodified and keeps meaning what it
+  # `cargo xtask fuzz-smoke` keeps passing unmodified and keeps meaning what it
   # meant. Nothing built here ships.
   sanitizers:
     name: sanitizers (${{ matrix.os }})
@@ -353,10 +353,10 @@ jobs:
       # into apparent assurance, which is worse than not running one.
       - name: Sanitizer is armed
         shell: bash
-        run: ci/gate-sanitizers.sh --self-check
+        run: cargo xtask sanitizers --self-check
       - name: ASAN and TSAN
         shell: bash
-        run: ci/gate-sanitizers.sh
+        run: cargo xtask sanitizers
 
   # ADR 006: 60s per target against the committed corpus. The 24h campaign
   # Phase 1's gate requires is .github/workflows/fuzz-campaign.yml, on a
@@ -377,7 +377,7 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install --locked cargo-fuzz
       - name: Smoke
-        run: ci/gate-fuzz-smoke.sh
+        run: cargo xtask fuzz-smoke
 
   # Not one of the five gate checks: a Phase 0 deliverable that only the
   # person who will daily-drive the browser can produce. Red here means the

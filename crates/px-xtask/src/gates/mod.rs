@@ -10,17 +10,24 @@ pub mod compat_list;
 pub mod count_lines;
 pub mod dom;
 pub mod flex_grid;
+pub mod fuzz_smoke;
 pub mod ipc;
 pub mod layout;
+pub mod make_fetch_corpus;
+pub mod miri;
 pub mod network;
 pub mod not_serializable;
 pub mod sandbox;
+pub mod sanitizers;
 pub mod setup_build_python;
 pub mod structure;
 pub mod style;
 pub mod suites;
+pub mod supply_chain;
 pub mod unsafe_audit;
 pub mod unsafe_headers;
+pub mod update_hsts;
+pub mod update_psl;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -89,6 +96,11 @@ pub static GATES: &[GateSpec] = &[
         run: flex_grid::run,
     },
     GateSpec {
+        name: "fuzz-smoke",
+        about: "60 s of cargo-fuzz per target against the committed corpus; asserts the nightly fence (ADR 006)",
+        run: fuzz_smoke::run,
+    },
+    GateSpec {
         name: "ipc",
         about: "Phase 1: hostile-identity/crash-restart/size-limit suites, content-release build, px-browser end to end, wire identity and ChannelId scans",
         run: ipc::run,
@@ -97,6 +109,16 @@ pub static GATES: &[GateSpec] = &[
         name: "layout",
         about: "Phase 6: CSS2 reftest subset, box-tree determinism, deep nesting, Au source scans",
         run: layout::run,
+    },
+    GateSpec {
+        name: "make-fetch-corpus",
+        about: "TOOL: regenerate the synthetic response corpus in tests/net/corpus",
+        run: make_fetch_corpus::run,
+    },
+    GateSpec {
+        name: "miri",
+        about: "Miri over px-dom's five ADR 022 suites on the pinned nightly",
+        run: miri::run,
     },
     GateSpec {
         name: "network",
@@ -114,6 +136,11 @@ pub static GATES: &[GateSpec] = &[
         run: sandbox::run,
     },
     GateSpec {
+        name: "sanitizers",
+        about: "ASAN (+ TSAN on Linux) over px-sandbox and px-broker; --self-check proves ASAN can still fail (ADR 011)",
+        run: sanitizers::run,
+    },
+    GateSpec {
         name: "setup-build-python",
         about: "TOOL: build the pinned Python venv stylo's build.rs needs; prints the interpreter path (ADR 023)",
         run: setup_build_python::run,
@@ -129,6 +156,11 @@ pub static GATES: &[GateSpec] = &[
         run: style::run,
     },
     GateSpec {
+        name: "supply-chain",
+        about: "cargo-deny, cargo-vet, cargo-auditable SBOM, and the unsafe baseline (build-spec §5, §4.5)",
+        run: supply_chain::run,
+    },
+    GateSpec {
         name: "unsafe-audit",
         about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
         run: unsafe_audit::run,
@@ -137,6 +169,16 @@ pub static GATES: &[GateSpec] = &[
         name: "unsafe-headers",
         about: "gate check 4: per-crate unsafe header rules, local waiver scans, px-css zero-unsafe counts",
         run: unsafe_headers::run,
+    },
+    GateSpec {
+        name: "update-hsts",
+        about: "TOOL: refresh data/hsts_preload.txt and its version file (--check, --from-file)",
+        run: update_hsts::run,
+    },
+    GateSpec {
+        name: "update-psl",
+        about: "TOOL: refresh data/public_suffix_list.dat and its version file (--check, --from-file)",
+        run: update_psl::run,
     },
     GateSpec {
         name: "vendor-wpt",

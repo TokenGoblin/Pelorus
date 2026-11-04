@@ -147,6 +147,11 @@ pub fn hex(digest: &[u8]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// `sha256sum` of in-memory bytes, as lowercase hex.
+pub fn hex_of(data: &[u8]) -> String {
+    hex(&sha256(data))
+}
+
 /// Digest of a file, streamed (release binaries are large).
 pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     let mut f = std::fs::File::open(path)?;

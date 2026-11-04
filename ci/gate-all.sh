@@ -23,7 +23,7 @@ cd "$(git rev-parse --show-toplevel)"
 # in scripts and then gate-all.sh itself becomes `cargo xtask all`.
 CHECKS="
 build:cargo xtask build
-supply-chain:bash ci/gate-supply-chain.sh
+supply-chain:cargo xtask supply-chain
 unsafe-headers:cargo xtask unsafe-headers
 brand-leak:cargo xtask brand-leak
 structure:cargo xtask structure

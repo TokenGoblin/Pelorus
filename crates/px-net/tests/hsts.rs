@@ -48,7 +48,7 @@ fn hsts_version_matches_the_list_on_disk() {
         sha256_hex(list.as_bytes()),
         recorded,
         "data/hsts_preload.txt does not match the sha256 in its version file. \
-         Either it was edited by hand, or refreshed without ci/update-hsts.sh \
+         Either it was edited by hand, or refreshed without `cargo xtask update-hsts` \
          rewriting both files together."
     );
 
@@ -84,7 +84,7 @@ fn hsts_version_is_not_stale() {
     assert!(
         now_year - year <= 1,
         "the HSTS list was fetched in {year} and is more than a year old. \
-         Hosts added since get no first-visit protection; run ci/update-hsts.sh."
+         Hosts added since get no first-visit protection; run `cargo xtask update-hsts`."
     );
 }
 

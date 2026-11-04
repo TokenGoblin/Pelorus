@@ -77,7 +77,7 @@ jobs:
           # target. Two shards for dom_mutation because it is the one checking
           # a structural property rather than a decoder, and its input space is
           # operation sequences rather than bytes, which is larger than it
-          # looks. See ci/gate-fuzz-smoke.sh for why their -max_len is 4 KB
+          # looks. See crates/px-xtask/src/gates/fuzz_smoke.rs for why their -max_len is 4 KB
           # rather than the megabyte the parsers get.
           #
           # dom_mutation gets six shards because §9 Phase 4's gate item is
@@ -112,7 +112,7 @@ jobs:
         env:
           FUZZ_TARGET: ${{ matrix.target }}
           FUZZ_SECONDS: ${{ github.event.inputs.seconds_per_shard || '14400' }}
-        run: ci/gate-fuzz-smoke.sh
+        run: cargo xtask fuzz-smoke
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
