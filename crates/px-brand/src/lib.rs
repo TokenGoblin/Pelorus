@@ -15,6 +15,8 @@
 //! updates for exactly the users who can no longer be reached. They live in
 //! `px-update`, and `cargo xtask structure` asserts they have not migrated here.
 
+pub mod palette;
+
 /// The product name as shown to a user.
 ///
 /// Provisional. See `docs/adr/000-name.md` for the surviving alternates and

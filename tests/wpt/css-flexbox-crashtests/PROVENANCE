@@ -1,0 +1,18 @@
+WPT css-flexbox and css-grid crashtests, vendored by hand for Phase 7.
+
+repository  https://github.com/web-platform-tests/wpt
+commit      b875b21fd9e6b688e37c10d1b6366cab7418f91e
+directories css/css-flexbox (-> tests/wpt/css-flexbox-crashtests)
+            css/css-grid    (-> tests/wpt/css-grid-crashtests)
+selection   every .html under those directories whose name contains "crash",
+            at any depth, with the relative path preserved
+files       css-flexbox 27, css-grid 35 (62 total)
+
+A crashtest has no reference and no assertions: it passes if layout does not
+panic, overflow the stack or fail to terminate. Eighteen carry a <script>, which
+cannot run until Phase 10; they are still laid out as written, as the CSS2
+crashtests are.
+
+ci/vendor-css2-reftests.sh pairs on -ref.html and so cannot see these, which is
+how Phase 6 missed 28 of its own. This directory was produced by the loop in
+docs/research/phase-07-wpt-composition.md, not by that script.

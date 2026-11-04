@@ -193,11 +193,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    # Phase 3's deliverable, red until the phase closes. Not marked required
-    # yet for the same reason compat-list is not: a job that is red for a known
-    # and recorded reason teaches people to ignore red, unless it is separated
-    # from the ones that mean something is broken.
-    continue-on-error: true
+    # `continue-on-error: true` lived here while Phase 3 was open and outlived it
+    # by three phases. Phase 5 recorded that in docs/backlog.md when it removed the
+    # same line from the style job; Phase 6 rediscovered it from scratch, removing
+    # the same line from the layout job, and filed a duplicate before noticing.
+    # Two phases deferred it as out-of-phase, correctly, and the effect was that a
+    # green job nobody owned stayed unenforced. Deleted on the third encounter.
     steps:
       - uses: actions/checkout@v4
       - name: Phase 3 gate
@@ -275,6 +276,43 @@ jobs:
       - name: Phase 5 gate
         shell: bash
         run: ci/gate-style.sh
+
+  # Phase 6, and red on purpose until the phase closes.
+  #
+  # `continue-on-error: true` was set from the phase's first commit and removed
+  # here, in its last: wired from day one so the gate's CI behaviour was exercised
+  # all along rather than discovered on the closing day, which is the lesson
+  # Phase 4 paid for. Phase 6 is closed; this job is now required.
+  layout:
+    name: layout (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 6 gate
+        shell: bash
+        run: ci/gate-layout.sh
+
+  # Phase 7 gate (ci/gate-flex-grid.sh). `continue-on-error` is set in the phase's
+  # first commit and must be deleted in its last, so the gate's CI behaviour is
+  # exercised all along rather than discovered on the closing day. It fails by
+  # design until the flex and grid reftest suites exist.
+  flex-grid:
+    name: flex-grid (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 7 gate
+        shell: bash
+        run: ci/gate-flex-grid.sh
 
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named

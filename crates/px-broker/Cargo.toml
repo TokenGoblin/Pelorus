@@ -13,6 +13,20 @@ path = "src/lib.rs"
 name = "px-browser"
 path = "src/main.rs"
 
+# A test-only diagnostic: fetch a real URL and run it through the whole engine.
+# `required-features` rather than a runtime flag, so it is not merely disabled in
+# a release build -- it is not compiled, and §14.4's release scan checks for the
+# absence of the symbol rather than trusting a flag to be off.
+[[bin]]
+name = "px-fetch"
+path = "src/bin/px-fetch.rs"
+required-features = ["testing"]
+
+[features]
+# /CLAUDE.md: test-only capabilities live behind this and are scanned for in
+# release artifacts. Nothing in the product path may depend on it.
+testing = ["dep:px-net", "dep:px-dom", "dep:px-css", "dep:px-layout", "dep:html5ever", "dep:url", "dep:app_units", "dep:stylo"]
+
 [dependencies]
 # Version alongside path: cargo-deny treats a bare path dependency as a
 # wildcard, and "any version at all" is not a supply-chain position.
@@ -21,3 +35,13 @@ px-ipc = { path = "../px-ipc", version = "0.0.0" }
 # one crate permitted unsafe. The broker keeps the supervisor and is handed a
 # child that was created under a policy.
 px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+# The engine, for the px-fetch diagnostic only. Optional, so a default build of
+# the product links none of it and the release scan has nothing to find.
+px-net = { path = "../px-net", version = "0.0.0", optional = true }
+px-dom = { path = "../px-dom", version = "0.0.0", optional = true }
+px-css = { path = "../px-css", version = "0.0.0", optional = true }
+px-layout = { path = "../px-layout", version = "0.0.0", optional = true }
+html5ever = { version = "0.39.0", optional = true }
+url = { version = "2.5.8", optional = true }
+app_units = { version = "0.7.8", optional = true }
+stylo = { version = "0.21.0", default-features = false, features = ["servo"], optional = true }
