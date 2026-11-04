@@ -2,20 +2,25 @@
 //!
 //! # Painting order
 //!
-//! **Not yet CSS 2.1 Appendix E in full.** What is implemented is the normal-flow
-//! case: the canvas background first, then every fragment in tree order, each
-//! painting its own background, then its border, then (inside the box's overflow
-//! clip, when it has one) its descendants. For boxes in normal flow that is
-//! Appendix E steps 4-7 collapsed into one pass, which is correct while nothing
-//! floats or is positioned.
+//! CSS 2.1 Appendix E, for what the engine has. Per stacking context (the root, and
+//! any element with `position` other than `static` and a `z-index` other than
+//! `auto`): 1 the context root's background and border, 2 child contexts with
+//! negative `z-index`, 3 in-flow non-positioned blocks' backgrounds and borders in
+//! tree order, 4 non-positioned floats, 5 inline content (text placeholders), 6
+//! positioned `z-index: auto` boxes and `z-index: 0` contexts in tree order, 7
+//! positive `z-index` contexts in z order, ties in tree order. A float and a
+//! positioned `z-index: auto` box are painted atomically as if they were contexts,
+//! but their positioned descendants belong to the enclosing real context.
 //!
-//! Not done, and not approximated: stacking contexts and `z-index`, floats
-//! (painted in tree order here, not in their own layer above block backgrounds),
-//! positioned boxes (likewise), inline-level backgrounds and borders (layout
-//! produces no fragment for an inline box), `outline`, shadows, background
-//! images, `border-radius`, `opacity`, transforms. A page using them paints in
-//! tree order, which is wrong for overlapping content and right for everything
-//! else. That is a known gap, not a silent one.
+//! `overflow` clips are not bracketed around subtrees (reordering would break the
+//! nesting) but opened and closed per phase from each fragment's chain of
+//! clipping ancestors; an absolutely positioned box escapes the clips between it
+//! and its containing block.
+//!
+//! Not done, and not approximated: `opacity` contexts, transforms, inline-level
+//! backgrounds and borders (layout produces no fragment for an inline box),
+//! `outline`, shadows, background images, `border-radius`. `position: sticky`
+//! counts as positioned. A page using them paints without them.
 //!
 //! # What is drawn
 //!
@@ -69,9 +74,302 @@ struct Inherited {
     visible: bool,
 }
 
-enum Task {
-    Enter(FragmentId, Inherited),
-    PopClip,
+/// One thing a phase paints.
+#[derive(Clone, Copy)]
+enum Op {
+    /// A box's background and border.
+    Boxed(FragmentId),
+    /// A line's text placeholder.
+    Text(FragmentId),
+}
+
+/// A unit of Appendix E painting: a real stacking context, or a *pseudo* one (a
+/// float, or a positioned box with `z-index: auto`) painted atomically as if it
+/// were one, whose positioned descendants are hoisted into the enclosing real
+/// context.
+#[derive(Default)]
+struct Unit {
+    /// The box whose own background and border open the unit (step 1).
+    root_box: Option<FragmentId>,
+    /// Child contexts with negative `z-index` (step 2), in discovery order.
+    negative: Vec<(i32, usize)>,
+    /// In-flow non-positioned blocks (step 3).
+    blocks: Vec<Op>,
+    /// Non-positioned floats (step 4).
+    floats: Vec<usize>,
+    /// Inline content (step 5).
+    inline: Vec<Op>,
+    /// Positioned `z-index: auto` boxes and `z-index: 0` contexts (step 6), in
+    /// tree order.
+    zero: Vec<usize>,
+    /// Child contexts with positive `z-index` (step 7).
+    positive: Vec<(i32, usize)>,
+}
+
+enum Job {
+    Unit(usize),
+    Ops(Vec<Op>),
+}
+
+/// Per-fragment facts gathered once, top-down.
+struct Facts {
+    style: Vec<Option<PaintStyle>>,
+    /// What the fragment inherits from its parent.
+    inherited: Vec<Inherited>,
+    parent: Vec<Option<FragmentId>>,
+    depth: Vec<i64>,
+    /// Depth of the nearest positioned strict ancestor, -1 for the initial
+    /// containing block.
+    cb_depth: Vec<i64>,
+}
+
+impl Facts {
+    /// The `overflow` clips that apply to `f`, outermost first.
+    ///
+    /// Every clipping ancestor applies, except that an absolutely positioned box
+    /// is not clipped by an `overflow` box *between* it and its containing block
+    /// (CSS 2.1 section 11.1.1).
+    fn clips(&self, f: FragmentId) -> Vec<FragmentId> {
+        let mut out = Vec::new();
+        let mut limit = i64::MAX;
+        let mut cur = f;
+        loop {
+            let i = cur.index();
+            if self.style[i].is_some_and(|s| s.position_absolute) {
+                limit = limit.min(self.cb_depth[i]);
+            }
+            let Some(p) = self.parent[i] else { break };
+            if self.style[p.index()].is_some_and(|s| s.clips_overflow)
+                && self.depth[p.index()] <= limit
+            {
+                out.push(p);
+            }
+            cur = p;
+        }
+        out.reverse();
+        out
+    }
+}
+
+/// One top-down pass: styles, inheritance, parents, depths.
+fn gather(
+    tree: &FragmentTree,
+    root: FragmentId,
+    style_of: impl Fn(NodeId) -> Option<PaintStyle>,
+) -> Facts {
+    let n = tree.len();
+    let initial = Inherited {
+        color: [0, 0, 0, 255],
+        visible: true,
+    };
+    let mut facts = Facts {
+        style: vec![None; n],
+        inherited: vec![initial; n],
+        parent: vec![None; n],
+        depth: vec![0; n],
+        cb_depth: vec![-1; n],
+    };
+    let mut stack = vec![(root, None::<FragmentId>, initial, 0i64, -1i64)];
+    while let Some((id, parent, inherited, depth, cb)) = stack.pop() {
+        let Some(fragment) = tree.get(id) else {
+            continue;
+        };
+        let i = id.index();
+        let style = fragment.node.and_then(&style_of);
+        facts.style[i] = style;
+        facts.inherited[i] = inherited;
+        facts.parent[i] = parent;
+        facts.depth[i] = depth;
+        facts.cb_depth[i] = cb;
+        let mut out = inherited;
+        let mut child_cb = cb;
+        if fragment.kind != FragmentKind::Line
+            && let Some(s) = style
+        {
+            out = Inherited {
+                color: s.color,
+                visible: s.visible,
+            };
+            if s.positioned {
+                child_cb = depth;
+            }
+        }
+        for kid in tree.children(id).iter().rev() {
+            stack.push((*kid, Some(id), out, depth + 1, child_cb));
+        }
+    }
+    facts
+}
+
+/// Sort every fragment into the unit and phase Appendix E paints it in.
+///
+/// One pre-order walk per real stacking context, not entering a nested real
+/// context (it gets its own walk, off the work list). Positioned descendants of a
+/// pseudo unit are registered with the enclosing real context, so tree order among
+/// them survives.
+fn build_units(tree: &FragmentTree, facts: &Facts, root: FragmentId) -> Vec<Unit> {
+    let mut units: Vec<Unit> = vec![Unit::default()];
+    units[0].root_box = facts.style[root.index()].map(|_| root);
+    let mut contexts = vec![(0usize, root)];
+    while let Some((real, ctx_root)) = contexts.pop() {
+        let mut stack: Vec<(FragmentId, usize)> = tree
+            .children(ctx_root)
+            .iter()
+            .rev()
+            .map(|k| (*k, real))
+            .collect();
+        while let Some((id, carried)) = stack.pop() {
+            let Some(fragment) = tree.get(id) else {
+                continue;
+            };
+            let mut kids_unit = carried;
+            if fragment.kind == FragmentKind::Line {
+                units[carried].inline.push(Op::Text(id));
+            } else if let Some(s) = facts.style[id.index()] {
+                if s.positioned
+                    && let Some(z) = s.z_index
+                {
+                    let u = units.len();
+                    units.push(Unit {
+                        root_box: Some(id),
+                        ..Unit::default()
+                    });
+                    match z {
+                        z if z < 0 => units[real].negative.push((z, u)),
+                        0 => units[real].zero.push(u),
+                        z => units[real].positive.push((z, u)),
+                    }
+                    contexts.push((u, id));
+                    continue;
+                } else if s.positioned || s.floated {
+                    let u = units.len();
+                    units.push(Unit {
+                        root_box: Some(id),
+                        ..Unit::default()
+                    });
+                    if s.positioned {
+                        units[real].zero.push(u);
+                    } else {
+                        units[carried].floats.push(u);
+                    }
+                    kids_unit = u;
+                } else {
+                    units[carried].blocks.push(Op::Boxed(id));
+                }
+            }
+            for kid in tree.children(id).iter().rev() {
+                stack.push((*kid, kids_unit));
+            }
+        }
+    }
+    units
+}
+
+/// Walk the units in painting order and emit their items.
+fn emit(
+    list: &mut DisplayList,
+    tree: &FragmentTree,
+    facts: &Facts,
+    mut units: Vec<Unit>,
+    propagated: Option<NodeId>,
+) {
+    let mut jobs = vec![Job::Unit(0)];
+    while let Some(job) = jobs.pop() {
+        match job {
+            Job::Ops(ops) => emit_ops(list, tree, facts, &ops, propagated),
+            Job::Unit(u) => {
+                let Some(unit) = units.get_mut(u).map(std::mem::take) else {
+                    continue;
+                };
+                // Pushed last-first: step 7 is popped last.
+                let mut positive = unit.positive;
+                positive.sort_by_key(|(z, _)| *z);
+                for (_, c) in positive.into_iter().rev() {
+                    jobs.push(Job::Unit(c));
+                }
+                for c in unit.zero.into_iter().rev() {
+                    jobs.push(Job::Unit(c));
+                }
+                jobs.push(Job::Ops(unit.inline));
+                for c in unit.floats.into_iter().rev() {
+                    jobs.push(Job::Unit(c));
+                }
+                jobs.push(Job::Ops(unit.blocks));
+                let mut negative = unit.negative;
+                negative.sort_by_key(|(z, _)| *z);
+                for (_, c) in negative.into_iter().rev() {
+                    jobs.push(Job::Unit(c));
+                }
+                if let Some(r) = unit.root_box {
+                    jobs.push(Job::Ops(vec![Op::Boxed(r)]));
+                }
+            }
+        }
+    }
+}
+
+/// Emit one phase's operations, opening and closing `overflow` clips as the chain
+/// of clipping ancestors changes from one operation to the next.
+fn emit_ops(
+    list: &mut DisplayList,
+    tree: &FragmentTree,
+    facts: &Facts,
+    ops: &[Op],
+    propagated: Option<NodeId>,
+) {
+    let mut open: Vec<FragmentId> = Vec::new();
+    for op in ops {
+        let (Op::Boxed(id) | Op::Text(id)) = *op;
+        let Some(fragment) = tree.get(id) else {
+            continue;
+        };
+        let want = facts.clips(id);
+        let common = open.iter().zip(&want).take_while(|(a, b)| a == b).count();
+        while open.len() > common {
+            open.pop();
+            list.push(Item::PopClip);
+        }
+        for g in want.iter().skip(common) {
+            if let (Some(gf), Some(gs)) = (tree.get(*g), facts.style[g.index()]) {
+                list.push(Item::PushClip {
+                    rect: padding_box(frag_rect(gf), &gs),
+                });
+                open.push(*g);
+            }
+        }
+        let rect = frag_rect(fragment);
+        match *op {
+            Op::Text(_) => {
+                let inherited = facts.inherited[id.index()];
+                if inherited.visible && inherited.color[3] > 0 {
+                    list.push(Item::TextRun {
+                        rect,
+                        color: color(inherited.color),
+                    });
+                }
+            }
+            Op::Boxed(_) => {
+                if let Some(style) = facts.style[id.index()]
+                    && style.visible
+                {
+                    let skip_bg = fragment.node.is_some() && fragment.node == propagated;
+                    paint_box(list, rect, &style, skip_bg);
+                }
+            }
+        }
+    }
+    for _ in open {
+        list.push(Item::PopClip);
+    }
+}
+
+fn frag_rect(fragment: &px_layout::fragment::Fragment) -> Rect {
+    Rect {
+        x: fragment.inline_offset,
+        y: fragment.block_offset,
+        width: fragment.size.inline,
+        height: fragment.size.block,
+    }
 }
 
 /// Build the display list for a laid-out document.
@@ -120,70 +418,9 @@ pub fn build_with_viewport(
             });
         }
 
-        let mut stack = vec![Task::Enter(
-            root,
-            Inherited {
-                color: [0, 0, 0, 255],
-                visible: true,
-            },
-        )];
-        while let Some(task) = stack.pop() {
-            let (id, mut inherited) = match task {
-                Task::PopClip => {
-                    list.push(Item::PopClip);
-                    continue;
-                }
-                Task::Enter(id, inherited) => (id, inherited),
-            };
-            let Some(fragment) = tree.get(id) else {
-                continue;
-            };
-            let rect = Rect {
-                x: fragment.inline_offset,
-                y: fragment.block_offset,
-                width: fragment.size.inline,
-                height: fragment.size.block,
-            };
-            let style = fragment.node.and_then(|n| paint_style(dom, n));
-            let mut clip = false;
-
-            match (fragment.kind, style) {
-                (FragmentKind::Line, _) => {
-                    if inherited.visible && inherited.color[3] > 0 {
-                        list.push(Item::TextRun {
-                            rect,
-                            color: color(inherited.color),
-                        });
-                    }
-                }
-                (_, Some(style)) => {
-                    inherited = Inherited {
-                        color: style.color,
-                        visible: style.visible,
-                    };
-                    if style.visible {
-                        let skip_bg = fragment.node.is_some() && fragment.node == propagated;
-                        paint_box(&mut list, rect, &style, skip_bg);
-                    }
-                    if style.clips_overflow {
-                        list.push(Item::PushClip {
-                            rect: padding_box(rect, &style),
-                        });
-                        clip = true;
-                    }
-                }
-                // The initial containing block and anonymous blocks: no style of
-                // their own, nothing to paint, children inherit.
-                (_, None) => {}
-            }
-
-            if clip {
-                stack.push(Task::PopClip);
-            }
-            for kid in tree.children(id).iter().rev() {
-                stack.push(Task::Enter(*kid, inherited));
-            }
-        }
+        let facts = gather(tree, root, |n| paint_style(dom, n));
+        let units = build_units(tree, &facts, root);
+        emit(&mut list, tree, &facts, units, propagated);
     });
     list
 }
