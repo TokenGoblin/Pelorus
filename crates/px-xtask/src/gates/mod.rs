@@ -27,6 +27,7 @@ pub mod structure;
 pub mod style;
 pub mod suites;
 pub mod supply_chain;
+pub mod test262;
 pub mod unsafe_audit;
 pub mod unsafe_headers;
 pub mod update_hsts;
@@ -178,6 +179,11 @@ pub static GATES: &[GateSpec] = &[
         name: "supply-chain",
         about: "cargo-deny, cargo-vet, cargo-auditable SBOM, and the unsafe baseline (build-spec §5, §4.5)",
         run: supply_chain::run,
+    },
+    GateSpec {
+        name: "test262",
+        about: "Phase 10: run the vendored test262 subset against the engine under a ratchet (--engine, --update, --filter; not in `all`)",
+        run: test262::run,
     },
     GateSpec {
         name: "unsafe-audit",
