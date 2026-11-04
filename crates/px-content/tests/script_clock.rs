@@ -33,7 +33,9 @@ fn script_clock_process_performance_now_is_on_the_grid_as_script_sees_it() {
     assert_eq!(peer.run(&spin(3)), value("1"));
     // Ten thousandths of a millisecond are not representable, so the check is
     // that ten times the value is an integer to within float noise, over many
-    // reads, and that the sequence only moves forward.
+    // reads, and that the sequence only moves forward. The read COUNT must not
+    // depend on interpreter speed (a loaded machine ran fewer than 20 reads in
+    // 2 ms and failed this test 2 runs in 5): `n > 1` only proves the loop ran.
     let verdict = peer.run(
         "var last = -1, bad = 0, n = 0;
          var end = performance.now() + 2;
@@ -43,7 +45,7 @@ fn script_clock_process_performance_now_is_on_the_grid_as_script_sees_it() {
            if (v < last) bad++;
            last = v; n++;
          }
-         bad + ',' + (n > 20)",
+         bad + ',' + (n > 1)",
     );
     assert_eq!(verdict, value("0,true"));
 }
