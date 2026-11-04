@@ -18,6 +18,7 @@ pub mod make_fetch_corpus;
 pub mod miri;
 pub mod network;
 pub mod not_serializable;
+pub mod render;
 pub mod sandbox;
 pub mod sanitizers;
 pub mod setup_build_python;
@@ -48,7 +49,7 @@ pub struct GateSpec {
 pub static GATES: &[GateSpec] = &[
     GateSpec {
         name: "all",
-        about: "run the pre-push gates in CI order (not the reproducible-build, layout, flex-grid, style or nightly ones)",
+        about: "run the pre-push gates in CI order (not the reproducible-build, layout, flex-grid, render, style or nightly ones)",
         run: all::run,
     },
     GateSpec {
@@ -135,6 +136,11 @@ pub static GATES: &[GateSpec] = &[
         name: "not-serializable",
         about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
         run: not_serializable::run,
+    },
+    GateSpec {
+        name: "render",
+        about: "Phase 8: 25 pages rendered headless and compared exactly to committed PNG baselines (--bless rewrites them, refused in CI; --select prints the WPT corpus selection)",
+        run: render::run,
     },
     GateSpec {
         name: "sandbox",
