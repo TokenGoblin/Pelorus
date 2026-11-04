@@ -481,29 +481,27 @@ fn parity_devanagari() {
 }
 
 #[test]
-fn ahem_when_the_bundled_font_is_present() {
-    // tests/fonts/ahem is added by the font/raster branch. Until it is merged
-    // this skips; the synthetic font above carries the deterministic cases.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fonts/ahem");
-    let Ok(rd) = std::fs::read_dir(&root) else {
-        eprintln!("SKIP ahem: {} does not exist yet", root.display());
-        return;
-    };
-    let ttf = rd.filter_map(Result::ok).map(|e| e.path()).find(|p| {
-        p.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("ttf"))
-    });
-    let Some(path) = ttf else {
-        eprintln!("SKIP ahem: no .ttf in {}", root.display());
-        return;
-    };
+fn shapes_the_bundled_ahem() {
+    // tests/fonts/Ahem.ttf is committed (public domain, ADR 036 (g)).
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fonts/Ahem.ttf");
     let s = HarfrustShaper::new(Arc::from(std::fs::read(path).unwrap()), 0).unwrap();
     let upem = s.units_per_em();
+    assert_eq!(upem, 1000);
     let r = shape_with(&s, "Xp x", Script::LATIN, Direction::LeftToRight);
     assert_eq!(r.glyphs.len(), 4);
+    assert_eq!(clusters(&r), [0, 1, 2, 3]);
     // Ahem: every glyph, the space included, is one em wide.
     assert!(r.glyphs.iter().all(|g| g.x_advance == i32::from(upem)));
+    // One em per character: width of N characters is N ems, no kerning.
+    let w = shape_with(&s, "ÉXXXXXXXXX", Script::LATIN, Direction::LeftToRight);
+    assert_eq!(w.total_advance(), 10 * i64::from(upem));
+    // Au: 16 px = 960 Au per em, so 10 em is 9600 Au exactly.
+    let au: i32 = w
+        .glyphs
+        .iter()
+        .map(|g| font_units_to_au(g.x_advance, w.units_per_em, 960))
+        .sum();
+    assert_eq!(au, 9600);
 }
 
 /// Regenerates the fuzz seed: `PELORUS_WRITE_FUZZ_SEED=<dir> cargo test -p
