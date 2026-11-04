@@ -51,10 +51,12 @@ fn script_clock_process_performance_now_is_on_the_grid_as_script_sees_it() {
 #[test]
 fn script_clock_process_the_clock_has_the_resolution_the_adr_states() {
     // Over 5 ms of real time a script sees at most one new value per 0.1 ms, so
-    // at most about 51, and a spinning loop sees most of them: not one value (no
-    // clock), not thousands (no coarsening). The exact count depends on how
-    // fast the interpreter loops, so the bounds are loose; the exact count is
-    // the pure property in px-script (`script_clock_prop_`).
+    // at most about 51: the UPPER bound is the coarsening check (thousands would
+    // mean no coarsening). The lower bound only guards against 'no clock at all',
+    // and must NOT depend on interpreter speed: a loaded CI runner loops slowly
+    // enough to see well under 15 values, and the first version of this test
+    // failed that way under heavy parallel builds. The exact count is the pure
+    // property in px-script (`script_clock_prop_`).
     let mut peer = Peer::spawn(7);
     let distinct = peer.run(
         "var seen = {}, count = 0;
@@ -70,7 +72,7 @@ fn script_clock_process_the_clock_has_the_resolution_the_adr_states() {
     };
     let count: u32 = text.as_str().parse().expect("a number");
     assert!(
-        (15..=53).contains(&count),
+        (3..=53).contains(&count),
         "{count} distinct values in 5 ms of a 100 us clock"
     );
 }
