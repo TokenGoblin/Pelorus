@@ -1118,3 +1118,16 @@ follows.
   threshold is not set by an unrelated feature. It is excluded, not rejected.
 - **Why deferred:** nothing implements it, and counting it would shrink the graded
   fraction for no signal.
+
+## Inline layout still flattens inline elements; `hyphens` is not a property
+
+- **Found in:** phase 9 unit 3 (real text in layout)
+- **Belongs to:** unassigned (needs inline boxes; before any gate that compares real pages)
+- **What:** text is shaped and broken per block container, not per inline element. A
+  `<span>` with its own font, size, `color`, padding or `vertical-align` contributes its
+  text with the *block's* style, and inline-blocks do not sit on a line. The style engine this
+  build links has no `hyphens` longhand, so `hyphens: none` cannot turn soft hyphens off
+  (`manual` is assumed). `letter-spacing`, `word-spacing`, `text-transform`, `text-indent`,
+  `tab-size` (a tab is eight spaces) and font features are not applied.
+- **Why deferred:** each needs inline boxes (the box tree has none) or a style-engine change;
+  neither fits a unit that replaces the text metric.

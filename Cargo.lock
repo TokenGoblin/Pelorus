@@ -908,6 +908,7 @@ dependencies = [
  "html5ever",
  "px-css",
  "px-dom",
+ "px-text",
  "stylo",
 ]
 

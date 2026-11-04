@@ -188,9 +188,17 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[
 /// exactly its child's rectangle. Two, and the number matters: a change to the
 /// oracle that bought a dozen would be evidence of bending it to fit.
 ///
+/// 55 once real shaped text replaced the half-em stub (Phase 9 unit 3, ADR 036):
+/// one pair gained, none lost, and the pair is
+/// `positioning/abspos-negative-margin-001.html`, whose fixture sets
+/// `font-size: 10px; line-height: 1` and so is exactly the kind of test a stub
+/// that ignored line geometry could not match (a real one-em glyph, a real
+/// 10px line box). Every other css2 pair moved by category 0: the corpus is
+/// almost entirely text-free or compares two runs of the same text.
+///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 54;
+const MATCH_FLOOR: usize = 55;
 
 /// Whether this test's meaning depends on script this engine cannot run.
 ///
