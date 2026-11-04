@@ -8,3 +8,4 @@
 //! See docs/build-spec.md §9 and this crate's CLAUDE.md.
 
 pub mod origin;
+pub mod cors;

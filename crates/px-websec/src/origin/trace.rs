@@ -40,7 +40,9 @@ pub(crate) fn assert_all_hit(points: &[&str]) {
         for p in points {
             assert!(hits.contains(p), "enforcement point never reached: {p}");
         }
-        for r in hits.iter() {
+        // Only this module's own points: policies call each other.
+        let module = points.first().and_then(|p| p.split("::").next());
+        for r in hits.iter().filter(|r| r.split("::").next() == module) {
             assert!(
                 points.contains(r),
                 "reached point missing from ENFORCEMENT_POINTS: {r}"
