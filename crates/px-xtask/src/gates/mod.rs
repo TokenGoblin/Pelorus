@@ -30,6 +30,7 @@ pub mod unsafe_audit;
 pub mod unsafe_headers;
 pub mod update_hsts;
 pub mod update_psl;
+pub mod vendor_test262;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -191,6 +192,11 @@ pub static GATES: &[GateSpec] = &[
         name: "update-psl",
         about: "TOOL: refresh data/public_suffix_list.dat and its version file (--check, --from-file)",
         run: update_psl::run,
+    },
+    GateSpec {
+        name: "vendor-test262",
+        about: "TOOL: vendor the rule-selected test262 subset into tests/test262 (--rev, --from-checkout, --target-bytes)",
+        run: vendor_test262::run,
     },
     GateSpec {
         name: "vendor-wpt",
