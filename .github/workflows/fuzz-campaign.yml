@@ -74,6 +74,8 @@ jobs:
           # is the privileged side decoding a sandboxed process.
           - { target: gpu_response, shard: 1 }
           - { target: gpu_request, shard: 1 }
+          # Phase 9: untrusted font bytes and text through the shaper.
+          - { target: shaper, shard: 1 }
           - { target: http_response, shard: 1 }
           - { target: http_response, shard: 2 }
           - { target: http_chunked, shard: 1 }

@@ -6,5 +6,10 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# ADR 036 (accepted 2026-11-04) is the authorisation for every line below.
+#
+# The shaper: harfrust (a HarfBuzz port, no `unsafe`) over skrifa's font
+# reader. `default-features = false` and `std` only: no `icu` feature (ICU is
+# reached directly where needed), no `libm`, no `tracing`.
+harfrust = { version = "0.15.0", default-features = false, features = ["std"] }
+skrifa = { version = "0.49.0", default-features = false, features = ["std"] }

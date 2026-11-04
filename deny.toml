@@ -15,7 +15,8 @@ version = 2
 confidence-threshold = 0.93
 # The closure build-spec §3 permits: html5ever, stylo, rustls, swash,
 # cosmic-text, wgpu, image, boa_engine, postcard, url, idna, and what they
-# pull. MPL-2.0 is here because stylo is Gecko-derived. Anything not on this
+# pull. ADR 036 amends swash to harfrust + skrifa (all MIT or Apache-2.0;
+# bytemuck and foldhash add Zlib, already allowed); no licence is added here. MPL-2.0 is here because stylo is Gecko-derived. Anything not on this
 # list stops the build and needs an ADR, which is the point.
 allow = [
     "Apache-2.0",
