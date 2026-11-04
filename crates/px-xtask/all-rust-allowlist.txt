@@ -29,7 +29,6 @@ ci/gate-all.sh             # -> cargo xtask all: run every registered gate in or
 ci/gate-unsafe-headers.sh  # -> cargo xtask unsafe-headers: per-crate header scan, waiver scans
 ci/gate-supply-chain.sh    # -> cargo xtask supply-chain: cargo-deny/vet/audit as children
 ci/count-lines.sh          # -> cargo xtask count-lines: line/unsafe counting
-ci/build-and-hash.sh       # -> cargo xtask build-and-hash: reproducible build + hashing (needs a SHA-256 by hand)
 ci/gate-fuzz-smoke.sh      # -> cargo xtask fuzz-smoke: runs cargo fuzz as a child
 ci/check_not_serializable.py # -> cargo xtask check-not-serializable, or a compile-fail test in px-ipc
 ci/update-psl.sh           # -> cargo xtask update-psl: HTTPS fetch + transform of the public suffix list

@@ -3,6 +3,7 @@
 pub mod all_rust;
 pub mod brand_leak;
 pub mod build;
+pub mod build_and_hash;
 pub mod check_build_python_pin;
 pub mod compare_hashes;
 pub mod flex_grid;
@@ -40,6 +41,11 @@ pub static GATES: &[GateSpec] = &[
         name: "build",
         about: "Phase 0: release build, clippy -D warnings and fmt --check, all --locked",
         run: build::run,
+    },
+    GateSpec {
+        name: "build-and-hash",
+        about: "TOOL: reproducible build in a scratch dir; prints the SHA-256 manifest of the release binaries (invariant 7)",
+        run: build_and_hash::run,
     },
     GateSpec {
         name: "check-build-python-pin",

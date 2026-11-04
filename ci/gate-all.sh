@@ -11,8 +11,8 @@
 # under two environments and is driven by the workflow, which varies HOME,
 # CARGO_HOME and — on Linux — the user between runs. Run it by hand:
 #
-#   ci/build-and-hash.sh /tmp/a > /tmp/a.txt
-#   ci/build-and-hash.sh /tmp/some/deeper/path > /tmp/b.txt
+#   cargo xtask build-and-hash /tmp/a > /tmp/a.txt
+#   cargo xtask build-and-hash /tmp/some/deeper/path > /tmp/b.txt
 #   cargo xtask compare-hashes /tmp/a.txt /tmp/b.txt
 
 set -uo pipefail
