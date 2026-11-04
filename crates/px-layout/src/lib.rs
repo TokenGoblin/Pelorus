@@ -2,5 +2,17 @@
 
 //! Box tree; block, inline, flex and grid.
 //!
-//! Phase 0 skeleton: no implementation. Phase 6 fills this in;
-//! see docs/build-spec.md §9 and this crate's CLAUDE.md.
+//! Phase 6 in progress. Done so far: `Au` geometry, the box tree, and block
+//! layout of in-flow blocks with margin collapsing. Not yet: inline layout,
+//! floats, positioned boxes, the px-css → [`style::BoxStyle`] conversion.
+//! See docs/adr/029 and docs/build-spec.md §9.
+
+pub mod au;
+pub mod block;
+pub mod style;
+pub mod tree;
+
+pub use au::Au;
+pub use block::layout;
+pub use style::{BoxStyle, Display, Edges, Length};
+pub use tree::{BoxId, Geometry, LayoutTree};
