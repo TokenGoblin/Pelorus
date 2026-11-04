@@ -3,6 +3,7 @@
 pub mod all_rust;
 pub mod brand_leak;
 pub mod compat_list;
+pub mod count_lines;
 pub mod flex_grid;
 pub mod layout;
 pub mod structure;
@@ -39,6 +40,11 @@ pub static GATES: &[GateSpec] = &[
         name: "compat-list",
         about: "the forty-site compat list: forty entries, each with assertions, no urls (build-spec §8)",
         run: compat_list::run,
+    },
+    GateSpec {
+        name: "count-lines",
+        about: "TOOL: regenerate the README size section (--check: fail if stale)",
+        run: count_lines::run,
     },
     GateSpec {
         name: "flex-grid",
