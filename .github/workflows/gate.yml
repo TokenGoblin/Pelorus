@@ -296,6 +296,24 @@ jobs:
         shell: bash
         run: ci/gate-layout.sh
 
+  # Phase 7 gate (ci/gate-flex-grid.sh). `continue-on-error` is set in the phase's
+  # first commit and must be deleted in its last, so the gate's CI behaviour is
+  # exercised all along rather than discovered on the closing day. It fails by
+  # design until the flex and grid reftest suites exist.
+  flex-grid:
+    name: flex-grid (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 7 gate
+        shell: bash
+        run: ci/gate-flex-grid.sh
+
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
   # explicitly rather than by directory override, so the fence assertion in
