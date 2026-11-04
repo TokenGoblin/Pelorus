@@ -54,6 +54,7 @@
 //! crate's files, not from the device.
 
 pub mod checksum;
+pub mod cookies;
 mod engine;
 pub mod error;
 pub mod format;
