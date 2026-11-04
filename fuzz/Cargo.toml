@@ -24,6 +24,8 @@ px-net = { path = "../crates/px-net" }
 px-dom = { path = "../crates/px-dom", features = ["testing"] }
 # Phase 9: the shaper parses untrusted font bytes (ADR 036).
 px-text = { path = "../crates/px-text" }
+# Phase 12: the CSP parser reads attacker-controlled headers.
+px-websec = { path = "../crates/px-websec" }
 
 [[bin]]
 name = "frame_request"
@@ -119,6 +121,13 @@ bench = false
 [[bin]]
 name = "shaper"
 path = "fuzz_targets/shaper.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "csp_parse"
+path = "fuzz_targets/csp_parse.rs"
 test = false
 doc = false
 bench = false

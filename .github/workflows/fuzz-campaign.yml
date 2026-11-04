@@ -80,6 +80,8 @@ jobs:
           - { target: script_request, shard: 1 }
           # Phase 9: untrusted font bytes and text through the shaper.
           - { target: shaper, shard: 1 }
+          # Phase 12: attacker-controlled CSP headers and <meta> content.
+          - { target: csp_parse, shard: 1 }
           - { target: http_response, shard: 1 }
           - { target: http_response, shard: 2 }
           - { target: http_chunked, shard: 1 }
