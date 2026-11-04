@@ -979,7 +979,16 @@ to a margin". Kept here as a record of what the deferral cost: nothing, because
 it was picked up three commits later once the reftest report pointed at the
 five pairs it was blocking.
 
-## `position: relative`'s offsets (CSS 2.1 §9.4.3), deferred in Phase 6
+## `position: relative`'s offsets (CSS 2.1 §9.4.3): block half done in Phase 8
+
+**Update (Phase 8):** offsets now apply to relatively positioned *block* boxes and
+their whole subtrees (`apply_relative` in block.rs), and a relative *inline*
+ancestor shifts the block-level boxes inside it (`inline_relative_shift`), which
+keeps the `float-inside-inline-between-blocks-1` pair matching. Still open: inline
+*content* (text lines, inline boxes) of a relative `<span>` that contains no block
+is not shifted, because inline elements have no fragment. The original note
+follows.
+
 
 - **What works:** `position: relative` establishes a containing block for
   absolutely positioned descendants, which is §10.1 and is most of why anyone

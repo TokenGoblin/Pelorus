@@ -161,6 +161,10 @@ struct Tables {
     ///
     /// `None` for every in-flow box. See [`place_absolute`] for why this waits.
     absolute: Vec<Option<AbsolutePlacement>>,
+    /// The offsets of a `position: relative` box, applied after layout (§9.4.3).
+    ///
+    /// `None` for every box that is not relatively positioned.
+    relative: Vec<Option<RelativeOffsets>>,
     /// What `min-height` and `max-height` allow this box's content to be (§10.7).
     ///
     /// The inline axis needs no table: its bounds are applied at `Enter`, where
@@ -220,6 +224,7 @@ impl Tables {
             formatting_context_roots: vec![true],
             padding_box_inline: vec![viewport_inline_size],
             absolute: vec![None],
+            relative: vec![None],
             block_bounds: vec![Bounds::NONE],
             self_collapsing: vec![false],
             collapsed_margins: vec![(Au(0), Au(0))],
@@ -239,6 +244,7 @@ impl Tables {
             self.formatting_context_roots.push(false);
             self.padding_box_inline.push(Au(0));
             self.absolute.push(None);
+            self.relative.push(None);
             self.block_bounds.push(Bounds::NONE);
             self.self_collapsing.push(false);
             self.collapsed_margins.push((Au(0), Au(0)));
@@ -324,6 +330,24 @@ struct AbsolutePlacement {
     block_start: Option<Au>,
     /// `bottom`, resolved; `None` for `auto`.
     block_end: Option<Au>,
+}
+
+/// A relatively positioned box's offsets (§9.4.3).
+///
+/// `left` and `right` resolve against the containing block's width, which is known
+/// when the box is entered. `top` and `bottom` percentages need its height, which
+/// is not, so they are kept as computed and resolved by [`apply_relative`].
+#[derive(Clone, Debug)]
+struct RelativeOffsets {
+    /// `left`, resolved; `None` for `auto`.
+    inline_start: Option<Au>,
+    /// `right`, resolved; `None` for `auto`.
+    inline_end: Option<Au>,
+    top: style::values::computed::Inset,
+    bottom: style::values::computed::Inset,
+    /// The shift this box inherits from relatively positioned **inline** ancestors
+    /// (see [`inline_relative_shift`]), `(inline, block)`, already resolved.
+    inherited: (Au, Au),
 }
 
 /// The resolved box-model edges of one box, in app units.
@@ -559,6 +583,28 @@ pub fn layout_document(
                         block_start: block_inset(&style.clone_top()),
                         block_end: block_inset(&style.clone_bottom()),
                     });
+                    let inherited = if absolute || side.is_some() {
+                        (Au(0), Au(0))
+                    } else {
+                        inline_relative_shift(arena, dom, node, containing)
+                    };
+                    let own = is_relatively_positioned(&style);
+                    tables.relative[fragment.index()] =
+                        (own || inherited != (Au(0), Au(0))).then(|| RelativeOffsets {
+                            inline_start: own
+                                .then(|| inline_inset(&style.clone_left(), containing))
+                                .flatten(),
+                            inline_end: own
+                                .then(|| inline_inset(&style.clone_right(), containing))
+                                .flatten(),
+                            top: style.clone_top(),
+                            bottom: style.clone_bottom(),
+                            inherited,
+                        });
+                    if !own && let Some(r) = tables.relative[fragment.index()].as_mut() {
+                        r.top = style::values::computed::Inset::Auto;
+                        r.bottom = style::values::computed::Inset::Auto;
+                    }
                     tables.padding_box_inline[fragment.index()] =
                         content_inline + resolved.padding.inline_sum();
 
@@ -1278,8 +1324,67 @@ pub fn layout_document(
     })?;
 
     make_offsets_absolute(&mut tree);
+    apply_relative(&mut tree, &tables);
     place_absolute(&mut tree, &tables);
     Some(tree)
+}
+
+/// Shift every `position: relative` box, and so its whole subtree (§9.4.3).
+///
+/// The box was laid out in normal flow, so its siblings and its parent's size are
+/// already final and stay so: only the fragments' offsets change. `left` wins over
+/// `right` and `top` over `bottom` (ltr, horizontal), `auto` is zero, and an
+/// opposite pair with one `auto` shifts by the negation of the other. A percentage
+/// `top`/`bottom` resolves against the containing block's content height only when
+/// that height is specified; against `auto` it computes to `auto` (§10.5) and so
+/// to zero.
+///
+/// One pre-order walk carrying the accumulated shift, so nested relative boxes add
+/// up and the cost is linear however deep the chain. It runs before
+/// [`place_absolute`] so that a box positioned against a relative ancestor sees the
+/// ancestor where it now is. Saturating arithmetic throughout: `Au`'s operators.
+fn apply_relative(tree: &mut FragmentTree, tables: &Tables) {
+    if tables.relative.iter().all(Option::is_none) {
+        return;
+    }
+    let Some(root) = tree.root() else { return };
+    let mut stack = vec![(root, None::<FragmentId>, Au(0), Au(0))];
+    while let Some((id, parent, mut inline, mut block)) = stack.pop() {
+        if let Some(offsets) = tables.relative.get(id.index()).and_then(Option::as_ref) {
+            // The containing block's content height, if it is a specified one.
+            let basis = parent.and_then(|p| {
+                tables.specified_block_sizes.get(p.index()).copied()??;
+                let size = tree.get(p)?.size.block;
+                let edges = tables.edges.get(p.index()).copied().unwrap_or(Edges::ZERO);
+                Some((size - edges.border.block_sum() - edges.padding.block_sum()).max(Au(0)))
+            });
+            let resolve = |inset: &style::values::computed::Inset| match inset {
+                style::values::computed::Inset::LengthPercentage(lp) => {
+                    lp.maybe_to_used_value(basis)
+                }
+                _ => None,
+            };
+            let dx = match (offsets.inline_start, offsets.inline_end) {
+                (Some(left), _) => left,
+                (None, Some(right)) => Au(0) - right,
+                (None, None) => Au(0),
+            };
+            let dy = match (resolve(&offsets.top), resolve(&offsets.bottom)) {
+                (Some(top), _) => top,
+                (None, Some(bottom)) => Au(0) - bottom,
+                (None, None) => Au(0),
+            };
+            inline += dx + offsets.inherited.0;
+            block += dy + offsets.inherited.1;
+        }
+        if let Some(fragment) = tree.get_mut(id) {
+            fragment.inline_offset += inline;
+            fragment.block_offset += block;
+        }
+        for kid in tree.children(id).to_vec() {
+            stack.push((kid, Some(id), inline, block));
+        }
+    }
 }
 
 /// Move each absolutely positioned box to the insets it asked for (§10.3.7).
@@ -1589,12 +1694,68 @@ pub(crate) fn is_absolutely_positioned(style: &ComputedValues) -> bool {
     matches!(style.clone_position(), Position::Absolute | Position::Fixed)
 }
 
+/// The shift a box inherits from relatively positioned *inline* ancestors.
+///
+/// An inline element has no fragment of its own, so `position: relative` on a
+/// `<span>` cannot shift anything directly. What it can do, and what CSS 2.1
+/// 9.2.1.1 requires of a span that contains blocks, is move the block-level boxes
+/// that interrupt it: they are its continuation. This walks from `node` up to the
+/// nearest block-level ancestor and sums the `left`/`top` (or negated `right`/
+/// `bottom`) of every relative inline element on the way. Percentages in the block
+/// axis resolve to zero, as for a block (the height is not known here).
+///
+/// Inline text that is *not* inside such a block box is still not shifted: that is
+/// the remaining inline-box gap (docs/backlog.md).
+fn inline_relative_shift(
+    arena: &Arena,
+    dom: px_css::view::Dom<'_>,
+    node: NodeId,
+    containing: Au,
+) -> (Au, Au) {
+    let (mut inline, mut block) = (Au(0), Au(0));
+    let mut at = arena.get(node).and_then(|n| n.parent());
+    while let Some(id) = at {
+        let Some(style) = computed_style(dom, id) else {
+            break;
+        };
+        if is_block_level(&style) {
+            break;
+        }
+        if is_relatively_positioned(&style) {
+            inline += match (
+                inline_inset(&style.clone_left(), containing),
+                inline_inset(&style.clone_right(), containing),
+            ) {
+                (Some(left), _) => left,
+                (None, Some(right)) => Au(0) - right,
+                (None, None) => Au(0),
+            };
+            block += match (
+                block_inset(&style.clone_top()),
+                block_inset(&style.clone_bottom()),
+            ) {
+                (Some(top), _) => top,
+                (None, Some(bottom)) => Au(0) - bottom,
+                (None, None) => Au(0),
+            };
+        }
+        at = arena.get(id).and_then(|n| n.parent());
+    }
+    (inline, block)
+}
+
+/// Whether this box is `position: relative`, and so shifted after layout (§9.4.3).
+pub(crate) fn is_relatively_positioned(style: &ComputedValues) -> bool {
+    use style::computed_values::position::T as Position;
+    matches!(style.clone_position(), Position::Relative)
+}
+
 /// Whether this box is a containing block for absolutely positioned descendants.
 ///
 /// §10.1: anything but `static`. `position: relative` with no offsets does nothing
 /// visible and is written on a great many pages for exactly this effect — which is
 /// the whole of what `relative` does here, because §9.4.3's *offsets* are not
-/// implemented. They are two lines for a block box and not implementable at all
+/// implemented for inline content (see `apply_relative` for blocks). They are two lines for a block box and not implementable at all
 /// for an inline one until there are inline boxes to shift, and shipping the
 /// block half alone made a reference whose `<div>` moved disagree with a test
 /// whose `<span>` did not. `docs/backlog.md` has it.
