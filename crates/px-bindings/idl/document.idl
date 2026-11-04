@@ -1,0 +1,30 @@
+[Exposed=Window]
+interface Document : Node {
+  constructor();
+
+  readonly attribute USVString URL;
+  readonly attribute USVString documentURI;
+  readonly attribute DOMString compatMode;
+  readonly attribute DOMString characterSet;
+  readonly attribute DOMString charset; // legacy alias of .characterSet
+  readonly attribute DOMString inputEncoding; // legacy alias of .characterSet
+  readonly attribute DOMString contentType;
+
+  readonly attribute Element? documentElement;
+
+  [CEReactions, NewObject] Element createElement(DOMString localName, optional (DOMString or ElementCreationOptions) options = {});
+  [CEReactions, NewObject] Element createElementNS(DOMString? namespace, DOMString qualifiedName, optional (DOMString or ElementCreationOptions) options = {});
+  [NewObject] Text createTextNode(DOMString data);
+
+  [CEReactions] Node adoptNode(Node node);
+
+  [NewObject] Event createEvent(DOMString interface); // legacy
+
+};
+
+[Exposed=Window]
+interface XMLDocument : Document {};
+
+dictionary ElementCreationOptions {
+  DOMString is;
+};
