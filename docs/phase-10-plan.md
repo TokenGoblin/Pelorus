@@ -147,3 +147,47 @@ Recommended: (a).
 4. **Speed** (spec: 10 to 50 times slower than V8) is measured in unit 7; the
    section 11 options apply if unusable.
 5. **Pre-1.0 API; CI cost:** exact pin; 73 more crates compiled twice.
+
+## Status, 2026-11-04 (built, not closed)
+
+| Unit | State |
+|---|---|
+| 0 gate tests, `cargo xtask script` | **Done** |
+| 1 embedding, first `eval` through the content process | **Done.** `boa_engine =0.22.0` in `px-script` only; the broker links no `boa_*` (a test enforces it); the testing-only variants are `non_exhaustive` after a workspace-build compile failure |
+| 2 event loop and queues | **Done.** Bounded queues, microtask budget, terminated state, 21 ordering tests, 13 stress tests |
+| 3 timers and the coarse clock | **Done.** 100 microsecond grid, jittered round-up, broker-seeded, monotonic |
+| 4 resource limits | **Done.** Engine limits, a 10 second watchdog abort, process-boundary tests for each runaway shape |
+| 5 test262 | **Half done.** 10,356 tests vendored (14.9 MB, pinned commit, reproducible); the engine-independent runner and ratchet exist and report `graded 0`; the Boa-bound runner is in progress, so **no pass rate exists yet** |
+| 6 fixture table | Not started |
+| 7 gate report | Not started |
+
+### Findings that change the ADR
+
+- **A limit error is not catchable.** ADR 040 and the research note said Boa's loop
+  limit error is catchable by script, so a script could catch it and loop again.
+  Reading the source and running it showed the opposite: the VM treats
+  `RuntimeLimit` as uncatchable. The host does not rely on that: it terminates on any
+  engine error crossing the native boundary.
+- **Properties 4 and 5 of the timer spec conflict.** "Stable within a quantum" and
+  "100 distinct values per 10 ms" cannot both hold; the implementation follows the
+  ADR's own formula (one change per quantum at most). The ADR still needs editing.
+- **Memory bombs are not contained.** Only `ArrayBuffer` is capped (256 MiB). A
+  doubling string reaches about 1.1 GiB in 1.5 seconds; the watchdog bounds time,
+  not memory. An address-space limit needs `unsafe`, which only `px-sandbox` may
+  use, so it is a Phase 17 item.
+- **Runaway shapes:** Boa itself ends deep recursion, try/catch loops, huge `repeat`
+  and a self-requeuing microtask; **only the watchdog ends** regex backtracking,
+  a huge array fill and calls-in-loops. All measured in an unoptimised build only.
+
+### Gate status
+
+| Item | State |
+|---|---|
+| test262 threshold | not measurable until the Boa-bound runner lands |
+| event ordering | tests pass (loop-level; DOM ordering is Phase 11) |
+| no unbounded queue growth | tests pass |
+| timer resolution asserted | tests pass, with the property conflict above |
+| script only in the sandboxed content process | tested; **not yet under the sandbox profile through the broker** (in progress) |
+
+Phase 10 is **not closed**: the headline gate item (a test262 number) does not exist
+yet.
