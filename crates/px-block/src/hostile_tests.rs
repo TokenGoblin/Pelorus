@@ -200,8 +200,8 @@ fn reference(p: &Pattern, text: &[u8], host: (usize, usize)) -> bool {
         StartAnchor::Start => vec![0],
         StartAnchor::Host => {
             let mut v = vec![host.0];
-            for k in host.0..host.1 {
-                if text[k] == b'.' {
+            for (k, b) in text.iter().enumerate().take(host.1).skip(host.0) {
+                if *b == b'.' {
                     v.push(k + 1);
                 }
             }

@@ -1361,6 +1361,9 @@ version = "0.0.0"
 [[package]]
 name = "px-block"
 version = "0.0.0"
+dependencies = [
+ "px-websec",
+]
 
 [[package]]
 name = "px-brand"
