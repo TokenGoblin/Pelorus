@@ -84,3 +84,29 @@ tests, which the script's one-ref-per-test assumption does not handle. Read the
 **The crashtests should land first, not last.** They need no reference pairing, no
 threshold argument and no oracle: run the file, assert the process survives. They
 would have been the cheapest possible Phase 6 gate item and nobody had looked.
+
+## Correction: measured in full at Phase 7's start
+
+The sample-based estimate above undercounted, because it covered top-level files
+only. Counted over the whole pinned tree (subdirectories included, `-ref` files and
+`reference/` directories excluded), at commit `b875b21`:
+
+| | `css-flexbox` | `css-grid` |
+|---|---|---|
+| test files | 1,317 | 2,357 |
+| reftests (`rel="match"`) | 880 | 1,648 |
+| of which also carry `<script>` | 66 | 132 |
+| `mismatch` reftests | 1 | 0 |
+| testharness.js | 372 | 661 |
+| crashtests (name contains `crash`) | 27 | 35 |
+
+So the runnable-in-principle denominator is about **814 flexbox and 1,516 grid
+reftests** after dropping the scripted ones, which is 22 times the CSS2 subset, not
+twice. `css-grid/grid-lanes` is a newer, separate module (a large share of the grid
+count) and should be a deliberate in/out decision, not an accident of the directory
+listing. The answer to the pairing question above is also in: 551 of 1,010
+`rel="match"` hrefs in flexbox name a file in the same directory and 459 point into
+a subdirectory or elsewhere, so pairing on filename would silently drop nearly half.
+
+The 62 crashtests are vendored in `tests/wpt/css-flexbox-crashtests/` and
+`tests/wpt/css-grid-crashtests/`. 18 of them carry a `<script>`.
