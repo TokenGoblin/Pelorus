@@ -39,7 +39,7 @@ mod field;
 mod scalar;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::sha2::sha512;
 use edwards::Point;
@@ -60,6 +60,22 @@ pub enum VerifyError {
     BadR,
     SmallOrderR,
     Mismatch,
+}
+
+/// Check that `public_key` is acceptable as a trusted key: canonical, on the
+/// curve, not of small order and with no torsion component. Used when a key
+/// set is built or rotated, so a malformed key is refused at load time and
+/// not first noticed as a signature that can never verify.
+pub fn check_public_key(public_key: &[u8]) -> Result<(), VerifyError> {
+    let bytes: &[u8; 32] = public_key.try_into().map_err(|_| VerifyError::BadLength)?;
+    let a = Point::decompress(bytes).ok_or(VerifyError::BadPublicKey)?;
+    if a.is_small_order() {
+        return Err(VerifyError::SmallOrderPublicKey);
+    }
+    if !a.is_torsion_free() {
+        return Err(VerifyError::BadPublicKey);
+    }
+    Ok(())
 }
 
 /// Verify a detached Ed25519 signature. `Ok(())` only when the strict rules in
