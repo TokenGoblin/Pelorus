@@ -1,0 +1,8 @@
+*Example-style list
+[Adblock Plus 2.0]
+! comment
+||ads.example.com^$third-party,script
+@@||ads.example.com/ok^
+/ads/banner*$domain=a.com|~b.a.com
+example.com##.ad
+/regex[0-9]+/
