@@ -9,5 +9,8 @@
 
 pub mod display_list;
 pub mod png;
+pub mod raster;
 
 pub use display_list::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect};
+pub use png::{decode, encode};
+pub use raster::{Canvas, rasterize};

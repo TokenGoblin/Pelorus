@@ -266,7 +266,7 @@ fn deflate(data: &[u8]) -> Vec<u8> {
                 }
                 let next = prev[p & (WINDOW - 1)];
                 // Chains only ever point backwards; anything else is stale.
-                if next != 0 && next as usize - 1 >= p {
+                if next != 0 && next as usize > p {
                     break;
                 }
                 cand = next;
@@ -344,7 +344,7 @@ pub fn encode(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, PngError>
     if rgba.len() != npix * 4 {
         return Err(PngError::BadBuffer);
     }
-    let opaque = rgba.chunks_exact(4).all(|p| p[3] == 255);
+    let opaque = rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
     let bpp = if opaque { 3 } else { 4 };
     let row_len = width as usize * bpp;
 
@@ -355,8 +355,13 @@ pub fn encode(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, PngError>
     for y in 0..height as usize {
         let src = &rgba[y * width as usize * 4..(y + 1) * width as usize * 4];
         if opaque {
-            for (d, s) in cur.chunks_exact_mut(3).zip(src.chunks_exact(4)) {
-                d.copy_from_slice(&s[..3]);
+            for (d, s) in cur
+                .as_chunks_mut::<3>()
+                .0
+                .iter_mut()
+                .zip(src.as_chunks::<4>().0)
+            {
+                *d = [s[0], s[1], s[2]];
             }
         } else {
             cur.copy_from_slice(src);
@@ -637,7 +642,7 @@ fn zlib_decompress(z: &[u8], limit: usize) -> Result<Vec<u8>, PngError> {
         return Err(PngError::Truncated);
     }
     let (cmf, flg) = (z[0], z[1]);
-    if cmf & 0x0F != 8 || cmf >> 4 > 7 || (((cmf as u32) << 8) | flg as u32) % 31 != 0 {
+    if cmf & 0x0F != 8 || cmf >> 4 > 7 || !(((cmf as u32) << 8) | flg as u32).is_multiple_of(31) {
         return Err(PngError::Malformed("bad zlib header"));
     }
     if flg & 0x20 != 0 {
@@ -725,10 +730,14 @@ pub fn decode(data: &[u8]) -> Result<Image, PngError> {
                 hdr = Some((w, h, body[9]));
             }
             b"PLTE" => {
-                if body.len() % 3 != 0 || body.is_empty() || body.len() / 3 > 256 || seen_idat {
+                if !body.len().is_multiple_of(3)
+                    || body.is_empty()
+                    || body.len() / 3 > 256
+                    || seen_idat
+                {
                     return Err(PngError::Malformed("bad PLTE"));
                 }
-                palette = body.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+                palette = body.as_chunks::<3>().0.to_vec();
             }
             b"tRNS" => {
                 if body.len() > 256 {
