@@ -7,3 +7,4 @@
 
 pub mod filter;
 pub mod glob;
+pub mod matcher;
