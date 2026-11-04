@@ -21,6 +21,7 @@ pub const ENFORCEMENT_POINTS: &[&str] = &[
     "mixed::trustworthy_url",
     "mixed::check_request",
     "mixed::upgrade",
+    "mixed::check_response",
 ];
 
 /// Whether `host` (already lowercase) is a loopback name or address.
@@ -112,6 +113,9 @@ pub enum RequestKind {
     Manifest,
     /// `<link rel=prefetch>` and similar.
     Prefetch,
+    /// Image loaded through `srcset`/`<picture>` (initiator `imageset`):
+    /// MC2 deliberately does not upgrade it, so it is blockable.
+    ImageSet,
     /// `sendBeacon`/`ping`.
     Beacon,
 }
@@ -174,12 +178,28 @@ pub fn check_request(context: &Context, kind: RequestKind, url: &Url) -> Verdict
         Category::Blockable => Verdict::Block,
         Category::OptionallyBlockable => {
             trace::hit("mixed::upgrade");
+            // MC2 upgrade algorithm: hosts that are IP addresses are not
+            // upgraded, and then the blocking step refuses them.
+            let ip_host = matches!(url.host(), Some(Host::Ipv4(_) | Host::Ipv6(_)));
             match url.upgraded_to_https() {
+                Some(_) if ip_host => Verdict::Block,
                 Some(u) => Verdict::Upgrade(u),
                 // An insecure URL we cannot upgrade (ws:, ftp:): fail closed.
                 None => Verdict::Block,
             }
         }
+    }
+}
+
+/// "Should response to request be blocked as mixed content?": run on the
+/// final response URL (after redirects and service workers), so a redirect
+/// to an insecure URL cannot slip past the request-time check.
+pub fn check_response(context: &Context, response_url: &Url) -> Verdict {
+    trace::hit("mixed::check_response");
+    if !context.prohibits_mixed() || is_url_potentially_trustworthy(response_url) {
+        Verdict::Allow
+    } else {
+        Verdict::Block
     }
 }
 
@@ -268,6 +288,7 @@ mod tests {
             RequestKind::WebSocket,
             RequestKind::Manifest,
             RequestKind::Prefetch,
+            RequestKind::ImageSet,
             RequestKind::Beacon,
         ] {
             assert_eq!(category(k), Category::Blockable, "{k:?}");
@@ -296,6 +317,12 @@ mod tests {
         );
         // Un-upgradable insecure scheme: fail closed.
         assert_eq!(check_request(&c, RequestKind::Audio, &u("ftp://x.example/a")), Verdict::Block);
+        // IP-address hosts are not upgraded (MC2), so they are blocked.
+        assert_eq!(check_request(&c, RequestKind::Image, &u("http://203.0.113.5/i.png")), Verdict::Block);
+        assert_eq!(check_request(&c, RequestKind::ImageSet, &u("http://x.example/i.png")), Verdict::Block);
+        // Response check catches a redirect target.
+        assert_eq!(check_response(&c, &u("http://x.example/")), Verdict::Block);
+        assert_eq!(check_response(&c, &u("https://x.example/")), Verdict::Allow);
     }
 
     #[test]
@@ -352,6 +379,7 @@ mod tests {
         trace::reset();
         let c = ctx("https://a.example/");
         let _ = check_request(&c, RequestKind::Image, &u("http://x.example/"));
+        let _ = check_response(&c, &u("http://x.example/"));
         let _ = check_request(&c, RequestKind::Script, &u("http://x.example/"));
         trace::assert_all_hit(ENFORCEMENT_POINTS);
     }
