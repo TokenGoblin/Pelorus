@@ -6,5 +6,18 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# ADR 040 (accepted 2026-11-04). Exact pin: Boa is pre-1.0 and breaks its API
+# between minors. Default features off (no Intl, no Temporal; ADR 040 decision
+# 2), `annex-b` on (decision 1). Only this crate links it: the broker and every
+# other process do not, and `script_confinement_` tests that.
+boa_engine = { version = "=0.22.0", default-features = false, features = ["annex-b"] }
+
+[features]
+# build-spec 14.4: the high-water-mark counters and the raw clock log exist only
+# under this feature, and `cargo xtask sandbox` scans release artifacts for them.
+testing = []
+
+# build-spec 4.3: the host runs hostile script text and hands its results to the
+# broker; held to the content process's panic lints.
+[lints]
+workspace = true

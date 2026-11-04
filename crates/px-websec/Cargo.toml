@@ -8,3 +8,7 @@ publish.workspace = true
 [dependencies]
 # Phase 0 adds no dependency to any crate. build-spec §3 names what may
 # eventually go here; anything else needs an ADR before it is added.
+
+# build-spec §4.3 / §10: this crate parses attacker-controlled headers.
+[lints]
+workspace = true

@@ -15,3 +15,10 @@ px-layout = { path = "../px-layout", version = "0.0.0" }
 # `app_units::Au` still arrives through `px_layout::geom`.
 px-css = { path = "../px-css", version = "0.0.0" }
 px-dom = { path = "../px-dom", version = "0.0.0" }
+
+[dev-dependencies]
+# Glyph-run tests draw real Ahem glyphs. px-text is a workspace path: no
+# third-party crate is added, and px-text does not depend on px-paint, so there
+# is no cycle. The library itself does not depend on it (it reads outlines
+# through `raster::GlyphSource`).
+px-text = { path = "../px-text", version = "0.0.0" }

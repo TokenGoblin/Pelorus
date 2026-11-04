@@ -3,6 +3,7 @@
 //! The GPU process boundary (Phase 8, ADR 033 and ADR 034).
 //!
 //! - [`rasterizer`]: the backend trait and the software backend.
+//! - [`fonts`]: the parsed fonts glyph runs draw with, on both sides.
 //! - [`wire`]: the display list across the boundary, and a frame's strips back.
 //! - [`server`]: the GPU process's request loop (the `px-gpu` binary wraps it).
 //! - [`session`]: [`session::GpuSession`], the supervisor that owns the process,
@@ -13,6 +14,7 @@
 //! that denies it files and sockets, a supervisor that survives its death) is
 //! independent of which backend runs in it, and is what is built and tested here.
 
+pub mod fonts;
 pub mod rasterizer;
 pub mod server;
 pub mod session;
@@ -22,4 +24,4 @@ pub mod wire;
 mod faults;
 
 pub use rasterizer::{FailingRasterizer, Rasterizer, RenderError, SoftwareRasterizer};
-pub use session::{Backend, Cause, GpuConfig, GpuEvent, GpuSession};
+pub use session::{Backend, Cause, FontRegisterError, GpuConfig, GpuEvent, GpuSession};

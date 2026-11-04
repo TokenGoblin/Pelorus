@@ -48,7 +48,28 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 ///
 /// History: 70 with flex unimplemented (flex containers laid out as plain blocks);
 /// 150 once `flex.rs` landed (+80, 0 panics, 0 pairs lost).
-const MATCH_FLOOR: usize = 150;
+///
+/// 151 once real shaped text replaced the half-em stub (Phase 9 unit 3, ADR 036;
+/// every family resolves to Ahem, one em per glyph). Two pairs gained and one was
+/// lost, all read:
+/// - Gained `flexbox_fbfc2.html` and `flexbox_item-clear.html`: a float beside a
+///   flex container whose text wraps. With the stub the text broke at a different
+///   column from the reference's equivalent; with real one-em glyphs both sides
+///   break in the same place.
+/// - Lost `percentage-widths-001.html`: an absolutely positioned flex container
+///   whose items hold a paragraph of text. The reference fixes the items at 100px
+///   and 500px; the test reaches them by shrinking a 20% and a 100% basis, which a
+///   flex item may not do below its content-based minimum (css-flexbox-1 section
+///   4.5). With Ahem at 16px the widest word ("percentage", ten glyphs) is 160px,
+///   so the 100px the reference expects is below the minimum and the item stays
+///   at 120px. That is the specified result for a font whose words are that wide;
+///   a proportional face has "percentage" at about 80px, which is why browsers
+///   pass. It is a consequence of the single-font policy, not a flex defect.
+///
+/// The 28 pairs that linked `/fonts/ahem.css` are now laid out as written
+/// (the harness satisfies that sheet; see `reftest_common`), 27 of them differ in
+/// layout and none matches, so they add no passes.
+const MATCH_FLOOR: usize = 151;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 543).
 const MIN_PAIRS: usize = 540;

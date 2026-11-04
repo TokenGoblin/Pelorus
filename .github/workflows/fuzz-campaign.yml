@@ -74,8 +74,14 @@ jobs:
           # is the privileged side decoding a sandboxed process.
           - { target: gpu_response, shard: 1 }
           - { target: gpu_request, shard: 1 }
+          # Phase 10: the script vocabulary, both directions. script_response
+          # is the privileged side decoding a process that runs arbitrary script.
+          - { target: script_response, shard: 1 }
+          - { target: script_request, shard: 1 }
           # Phase 9: untrusted font bytes and text through the shaper.
           - { target: shaper, shard: 1 }
+          # Phase 12: attacker-controlled CSP headers and <meta> content.
+          - { target: csp_parse, shard: 1 }
           - { target: http_response, shard: 1 }
           - { target: http_response, shard: 2 }
           - { target: http_chunked, shard: 1 }
