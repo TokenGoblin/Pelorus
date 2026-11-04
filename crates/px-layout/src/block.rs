@@ -42,6 +42,7 @@ use style::properties::ComputedValues;
 
 use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree};
 use crate::geom::{LogicalEdges, LogicalSize};
+use crate::grid;
 
 /// One visit in the iterative traversal.
 ///
@@ -339,7 +340,7 @@ pub(crate) struct Edges {
 
 impl Edges {
     /// No margin, border or padding — what an anonymous block box has (§9.2.1.1).
-    const ZERO: Self = Self {
+    pub(crate) const ZERO: Self = Self {
         margin: LogicalEdges::ZERO,
         border: LogicalEdges::ZERO,
         padding: LogicalEdges::ZERO,
@@ -388,6 +389,10 @@ pub fn layout_document(
 
     let mut tables = Tables::new(viewport_inline_size);
     let mut flex = crate::flex::FlexState::new();
+    // Grid containers between their `Children` and `Exit` visits, keyed by
+    // fragment index. A `BTreeMap`, so nothing here depends on hash order.
+    let mut grids: std::collections::BTreeMap<usize, grid::Container> =
+        std::collections::BTreeMap::new();
 
     // The ICB is entered as a block container whose content is the document's.
     // Starting from the document node rather than from the root element is what
@@ -449,8 +454,18 @@ pub fn layout_document(
                             .copied()
                             .unwrap_or(Au(0))
                     };
+                    // A grid item is laid out against its grid area, not its
+                    // parent's content box (css-grid-1 section 6): the grid decided
+                    // its inline size and margins before the item was visited.
+                    let grid_item = grids.get(&parent.index()).and_then(|g| g.item_inline(slot));
+                    let containing = grid_item.map_or(containing, |g| g.containing);
                     let mut resolved = resolve_edges(&style, containing);
-                    let side = float_side(&style);
+                    // `float` does not apply to a grid item (section 6).
+                    let side = if grid_item.is_some() {
+                        None
+                    } else {
+                        float_side(&style)
+                    };
 
                     // §10.3.5: a float with `width: auto` shrinks to fit rather
                     // than filling its containing block, which is why floats need
@@ -467,7 +482,9 @@ pub fn layout_document(
                             let intrinsic = intrinsic_inline_size(dom, arena, node);
                             absolute_inline_size(&style, containing, &resolved, intrinsic)
                         }
-                        Some(_) if definite_inline_size(&style).is_none() => {
+                        _ if (side.is_some() || is_inline_grid(&style))
+                            && definite_inline_size(&style).is_none() =>
+                        {
                             let available = containing - resolved.inline_surround();
                             let available = available.max(Au(0));
                             let intrinsic = intrinsic_inline_size(dom, arena, node);
@@ -510,6 +527,14 @@ pub fn layout_document(
                     if side.is_none() && !absolute && !flex.is_item(node) {
                         centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
                     }
+                    let content_inline = match grid_item {
+                        Some(g) => {
+                            resolved.margin.inline_start = g.margin_start;
+                            resolved.margin.inline_end = g.margin_end;
+                            g.content_inline
+                        }
+                        None => content_inline,
+                    };
 
                     let fragment = tree.push(Fragment::new(
                         FragmentKind::Block,
@@ -537,7 +562,9 @@ pub fn layout_document(
                     tables.edges[fragment.index()] = resolved;
                     tables.clear_sides[fragment.index()] = clear_side(&style);
                     tables.formatting_context_roots[fragment.index()] =
-                        establishes_formatting_context(&style) || flex.is_item(node);
+                        establishes_formatting_context(&style)
+                            || flex.is_item(node)
+                            || grid_item.is_some();
                     // A flex item's block size is the flex algorithm's to decide.
                     if !flex.is_item(node) {
                         tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
@@ -574,6 +601,8 @@ pub fn layout_document(
                     node,
                     containing_block,
                 } => {
+                    let style = computed_style(dom, node);
+                    let is_grid = style.as_ref().is_some_and(|s| grid::is_grid_container(s));
                     let flex_items = flex.begin(
                         dom,
                         arena,
@@ -589,8 +618,10 @@ pub fn layout_document(
                     let items = flex_items.unwrap_or_else(|| partition_content(dom, arena, node));
                     // Only *in-flow* block-level content forces anonymous boxes
                     // (§9.2.1.1); a float is block-level and does not. Text in a
-                    // flex container is always wrapped: it is an anonymous item.
-                    let has_block = is_flex || items.iter().any(|i| matches!(i, Content::Block(_)));
+                    // flex or grid container is always wrapped: it is an anonymous
+                    // item (css-flexbox-1 section 4, css-grid-1 section 6).
+                    let has_block =
+                        is_flex || is_grid || items.iter().any(|i| matches!(i, Content::Block(_)));
                     let available = tables
                         .inline_sizes
                         .get(fragment.index())
@@ -602,7 +633,6 @@ pub fn layout_document(
                     // Flattening through inline elements loses their fonts, which
                     // is a limitation of `crate::text`'s single-metric stub rather
                     // than of this partition.
-                    let style = computed_style(dom, node);
                     let font_size = style.as_ref().map_or_else(
                         || crate::geom::px(16),
                         |s| Au::from(s.clone_font_size().computed_size()),
@@ -622,6 +652,29 @@ pub fn layout_document(
                     // does not.
                     tables.grow_to(fragment.index());
                     tables.pending[fragment.index()] = vec![None; items.len()];
+
+                    if let Some(s) = style.as_ref().filter(|_| is_grid) {
+                        let bounds = tables.block_bounds[fragment.index()];
+                        let specified = tables.specified_block_sizes[fragment.index()];
+                        let shrink = (is_inline_grid(s)
+                            || float_side(s).is_some()
+                            || is_absolutely_positioned(s))
+                            && definite_inline_size(s).is_none();
+                        let inputs = grid::Inputs {
+                            dom,
+                            style: s,
+                            content_inline: Some(available),
+                            inline_definite: !shrink,
+                            definite_block: specified.map(|h| bounds.clamp(h)),
+                            min_block: bounds.min,
+                            max_block: bounds.max,
+                            font_size,
+                        };
+                        let container = grid::Container::begin(&inputs, &items, &mut |n| {
+                            intrinsic_inline_size(dom, arena, n)
+                        });
+                        grids.insert(fragment.index(), container);
+                    }
 
                     for (slot, item) in items.into_iter().enumerate() {
                         match item {
@@ -756,6 +809,10 @@ pub fn layout_document(
                                 f.size.block = content + edges.block_surround();
                             }
                         }
+                        continue;
+                    }
+                    if let Some(mut container) = grids.remove(&fragment.index()) {
+                        exit_grid(&mut tree, &mut tables, fragment, &mut container);
                         continue;
                     }
                     // The content slots reserved when this container was
@@ -1406,6 +1463,117 @@ fn place_run(
     height
 }
 
+/// Finish a grid container: lay its anonymous items out, then hand the rest to the
+/// grid, which sizes the rows and positions every item (css-grid-1 section 11).
+///
+/// A grid container is a formatting-context root: its children's margins neither
+/// collapse with its own nor escape it, so its collapsed margins are just its own.
+fn exit_grid(
+    tree: &mut FragmentTree,
+    tables: &mut Tables,
+    fragment: FragmentId,
+    container: &mut grid::Container,
+) {
+    let slots = tables
+        .pending
+        .get(fragment.index())
+        .cloned()
+        .unwrap_or_default();
+    let edges = tables
+        .edges
+        .get(fragment.index())
+        .copied()
+        .unwrap_or(Edges::ZERO);
+    let origin_inline = edges.border.inline_start + edges.padding.inline_start;
+    let origin_block = edges.border.block_start + edges.padding.block_start;
+    let origin = (origin_inline, origin_block);
+    let no_floats = crate::float::FloatContext::new();
+    let mut facts = Vec::new();
+    let mut out_of_flow = Vec::new();
+
+    for (slot, kid) in slots.iter().enumerate() {
+        let Some(kid) = *kid else { continue };
+        let kid_edges = tables
+            .edges
+            .get(kid.index())
+            .copied()
+            .unwrap_or(Edges::ZERO);
+        if tables
+            .absolute
+            .get(kid.index())
+            .copied()
+            .flatten()
+            .is_some()
+        {
+            // The static position of an absolutely positioned child of a grid
+            // container is the start of its content box (section 9.1).
+            if let Some(f) = tree.get_mut(kid) {
+                f.inline_offset = origin_inline + kid_edges.margin.inline_start;
+                f.block_offset = origin_block + kid_edges.margin.block_start;
+            }
+            out_of_flow.push(kid);
+            continue;
+        }
+        if let Some(run) = tables
+            .inline_runs
+            .get_mut(kid.index())
+            .and_then(Option::take)
+        {
+            let width = container
+                .item_inline(slot)
+                .map_or(Au(0), |i| i.content_inline);
+            let mut wrapped = Vec::new();
+            let height = place_run(
+                tree,
+                &mut wrapped,
+                &run,
+                &no_floats,
+                width,
+                Au(0),
+                Au(0),
+                Au(0),
+            );
+            tree.set_children(kid, &wrapped);
+            if let Some(f) = tree.get_mut(kid) {
+                f.size.inline = width;
+                f.size.block = height;
+            }
+        }
+        facts.push(grid::Kid {
+            slot,
+            fragment: kid,
+            margin_block: (kid_edges.margin.block_start, kid_edges.margin.block_end),
+            border_padding_block: kid_edges.border.block_sum() + kid_edges.padding.block_sum(),
+        });
+    }
+
+    let (content, mut children) = container.finish(tree, &facts, origin);
+    children.extend(out_of_flow);
+    tree.set_children(fragment, &children);
+    if let Some(f) = tree.get_mut(fragment) {
+        f.size.block = content + edges.block_surround();
+    }
+    if let Some(slot) = tables.collapsed_margins.get_mut(fragment.index()) {
+        *slot = (edges.margin.block_start, edges.margin.block_end);
+    }
+    if let Some(slot) = tables.self_collapsing.get_mut(fragment.index()) {
+        *slot = false;
+    }
+}
+
+/// Whether this is `display: inline-grid`.
+///
+/// There is no inline-block layout to put an atomic inline into, so an
+/// `inline-grid` is laid out as a block-level grid container with a shrink-to-fit
+/// width, on a line of its own. Correct for the common case of one alone; a
+/// second `inline-grid` beside it stacks instead of sitting on the same line.
+fn is_inline_grid(style: &ComputedValues) -> bool {
+    use style::values::specified::box_::{DisplayInside, DisplayOutside};
+    let display = style.clone_display();
+    matches!(display.outside(), DisplayOutside::Inline)
+        && matches!(display.inside(), DisplayInside::Grid)
+}
+
 /// Whether this box is taken out of flow by `position` (§9.6).
 ///
 /// `fixed` is here with `absolute` because the two differ only in which box is the
@@ -1680,6 +1848,19 @@ struct IntrinsicFrame {
     sum_max: bool,
     gap: Au,
     count: u32,
+    /// Set for a grid container: its items' intrinsic sizes are not folded into
+    /// `min`/`max` (children of a grid do not stack) but kept, to be placed in
+    /// tracks when the frame is combined.
+    grid: Option<GridFrame>,
+}
+
+/// What a grid container's frame collects while its items are measured.
+struct GridFrame {
+    contents: Vec<Content>,
+    /// The items being measured, in the order their results will arrive.
+    order: Vec<NodeId>,
+    results: Vec<Intrinsic>,
+    font_size: Au,
 }
 
 impl IntrinsicFrame {
@@ -1703,8 +1884,8 @@ impl IntrinsicFrame {
 enum IntrinsicStep {
     /// Measure this box's own text and schedule its block-level children.
     Descend(NodeId),
-    /// Every child has contributed; fold the frame into its parent.
-    Combine,
+    /// Every child has contributed; fold the frame of this node into its parent.
+    Combine(NodeId),
 }
 
 /// CSS 2.1 §10.3.5: shrink-to-fit.
@@ -1766,6 +1947,10 @@ pub(crate) fn intrinsic_inline_size_with(
     fn contribute(frames: &mut [IntrinsicFrame], result: &mut Intrinsic, value: Intrinsic) {
         let target = match frames.last_mut() {
             Some(frame) => {
+                if let Some(grid) = frame.grid.as_mut() {
+                    grid.results.push(value);
+                    return;
+                }
                 frame.add(value.min, value.max);
                 return;
             }
@@ -1808,6 +1993,39 @@ pub(crate) fn intrinsic_inline_size_with(
 
                 let font_size = Au::from(style.clone_font_size().computed_size());
                 let (sum_min, sum_max, gap) = crate::flex::intrinsic_mode(&style);
+                if grid::is_grid_container(&style) {
+                    // A grid's intrinsic size is its tracks sized under a min- or
+                    // max-content constraint (css-grid-1 section 5.1), which needs
+                    // each item's own intrinsic sizes first.
+                    let contents = partition_content(dom, arena, node);
+                    let order: Vec<NodeId> = contents
+                        .iter()
+                        .filter_map(|c| match c {
+                            Content::Block(n) | Content::Float(n) => Some(*n),
+                            _ => None,
+                        })
+                        .collect();
+                    frames.push(IntrinsicFrame {
+                        surround,
+                        min: Au(0),
+                        max: Au(0),
+                        sum_min: false,
+                        sum_max: false,
+                        gap: Au(0),
+                        count: 0,
+                        grid: Some(GridFrame {
+                            contents,
+                            order: order.clone(),
+                            results: Vec::new(),
+                            font_size,
+                        }),
+                    });
+                    stack.push(IntrinsicStep::Combine(node));
+                    for child in order.into_iter().rev() {
+                        stack.push(IntrinsicStep::Descend(child));
+                    }
+                    continue;
+                }
                 let mut frame = IntrinsicFrame {
                     surround,
                     min: Au(0),
@@ -1816,6 +2034,7 @@ pub(crate) fn intrinsic_inline_size_with(
                     sum_max,
                     gap,
                     count: 0,
+                    grid: None,
                 };
                 let mut blocks = Vec::new();
                 for item in partition_content(dom, arena, node) {
@@ -1843,14 +2062,44 @@ pub(crate) fn intrinsic_inline_size_with(
                 }
 
                 frames.push(frame);
-                stack.push(IntrinsicStep::Combine);
+                stack.push(IntrinsicStep::Combine(node));
                 for child in blocks.into_iter().rev() {
                     stack.push(IntrinsicStep::Descend(child));
                 }
             }
 
-            IntrinsicStep::Combine => {
-                let Some(frame) = frames.pop() else { continue };
+            IntrinsicStep::Combine(node) => {
+                let Some(mut frame) = frames.pop() else {
+                    continue;
+                };
+                if let Some(g) = frame.grid.take()
+                    && let Some(style) = computed_style(dom, node)
+                {
+                    {
+                        let measured: std::collections::BTreeMap<NodeId, Intrinsic> = g
+                            .order
+                            .iter()
+                            .copied()
+                            .zip(g.results.iter().copied())
+                            .collect();
+                        let inputs = grid::Inputs {
+                            dom,
+                            style: &style,
+                            content_inline: None,
+                            inline_definite: false,
+                            definite_block: None,
+                            min_block: Au(0),
+                            max_block: None,
+                            font_size: g.font_size,
+                        };
+                        let (min, max) =
+                            grid::Container::intrinsic(&inputs, &g.contents, &mut |n| {
+                                measured.get(&n).copied().unwrap_or(Intrinsic::ZERO)
+                            });
+                        frame.min = min;
+                        frame.max = max;
+                    }
+                }
                 let value = Intrinsic {
                     min: frame.min + frame.surround,
                     max: frame.max + frame.surround,
@@ -1986,13 +2235,18 @@ pub(crate) fn is_block_level(style: &ComputedValues) -> bool {
     let display = style.clone_display();
     // `inline-flex` is treated as block-level too: this engine has no atomic
     // inlines, so it breaks the line rather than sitting in it (see flex.rs).
+    // `inline-grid` likewise (see `is_inline_grid`).
     (matches!(display.outside(), DisplayOutside::Block)
         && matches!(
             display.inside(),
-            DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex
+            DisplayInside::Flow
+                | DisplayInside::FlowRoot
+                | DisplayInside::Flex
+                | DisplayInside::Grid
         ))
         || (matches!(display.outside(), DisplayOutside::Inline)
             && matches!(display.inside(), DisplayInside::Flex))
+        || is_inline_grid(style)
 }
 
 /// Whether this box establishes a block formatting context (§9.4.1).
@@ -2020,7 +2274,7 @@ fn establishes_formatting_context(style: &ComputedValues) -> bool {
 
     matches!(
         style.clone_display().inside(),
-        DisplayInside::FlowRoot | DisplayInside::Flex
+        DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid
     ) || float_side(style).is_some()
         || style.clone_overflow_x() != Overflow::Visible
         || style.clone_overflow_y() != Overflow::Visible

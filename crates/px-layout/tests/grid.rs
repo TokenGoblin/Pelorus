@@ -692,9 +692,12 @@ fn layout_grid_absolute_child_takes_no_cell() {
         "#g { grid-template-columns: 100px 100px }",
     );
     let (_, items) = grid(&tree);
+    // Items come first, in order; the out-of-flow child is listed after them, at
+    // the start of the content box (its static position).
     assert_eq!(items.len(), 3);
     assert_eq!(items.first().copied(), Some(r(0, 0, 100, 20)));
-    assert_eq!(items.get(2).copied(), Some(r(100, 0, 100, 20)));
+    assert_eq!(items.get(1).copied(), Some(r(100, 0, 100, 20)));
+    assert_eq!(items.get(2).copied(), Some(r(0, 0, 5, 5)));
 }
 
 // --- Items: sizing, margins, alignment --------------------------------------
@@ -1084,13 +1087,14 @@ fn layout_grid_is_deterministic() {
     assert_eq!(first, second);
 }
 
-/// A thousand grids nested in one another on a small stack: the walks are iterative.
+/// Grids nested as deep as the parser allows (480 levels) on a small stack: the walks are iterative.
 #[test]
 fn layout_grid_deep_nesting_does_not_overflow_the_stack() {
     let handle = std::thread::Builder::new()
         .stack_size(256 * 1024)
         .spawn(|| {
-            let depth = 1000;
+            // px-dom abandons a parse nested past MAX_DEPTH (512); stay just under it.
+            let depth = 480;
             let mut body = String::new();
             for _ in 0..depth {
                 body.push_str("<div class=n>");
@@ -1104,5 +1108,5 @@ fn layout_grid_deep_nesting_does_not_overflow_the_stack() {
         })
         .expect("spawn");
     let count = handle.join().expect("no stack overflow, no panic");
-    assert!(count > 1000);
+    assert!(count >= 480);
 }
