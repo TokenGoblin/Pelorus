@@ -41,7 +41,7 @@ publish = false
 # by a process an attacker may fully control. The broker unwinds and is allowed
 # to; the crates that parse hostile input are not.
 #
-# ci/gate-unsafe-headers.sh scans this same set for per-site allow() waivers.
+# `cargo xtask unsafe-headers` scans this same set for per-site allow() waivers.
 # Adding a crate here means adding it there.
 [workspace.lints.clippy]
 unwrap_used = "deny"

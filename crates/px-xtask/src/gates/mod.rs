@@ -7,6 +7,7 @@ pub mod flex_grid;
 pub mod layout;
 pub mod structure;
 pub mod unsafe_audit;
+pub mod unsafe_headers;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -58,6 +59,11 @@ pub static GATES: &[GateSpec] = &[
         name: "unsafe-audit",
         about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
         run: unsafe_audit::run,
+    },
+    GateSpec {
+        name: "unsafe-headers",
+        about: "gate check 4: per-crate unsafe header rules, local waiver scans, px-css zero-unsafe counts",
+        run: unsafe_headers::run,
     },
     GateSpec {
         name: "vendor-wpt",

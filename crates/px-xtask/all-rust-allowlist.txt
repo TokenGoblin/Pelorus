@@ -25,7 +25,6 @@ ci/gate-miri.sh            # -> cargo xtask miri: runs cargo +nightly miri as a 
 ci/gate-all.sh             # -> cargo xtask all: run every registered gate in order
 
 # --- Medium: more logic, text scanning, or external tools --------------------
-ci/gate-unsafe-headers.sh  # -> cargo xtask unsafe-headers: per-crate header scan, waiver scans
 ci/gate-supply-chain.sh    # -> cargo xtask supply-chain: cargo-deny/vet/audit as children
 ci/count-lines.sh          # -> cargo xtask count-lines: line/unsafe counting
 ci/build-and-hash.sh       # -> cargo xtask build-and-hash: reproducible build + hashing (needs a SHA-256 by hand)

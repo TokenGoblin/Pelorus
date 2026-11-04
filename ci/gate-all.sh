@@ -24,7 +24,7 @@ cd "$(git rev-parse --show-toplevel)"
 CHECKS="
 build:bash ci/gate-build.sh
 supply-chain:bash ci/gate-supply-chain.sh
-unsafe-headers:bash ci/gate-unsafe-headers.sh
+unsafe-headers:cargo xtask unsafe-headers
 brand-leak:cargo xtask brand-leak
 structure:cargo xtask structure
 compat-list:cargo xtask compat-list

@@ -141,7 +141,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Gate check 4
-        run: ci/gate-unsafe-headers.sh
+        run: cargo xtask unsafe-headers
 
   brand-leak:
     name: brand-leak
