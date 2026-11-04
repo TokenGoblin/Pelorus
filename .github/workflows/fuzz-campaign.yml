@@ -86,6 +86,8 @@ jobs:
           # JPEG, BMP, ICO). The Phase 15 gate is 24h clean.
           - { target: image_decode, shard: 1 }
           - { target: image_decode, shard: 2 }
+          # Phase 19: untrusted filter-list text through px-block.
+          - { target: filter_parse, shard: 1 }
           # Phase 11: arbitrary IDL text through parse, resolve, lower and emit.
           - { target: webidl_parse, shard: 1 }
           - { target: http_response, shard: 1 }

@@ -28,6 +28,8 @@ px-text = { path = "../crates/px-text" }
 px-websec = { path = "../crates/px-websec" }
 # Phase 15: PNG, GIF, JPEG, BMP and ICO decoders of untrusted image bytes (ADR 042).
 px-image = { path = "../crates/px-image" }
+# Phase 19: filter lists are untrusted text through the px-block parser.
+px-block = { path = "../crates/px-block" }
 # Phase 11: the WebIDL parser and generator sit in the build chain.
 px-bindings = { path = "../crates/px-bindings" }
 
@@ -146,6 +148,13 @@ bench = false
 [[bin]]
 name = "webidl_parse"
 path = "fuzz_targets/webidl_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "filter_parse"
+path = "fuzz_targets/filter_parse.rs"
 test = false
 doc = false
 bench = false
