@@ -13,6 +13,7 @@
 
 pub mod cors;
 pub mod csp;
+pub mod frame;
 pub mod mixed;
 pub mod origin;
 pub mod referrer;
