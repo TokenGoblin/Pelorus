@@ -3,6 +3,7 @@
 pub mod all_rust;
 pub mod brand_leak;
 pub mod check_build_python_pin;
+pub mod compare_hashes;
 pub mod flex_grid;
 pub mod layout;
 pub mod setup_build_python;
@@ -38,6 +39,11 @@ pub static GATES: &[GateSpec] = &[
         name: "check-build-python-pin",
         about: "TOOL: a Python env holds exactly the pins in build-python/requirements.txt (ADR 023)",
         run: check_build_python_pin::run,
+    },
+    GateSpec {
+        name: "compare-hashes",
+        about: "reproducible builds: two hash manifests (from build-and-hash) must be identical (invariant 7)",
+        run: compare_hashes::run,
     },
     GateSpec {
         name: "flex-grid",

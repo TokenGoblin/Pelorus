@@ -13,7 +13,7 @@
 #
 #   ci/build-and-hash.sh /tmp/a > /tmp/a.txt
 #   ci/build-and-hash.sh /tmp/some/deeper/path > /tmp/b.txt
-#   ci/compare-hashes.sh /tmp/a.txt /tmp/b.txt
+#   cargo xtask compare-hashes /tmp/a.txt /tmp/b.txt
 
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"

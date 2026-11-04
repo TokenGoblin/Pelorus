@@ -19,7 +19,6 @@
 # intended destination, using the name the script passed to `verdict`.
 
 # --- Easy: short, no compilation, mostly git/grep/file checks ----------------
-ci/compare-hashes.sh       # -> cargo xtask compare-hashes: diff two hash manifests
 ci/gate-build.sh           # -> cargo xtask build: runs cargo build/test; uses xtask::proc::cargo
 ci/gate-compat-list.sh     # -> cargo xtask compat-list: wraps check_compat_sites.py
 ci/check_compat_sites.py   # -> folded into compat-list: parse tests/compat/sites.toml by hand

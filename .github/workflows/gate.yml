@@ -113,7 +113,7 @@ jobs:
         shell: bash
         run: |
           TMP="$(cygpath -u "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")"
-          ci/compare-hashes.sh "$TMP/a.txt" "$TMP/b.txt"
+          cargo xtask compare-hashes "$TMP/a.txt" "$TMP/b.txt"
 
   supply-chain:
     name: supply-chain (${{ matrix.os }})
