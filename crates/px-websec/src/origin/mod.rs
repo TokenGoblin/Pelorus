@@ -359,59 +359,23 @@ mod tests {
 
     #[test]
     fn sites() {
-        assert!(same_site(
-            &o("https://a.example.com/"),
-            &o("https://b.example.com/"),
-            &psl
-        ));
-        assert!(!same_site(
-            &o("https://a.example.com/"),
-            &o("http://a.example.com/"),
-            &psl
-        ));
+        assert!(same_site(&o("https://a.example.com/"), &o("https://b.example.com/"), &psl));
+        assert!(!same_site(&o("https://a.example.com/"), &o("http://a.example.com/"), &psl));
         assert!(schemelessly_same_site(
             &o("https://a.example.com/"),
             &o("http://b.example.com:8080/"),
             &psl
         ));
-        assert!(!same_site(
-            &o("https://a.example.com/"),
-            &o("https://example.org/"),
-            &psl
-        ));
+        assert!(!same_site(&o("https://a.example.com/"), &o("https://example.org/"), &psl));
         // Shared-suffix hosts are different sites.
-        assert!(!same_site(
-            &o("https://a.co.uk/"),
-            &o("https://b.co.uk/"),
-            &psl
-        ));
-        assert!(same_site(
-            &o("https://x.a.co.uk/"),
-            &o("https://y.a.co.uk/"),
-            &psl
-        ));
+        assert!(!same_site(&o("https://a.co.uk/"), &o("https://b.co.uk/"), &psl));
+        assert!(same_site(&o("https://x.a.co.uk/"), &o("https://y.a.co.uk/"), &psl));
         // IPs: site is the address itself.
-        assert!(same_site(
-            &o("http://127.0.0.1:1/"),
-            &o("http://127.0.0.1:2/"),
-            &psl
-        ));
-        assert!(!same_site(
-            &o("http://127.0.0.1/"),
-            &o("http://127.0.0.2/"),
-            &psl
-        ));
+        assert!(same_site(&o("http://127.0.0.1:1/"), &o("http://127.0.0.1:2/"), &psl));
+        assert!(!same_site(&o("http://127.0.0.1/"), &o("http://127.0.0.2/"), &psl));
         // No registrable domain: falls back to the host.
-        assert!(same_site(
-            &o("https://localhost/"),
-            &o("https://localhost:8/"),
-            &psl
-        ));
-        assert!(!same_site(
-            &o("https://localhost/"),
-            &o("https://other/"),
-            &psl
-        ));
+        assert!(same_site(&o("https://localhost/"), &o("https://localhost:8/"), &psl));
+        assert!(!same_site(&o("https://localhost/"), &o("https://other/"), &psl));
     }
 
     #[test]
@@ -427,21 +391,9 @@ mod tests {
     #[test]
     fn cookie_context() {
         let top = o("https://a.example.com/");
-        assert!(!cross_site_for_cookies(
-            &top,
-            &o("https://api.example.com/"),
-            &psl
-        ));
-        assert!(cross_site_for_cookies(
-            &top,
-            &o("https://evil.example/"),
-            &psl
-        ));
-        assert!(cross_site_for_cookies(
-            &top,
-            &o("http://api.example.com/"),
-            &psl
-        ));
+        assert!(!cross_site_for_cookies(&top, &o("https://api.example.com/"), &psl));
+        assert!(cross_site_for_cookies(&top, &o("https://evil.example/"), &psl));
+        assert!(cross_site_for_cookies(&top, &o("http://api.example.com/"), &psl));
     }
 
     #[test]

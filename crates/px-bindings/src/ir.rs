@@ -7,9 +7,7 @@
 //! dictionary member order). An engine emitter consumes this data; the Rust
 //! host-trait emitter in `emit` uses it for signatures and defaults.
 
-use crate::ast::{
-    BufferType, ConstValue, DefaultValue, ExtAttr, ExtAttrValue, Special, StringType, find_ext,
-};
+use crate::ast::{BufferType, ConstValue, DefaultValue, ExtAttr, ExtAttrValue, Special, StringType, find_ext};
 use crate::resolve::{
     Arg, ContainerKind, Exposure, Member, MemberKind, Model, RKind, RType, int_range, parse_integer,
 };
@@ -46,28 +44,14 @@ pub enum Conv {
     Any,
     Undefined,
     Boolean,
-    Integer {
-        bits: u8,
-        signed: bool,
-        mode: IntMode,
-    },
+    Integer { bits: u8, signed: bool, mode: IntMode },
     BigInt,
     /// `unrestricted` floats pass NaN and infinities; restricted ones throw.
-    Float {
-        double: bool,
-        unrestricted: bool,
-    },
-    String {
-        kind: StringType,
-        null_to_empty: bool,
-    },
+    Float { double: bool, unrestricted: bool },
+    String { kind: StringType, null_to_empty: bool },
     Object,
     Symbol,
-    Buffer {
-        ty: BufferType,
-        allow_shared: bool,
-        allow_resizable: bool,
-    },
+    Buffer { ty: BufferType, allow_shared: bool, allow_resizable: bool },
     Interface(String),
     CallbackInterface(String),
     CallbackFunction(String),
@@ -78,10 +62,7 @@ pub enum Conv {
     AsyncSequence(Box<Conv>),
     FrozenArray(Box<Conv>),
     ObservableArray(Box<Conv>),
-    Record {
-        key: StringType,
-        value: Box<Conv>,
-    },
+    Record { key: StringType, value: Box<Conv> },
     Promise(Box<Conv>),
     Union(UnionConv),
 }
@@ -124,19 +105,13 @@ pub enum IrDefault {
     NegInfinity,
     NaN,
     Str(String),
-    EnumValue {
-        enum_name: String,
-        value: String,
-    },
+    EnumValue { enum_name: String, value: String },
     EmptySequence,
     EmptyDictionary,
     Null,
     Undefined,
     /// The default selects member `index` of the union's flattened members.
-    UnionMember {
-        index: usize,
-        value: Box<IrDefault>,
-    },
+    UnionMember { index: usize, value: Box<IrDefault> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -338,10 +313,7 @@ pub fn conv(t: &RType) -> Conv {
             },
         },
         RKind::Bigint => Conv::BigInt,
-        RKind::Float {
-            double,
-            unrestricted,
-        } => Conv::Float {
+        RKind::Float { double, unrestricted } => Conv::Float {
             double: *double,
             unrestricted: *unrestricted,
         },
@@ -427,10 +399,7 @@ fn union_steps(members: &[Conv], nullable: bool) -> Vec<UnionStep> {
     let v = idx(&|m| {
         matches!(
             m,
-            Conv::Sequence(_)
-                | Conv::FrozenArray(_)
-                | Conv::ObservableArray(_)
-                | Conv::AsyncSequence(_)
+            Conv::Sequence(_) | Conv::FrozenArray(_) | Conv::ObservableArray(_) | Conv::AsyncSequence(_)
         )
     });
     if !v.is_empty() {
@@ -504,16 +473,10 @@ fn lower_default(model: &Model, ty: &RType, v: &DefaultValue) -> Result<IrDefaul
                 _ => Err(format!("`{t}` is out of range for `{ty}`")),
             }
         }
-        (
-            RKind::Float { .. },
-            DefaultValue::Const(ConstValue::Integer(t) | ConstValue::Decimal(t)),
-        ) => decimal_to_f64(t).map(IrDefault::Float).ok_or_else(mismatch),
-        (
-            RKind::Float {
-                unrestricted: true, ..
-            },
-            DefaultValue::Const(c),
-        ) => match c {
+        (RKind::Float { .. }, DefaultValue::Const(ConstValue::Integer(t) | ConstValue::Decimal(t))) => {
+            decimal_to_f64(t).map(IrDefault::Float).ok_or_else(mismatch)
+        }
+        (RKind::Float { unrestricted: true, .. }, DefaultValue::Const(c)) => match c {
             ConstValue::Infinity => Ok(IrDefault::Infinity),
             ConstValue::NegInfinity => Ok(IrDefault::NegInfinity),
             ConstValue::NaN => Ok(IrDefault::NaN),
@@ -540,9 +503,7 @@ fn lower_default(model: &Model, ty: &RType, v: &DefaultValue) -> Result<IrDefaul
         (RKind::Record(..), DefaultValue::EmptyDictionary) => Ok(IrDefault::EmptyDictionary),
         (RKind::Dictionary(n), DefaultValue::EmptyDictionary) => {
             if dictionary_has_required(model, n) {
-                Err(format!(
-                    "`{{}}` is not a valid default: `{n}` has required members"
-                ))
+                Err(format!("`{{}}` is not a valid default: `{n}` has required members"))
             } else {
                 Ok(IrDefault::EmptyDictionary)
             }
@@ -581,12 +542,10 @@ fn decimal_to_f64(t: &str) -> Option<f64> {
 
 fn lower_arg(model: &Model, ctx: &str, a: &Arg) -> Result<ArgBinding, LowerError> {
     let default = match &a.default {
-        Some(d) => Some(
-            lower_default(model, &a.ty, d).map_err(|message| LowerError {
-                context: format!("{ctx}, argument `{}`", a.name),
-                message,
-            })?,
-        ),
+        Some(d) => Some(lower_default(model, &a.ty, d).map_err(|message| LowerError {
+            context: format!("{ctx}, argument `{}`", a.name),
+            message,
+        })?),
         None => None,
     };
     Ok(ArgBinding {
@@ -598,12 +557,7 @@ fn lower_arg(model: &Model, ctx: &str, a: &Arg) -> Result<ArgBinding, LowerError
     })
 }
 
-fn lower_overload(
-    model: &Model,
-    ctx: &str,
-    args: &[Arg],
-    ret: &RType,
-) -> Result<Overload, LowerError> {
+fn lower_overload(model: &Model, ctx: &str, args: &[Arg], ret: &RType) -> Result<Overload, LowerError> {
     let mut out = Vec::new();
     for a in args {
         out.push(lower_arg(model, ctx, a)?);
@@ -653,20 +607,13 @@ fn const_ir(v: &ConstValue, ty: &RType) -> Result<IrConst, String> {
     })
 }
 
-fn lower_container(
-    model: &Model,
-    c: &crate::resolve::Interface,
-) -> Result<InterfaceBinding, LowerError> {
+fn lower_container(model: &Model, c: &crate::resolve::Interface) -> Result<InterfaceBinding, LowerError> {
     let owner_secure = c.has_ext("SecureContext");
     let mut b = InterfaceBinding {
         name: c.name.clone(),
         kind: c.kind,
         parent: c.inherits.clone(),
-        ancestors: model
-            .ancestors(&c.name)
-            .iter()
-            .map(|a| a.name.clone())
-            .collect(),
+        ancestors: model.ancestors(&c.name).iter().map(|a| a.name.clone()).collect(),
         exposure: c.exposure.clone(),
         flags: flags(&c.ext_attrs, false),
         global: match find_ext(&c.ext_attrs, "Global").map(|a| &a.value) {
@@ -754,10 +701,7 @@ fn lower_member(
             ret,
             args,
         } => {
-            let octx = format!(
-                "{ctx}, operation `{}`",
-                name.as_deref().unwrap_or("(anonymous)")
-            );
+            let octx = format!("{ctx}, operation `{}`", name.as_deref().unwrap_or("(anonymous)"));
             let ov = lower_overload(model, &octx, args, ret)?;
             let key = name
                 .as_ref()
@@ -815,11 +759,7 @@ fn lower_member(
                 args: a,
             });
         }
-        MemberKind::Maplike {
-            readonly,
-            key,
-            value,
-        } => {
+        MemberKind::Maplike { readonly, key, value } => {
             b.collection = Some(CollectionBinding {
                 kind: CollectionKind::Maplike,
                 readonly: *readonly,
@@ -841,19 +781,14 @@ fn lower_member(
     Ok(())
 }
 
-fn lower_dictionary(
-    model: &Model,
-    d: &crate::resolve::Dictionary,
-) -> Result<DictionaryBinding, LowerError> {
+fn lower_dictionary(model: &Model, d: &crate::resolve::Dictionary) -> Result<DictionaryBinding, LowerError> {
     let mut members = Vec::new();
     for m in &d.members {
         let default = match &m.default {
-            Some(v) => Some(
-                lower_default(model, &m.ty, v).map_err(|message| LowerError {
-                    context: format!("dictionary `{}`, member `{}`", d.name, m.name),
-                    message,
-                })?,
-            ),
+            Some(v) => Some(lower_default(model, &m.ty, v).map_err(|message| LowerError {
+                context: format!("dictionary `{}`, member `{}`", d.name, m.name),
+                message,
+            })?),
             None => None,
         };
         members.push(DictMemberBinding {

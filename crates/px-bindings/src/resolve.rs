@@ -522,9 +522,10 @@ impl<'a> Builder<'a> {
             match kind {
                 NameKind::Interface | NameKind::CallbackInterface | NameKind::Namespace => {
                     if let Some(i) = self.build_container(name) {
-                        model
-                            .index
-                            .insert(name.to_owned(), (kind, model.containers.len()));
+                        model.index.insert(
+                            name.to_owned(),
+                            (kind, model.containers.len()),
+                        );
                         model.containers.push(i);
                     }
                 }
@@ -623,37 +624,37 @@ impl<'a> Builder<'a> {
         // Pass 2: members, partials, includes, in source order. Own members
         // of a non-partial definition come before any partial's.
         for want_partial in [false, true] {
-            for ast in asts {
-                for d in &ast.definitions {
-                    match &d.kind {
-                        DefinitionKind::Interface(c)
-                        | DefinitionKind::InterfaceMixin(c)
-                        | DefinitionKind::Namespace(c)
-                        | DefinitionKind::CallbackInterface(c) => {
-                            if c.partial == want_partial {
-                                self.add_members(c, d);
-                            }
+          for ast in asts {
+            for d in &ast.definitions {
+                match &d.kind {
+                    DefinitionKind::Interface(c)
+                    | DefinitionKind::InterfaceMixin(c)
+                    | DefinitionKind::Namespace(c)
+                    | DefinitionKind::CallbackInterface(c) => {
+                        if c.partial == want_partial {
+                            self.add_members(c, d);
                         }
-                        DefinitionKind::Dictionary(dd) if dd.partial == want_partial => {
-                            match self.dicts.get_mut(dd.name.as_str()) {
-                                Some(src) => src.members.extend(dd.members.iter()),
-                                None => {
-                                    if dd.partial {
-                                        self.err(
+                    }
+                    DefinitionKind::Dictionary(dd) if dd.partial == want_partial => {
+                        match self.dicts.get_mut(dd.name.as_str()) {
+                            Some(src) => src.members.extend(dd.members.iter()),
+                            None => {
+                                if dd.partial {
+                                    self.err(
                                         d.span,
                                         format!(
                                             "partial dictionary `{}` has no dictionary to extend",
                                             dd.name
                                         ),
                                     );
-                                    }
                                 }
                             }
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
+          }
         }
         // Pass 3: includes statements, after every mixin has its members.
         let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
@@ -673,20 +674,14 @@ impl<'a> Builder<'a> {
                 if !target_ok {
                     self.err(
                         d.span,
-                        format!(
-                            "`{}` in an includes statement is not an interface",
-                            inc.target
-                        ),
+                        format!("`{}` in an includes statement is not an interface", inc.target),
                     );
                     continue;
                 }
                 if !mixin_ok {
                     self.err(
                         d.span,
-                        format!(
-                            "`{}` in an includes statement is not an interface mixin",
-                            inc.mixin
-                        ),
+                        format!("`{}` in an includes statement is not an interface mixin", inc.mixin),
                     );
                     continue;
                 }
@@ -696,12 +691,7 @@ impl<'a> Builder<'a> {
                 let moved: Vec<(&'a ast::Member, Vec<ExtAttr>)> = self
                     .containers
                     .get(inc.mixin.as_str())
-                    .map(|m| {
-                        m.members
-                            .iter()
-                            .map(|x| (x.m, x.inherited_ext.clone()))
-                            .collect()
-                    })
+                    .map(|m| m.members.iter().map(|x| (x.m, x.inherited_ext.clone())).collect())
                     .unwrap_or_default();
                 if let Some(t) = self.containers.get_mut(inc.target.as_str()) {
                     for (m, ext) in moved {
@@ -752,9 +742,7 @@ impl<'a> Builder<'a> {
             None => {
                 if c.partial {
                     let msg = match self.names.get(c.name.as_str()) {
-                        Some(_) => {
-                            format!("partial definition of `{}` does not match its kind", c.name)
-                        }
+                        Some(_) => format!("partial definition of `{}` does not match its kind", c.name),
                         None => format!("partial definition of `{}` has nothing to extend", c.name),
                     };
                     self.err(d.span, msg);
@@ -790,40 +778,18 @@ impl<'a> Builder<'a> {
             apply_type_ext(&mut ext, a);
         }
         let mut nullable = t.nullable;
-        let sub =
-            |this: &mut Self, x: &ast::Type, budget: &mut u32| this.rtype_in(x, depth, budget);
+        let sub = |this: &mut Self, x: &ast::Type, budget: &mut u32| this.rtype_in(x, depth, budget);
         let kind = match &t.kind {
             TypeKind::Any => RKind::Any,
             TypeKind::Undefined => RKind::Undefined,
             TypeKind::Boolean => RKind::Boolean,
-            TypeKind::Byte => RKind::Integer {
-                bits: 8,
-                signed: true,
-            },
-            TypeKind::Octet => RKind::Integer {
-                bits: 8,
-                signed: false,
-            },
-            TypeKind::Short { unsigned } => RKind::Integer {
-                bits: 16,
-                signed: !unsigned,
-            },
-            TypeKind::Long { unsigned } => RKind::Integer {
-                bits: 32,
-                signed: !unsigned,
-            },
-            TypeKind::LongLong { unsigned } => RKind::Integer {
-                bits: 64,
-                signed: !unsigned,
-            },
-            TypeKind::Float { unrestricted } => RKind::Float {
-                double: false,
-                unrestricted: *unrestricted,
-            },
-            TypeKind::Double { unrestricted } => RKind::Float {
-                double: true,
-                unrestricted: *unrestricted,
-            },
+            TypeKind::Byte => RKind::Integer { bits: 8, signed: true },
+            TypeKind::Octet => RKind::Integer { bits: 8, signed: false },
+            TypeKind::Short { unsigned } => RKind::Integer { bits: 16, signed: !unsigned },
+            TypeKind::Long { unsigned } => RKind::Integer { bits: 32, signed: !unsigned },
+            TypeKind::LongLong { unsigned } => RKind::Integer { bits: 64, signed: !unsigned },
+            TypeKind::Float { unrestricted } => RKind::Float { double: false, unrestricted: *unrestricted },
+            TypeKind::Double { unrestricted } => RKind::Float { double: true, unrestricted: *unrestricted },
             TypeKind::Bigint => RKind::Bigint,
             TypeKind::String(s) => RKind::String(*s),
             TypeKind::Object => RKind::Object,
@@ -868,10 +834,7 @@ impl<'a> Builder<'a> {
                         let target = *self.typedefs.get(n.as_str())?;
                         let mut inner = self.rtype_in(target, depth + 1, budget)?;
                         if inner.nullable && nullable {
-                            self.err(
-                                t.span,
-                                format!("`{n}` is already nullable; `{n}?` is not allowed"),
-                            );
+                            self.err(t.span, format!("`{n}` is already nullable; `{n}?` is not allowed"));
                             return None;
                         }
                         nullable |= inner.nullable;
@@ -886,11 +849,7 @@ impl<'a> Builder<'a> {
             self.err(t.span, "`any` and `Promise` types cannot be nullable");
             return None;
         }
-        Some(RType {
-            kind,
-            nullable,
-            ext,
-        })
+        Some(RType { kind, nullable, ext })
     }
 
     fn check_type_ext(&mut self, t: &RType, span: Span) -> Option<()> {
@@ -900,10 +859,7 @@ impl<'a> Builder<'a> {
             ok = false;
         }
         if (t.ext.clamp || t.ext.enforce_range) && !matches!(t.kind, RKind::Integer { .. }) {
-            self.err(
-                span,
-                "[Clamp] and [EnforceRange] apply only to integer types",
-            );
+            self.err(span, "[Clamp] and [EnforceRange] apply only to integer types");
             ok = false;
         }
         if t.ext.null_to_empty && !matches!(t.kind, RKind::String(StringType::DOMString)) {
@@ -911,10 +867,7 @@ impl<'a> Builder<'a> {
             ok = false;
         }
         if (t.ext.allow_shared || t.ext.allow_resizable) && !matches!(t.kind, RKind::Buffer(_)) {
-            self.err(
-                span,
-                "[AllowShared] and [AllowResizable] apply only to buffer types",
-            );
+            self.err(span, "[AllowShared] and [AllowResizable] apply only to buffer types");
             ok = false;
         }
         ok.then_some(())
@@ -960,10 +913,7 @@ impl<'a> Builder<'a> {
                         }
                     }
                     if has_dict && (nullable_members > 0 || x.nullable) {
-                        self.err(
-                            span,
-                            "a union cannot include a dictionary and a nullable type",
-                        );
+                        self.err(span, "a union cannot include a dictionary and a nullable type");
                         ok = false;
                     }
                 }
@@ -1016,10 +966,7 @@ impl<'a> Builder<'a> {
                 Exposure::Globals(v)
             }
             _ => {
-                self.err(
-                    span,
-                    "[Exposed] takes an identifier, a list of identifiers or `*`",
-                );
+                self.err(span, "[Exposed] takes an identifier, a list of identifiers or `*`");
                 Exposure::Unspecified
             }
         }
@@ -1037,10 +984,7 @@ impl<'a> Builder<'a> {
             && exposure == Exposure::Unspecified
             && kind != ContainerKind::CallbackInterface
         {
-            self.err(
-                src.span,
-                format!("`{name}` is missing an [Exposed] extended attribute"),
-            );
+            self.err(src.span, format!("`{name}` is missing an [Exposed] extended attribute"));
         }
         let mut members = Vec::new();
         for ms in &src.members {
@@ -1128,11 +1072,7 @@ impl<'a> Builder<'a> {
                     args: self.args(args)?,
                 }
             }
-            ast::MemberKind::Maplike {
-                readonly,
-                key,
-                value,
-            } => MemberKind::Maplike {
+            ast::MemberKind::Maplike { readonly, key, value } => MemberKind::Maplike {
                 readonly: *readonly,
                 key: self.rtype(key, &[])?,
                 value: self.rtype(value, &[])?,
@@ -1162,10 +1102,7 @@ impl<'a> Builder<'a> {
 
     fn check_const(&mut self, ty: &RType, v: &ConstValue, name: &str, span: Span) -> Option<()> {
         if ty.nullable {
-            self.err(
-                span,
-                format!("constant `{name}` cannot have a nullable type"),
-            );
+            self.err(span, format!("constant `{name}` cannot have a nullable type"));
             return None;
         }
         let bad = |this: &mut Self, why: &str| {
@@ -1183,9 +1120,7 @@ impl<'a> Builder<'a> {
             }
             (RKind::Float { .. }, ConstValue::Integer(_) | ConstValue::Decimal(_)) => Some(()),
             (
-                RKind::Float {
-                    unrestricted: true, ..
-                },
+                RKind::Float { unrestricted: true, .. },
                 ConstValue::Infinity | ConstValue::NegInfinity | ConstValue::NaN,
             ) => Some(()),
             (RKind::Boolean | RKind::Integer { .. } | RKind::Float { .. }, _) => {
@@ -1208,13 +1143,8 @@ impl<'a> Builder<'a> {
                         self.err(m.span, format!("duplicate member `{name}` in `{owner}`"));
                     }
                 }
-                MemberKind::Attribute {
-                    name, is_static, ..
-                } => {
-                    if plain_names
-                        .insert((*is_static, name), "attribute")
-                        .is_some()
-                    {
+                MemberKind::Attribute { name, is_static, .. } => {
+                    if plain_names.insert((*is_static, name), "attribute").is_some() {
                         self.err(m.span, format!("duplicate member `{name}` in `{owner}`"));
                     }
                 }
@@ -1233,16 +1163,10 @@ impl<'a> Builder<'a> {
                         .map(|a| format!("{}{}", a.ty, if a.variadic { "..." } else { "" }))
                         .collect::<Vec<_>>()
                         .join(",");
-                    ops.entry((*is_static, name))
-                        .or_default()
-                        .push((sig, m.span));
+                    ops.entry((*is_static, name)).or_default().push((sig, m.span));
                 }
                 MemberKind::Constructor { args } => {
-                    let sig = args
-                        .iter()
-                        .map(|a| a.ty.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",");
+                    let sig = args.iter().map(|a| a.ty.to_string()).collect::<Vec<_>>().join(",");
                     ctors.push((sig, m.span));
                 }
                 MemberKind::Iterable { .. }
@@ -1250,9 +1174,7 @@ impl<'a> Builder<'a> {
                 | MemberKind::Maplike { .. }
                 | MemberKind::Setlike { .. } => collections += 1,
                 MemberKind::Stringifier => stringifiers += 1,
-                MemberKind::Operation {
-                    stringifier: true, ..
-                } => stringifiers += 1,
+                MemberKind::Operation { stringifier: true, .. } => stringifiers += 1,
                 MemberKind::Operation { .. } => {}
             }
             if matches!(m.kind, MemberKind::Operation { .. })
@@ -1270,20 +1192,14 @@ impl<'a> Builder<'a> {
             let mut seen = BTreeSet::new();
             for (sig, span) in sigs {
                 if !seen.insert(sig.as_str()) {
-                    self.err(
-                        *span,
-                        format!("duplicate overload of `{name}({sig})` in `{owner}`"),
-                    );
+                    self.err(*span, format!("duplicate overload of `{name}({sig})` in `{owner}`"));
                 }
             }
         }
         let mut seen = BTreeSet::new();
         for (sig, span) in &ctors {
             if !seen.insert(sig.as_str()) {
-                self.err(
-                    *span,
-                    format!("duplicate constructor `({sig})` in `{owner}`"),
-                );
+                self.err(*span, format!("duplicate constructor `({sig})` in `{owner}`"));
             }
         }
         if collections > 1 {
@@ -1308,17 +1224,11 @@ impl<'a> Builder<'a> {
         let mut seen = BTreeSet::new();
         for m in &src.members {
             if !seen.insert(m.name.as_str()) {
-                self.err(
-                    m.span,
-                    format!("duplicate dictionary member `{}` in `{name}`", m.name),
-                );
+                self.err(m.span, format!("duplicate dictionary member `{}` in `{name}`", m.name));
                 continue;
             }
             if m.required && m.default.is_some() {
-                self.err(
-                    m.span,
-                    "a required dictionary member cannot have a default value",
-                );
+                self.err(m.span, "a required dictionary member cannot have a default value");
             }
             if let Some(ty) = self.rtype(&m.ty, &m.ext_attrs) {
                 members.push(DictMember {
@@ -1349,17 +1259,11 @@ impl<'a> Builder<'a> {
                         let mut seen = BTreeSet::new();
                         for v in &e.values {
                             if !seen.insert(v.as_str()) {
-                                self.err(
-                                    d.span,
-                                    format!("duplicate enum value \"{v}\" in `{}`", e.name),
-                                );
+                                self.err(d.span, format!("duplicate enum value \"{v}\" in `{}`", e.name));
                             }
                         }
-                        if matches!(self.names.get(e.name.as_str()), Some((NameKind::Enum, s)) if *s == d.span)
-                        {
-                            model
-                                .index
-                                .insert(e.name.clone(), (NameKind::Enum, model.enums.len()));
+                        if matches!(self.names.get(e.name.as_str()), Some((NameKind::Enum, s)) if *s == d.span) {
+                            model.index.insert(e.name.clone(), (NameKind::Enum, model.enums.len()));
                             model.enums.push(Enum {
                                 name: e.name.clone(),
                                 values: e.values.clone(),
@@ -1368,15 +1272,13 @@ impl<'a> Builder<'a> {
                         }
                     }
                     DefinitionKind::Callback(c) => {
-                        if matches!(self.names.get(c.name.as_str()), Some((NameKind::Callback, s)) if *s == d.span)
-                        {
+                        if matches!(self.names.get(c.name.as_str()), Some((NameKind::Callback, s)) if *s == d.span) {
                             let ret = self.rtype(&c.ret, &[]);
                             let args = self.args(&c.args);
                             if let (Some(ret), Some(args)) = (ret, args) {
-                                model.index.insert(
-                                    c.name.clone(),
-                                    (NameKind::Callback, model.callbacks.len()),
-                                );
+                                model
+                                    .index
+                                    .insert(c.name.clone(), (NameKind::Callback, model.callbacks.len()));
                                 model.callbacks.push(Callback {
                                     name: c.name.clone(),
                                     ret,
@@ -1410,17 +1312,11 @@ impl<'a> Builder<'a> {
                         {
                             self.err(
                                 c.span,
-                                format!(
-                                    "`{}` is exposed in globals where its parent `{p}` is not",
-                                    c.name
-                                ),
+                                format!("`{}` is exposed in globals where its parent `{p}` is not", c.name),
                             );
                         }
                     }
-                    _ => self.err(
-                        c.span,
-                        format!("`{}` inherits `{p}`, which is not an interface", c.name),
-                    ),
+                    _ => self.err(c.span, format!("`{}` inherits `{p}`, which is not an interface", c.name)),
                 }
             }
             // Cycle: walk at most `containers.len()` steps.
@@ -1443,10 +1339,7 @@ impl<'a> Builder<'a> {
             if let Some(p) = &d.inherits
                 && model.dictionary(p).is_none()
             {
-                self.err(
-                    d.span,
-                    format!("`{}` inherits `{p}`, which is not a dictionary", d.name),
-                );
+                self.err(d.span, format!("`{}` inherits `{p}`, which is not a dictionary", d.name));
                 continue;
             }
             let mut cur = d.inherits.as_deref();
@@ -1470,13 +1363,7 @@ impl<'a> Builder<'a> {
             }
             for m in &d.members {
                 if inherited.contains(m.name.as_str()) {
-                    self.err(
-                        m.span,
-                        format!(
-                            "dictionary member `{}` of `{}` is already inherited",
-                            m.name, d.name
-                        ),
-                    );
+                    self.err(m.span, format!("dictionary member `{}` of `{}` is already inherited", m.name, d.name));
                 }
             }
         }
@@ -1521,13 +1408,7 @@ impl<'a> Builder<'a> {
                         *i += 1;
                         match color.get(n).copied() {
                             Some(1) => {
-                                self.err(
-                                    d.span,
-                                    format!(
-                                        "dictionary `{}` contains itself through `{n}`",
-                                        d.name
-                                    ),
-                                );
+                                self.err(d.span, format!("dictionary `{}` contains itself through `{n}`", d.name));
                             }
                             Some(_) => {}
                             None => {

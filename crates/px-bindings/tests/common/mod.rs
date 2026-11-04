@@ -46,14 +46,7 @@ pub fn compile(src: &str) -> Result<(), String> {
     let file = dir.join("generated.rs");
     std::fs::write(&file, src).map_err(|e| e.to_string())?;
     let out = Command::new("rustc")
-        .args([
-            "--edition",
-            "2024",
-            "--crate-type",
-            "lib",
-            "--crate-name",
-            "generated",
-        ])
+        .args(["--edition", "2024", "--crate-type", "lib", "--crate-name", "generated"])
         .args(["-D", "warnings", "--emit=metadata", "--out-dir"])
         .arg(&dir)
         .arg(&file)

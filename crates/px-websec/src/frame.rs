@@ -155,54 +155,25 @@ mod tests {
     #[test]
     fn deny_and_sameorigin() {
         let r = "https://a.example/page";
-        assert_eq!(
-            x(&["DENY"], r, &["https://a.example/"]),
-            XfoVerdict::Blocked
-        );
-        assert_eq!(
-            x(&["deny"], r, &["https://b.example/"]),
-            XfoVerdict::Blocked
-        );
-        assert_eq!(
-            x(&["SAMEORIGIN"], r, &["https://a.example/"]),
-            XfoVerdict::Allowed
-        );
-        assert_eq!(
-            x(&["sameorigin"], r, &["https://b.example/"]),
-            XfoVerdict::Blocked
-        );
-        assert_eq!(
-            x(&[" SameOrigin "], r, &["https://a.example:443/"]),
-            XfoVerdict::Allowed
-        );
+        assert_eq!(x(&["DENY"], r, &["https://a.example/"]), XfoVerdict::Blocked);
+        assert_eq!(x(&["deny"], r, &["https://b.example/"]), XfoVerdict::Blocked);
+        assert_eq!(x(&["SAMEORIGIN"], r, &["https://a.example/"]), XfoVerdict::Allowed);
+        assert_eq!(x(&["sameorigin"], r, &["https://b.example/"]), XfoVerdict::Blocked);
+        assert_eq!(x(&[" SameOrigin "], r, &["https://a.example:443/"]), XfoVerdict::Allowed);
         // Scheme and port matter.
-        assert_eq!(
-            x(&["SAMEORIGIN"], r, &["http://a.example/"]),
-            XfoVerdict::Blocked
-        );
-        assert_eq!(
-            x(&["SAMEORIGIN"], r, &["https://a.example:8443/"]),
-            XfoVerdict::Blocked
-        );
+        assert_eq!(x(&["SAMEORIGIN"], r, &["http://a.example/"]), XfoVerdict::Blocked);
+        assert_eq!(x(&["SAMEORIGIN"], r, &["https://a.example:8443/"]), XfoVerdict::Blocked);
     }
 
     #[test]
     fn sameorigin_checks_every_ancestor() {
         let r = "https://a.example/page";
         assert_eq!(
-            x(
-                &["SAMEORIGIN"],
-                r,
-                &["https://a.example/", "https://evil.example/"]
-            ),
+            x(&["SAMEORIGIN"], r, &["https://a.example/", "https://evil.example/"]),
             XfoVerdict::Blocked
         );
         assert_eq!(
-            x(
-                &["SAMEORIGIN"],
-                r,
-                &["https://a.example/", "https://a.example/x"]
-            ),
+            x(&["SAMEORIGIN"], r, &["https://a.example/", "https://a.example/x"]),
             XfoVerdict::Allowed
         );
     }
@@ -217,10 +188,7 @@ mod tests {
         let a = &["https://b.example/"];
         let r = "https://a.example/";
         assert_eq!(x(&[], r, a), XfoVerdict::Allowed);
-        assert_eq!(
-            x(&["ALLOW-FROM https://b.example"], r, a),
-            XfoVerdict::Allowed
-        );
+        assert_eq!(x(&["ALLOW-FROM https://b.example"], r, a), XfoVerdict::Allowed);
         assert_eq!(x(&["bogus"], r, a), XfoVerdict::Allowed);
         assert_eq!(x(&[""], r, a), XfoVerdict::Allowed);
     }
@@ -245,10 +213,7 @@ mod tests {
     #[test]
     fn oversized_header_fails_closed() {
         let big = "x".repeat(MAX_HEADER_BYTES + 1);
-        assert_eq!(
-            x(&[&big], "https://a.example/", &["https://b.example/"]),
-            XfoVerdict::Blocked
-        );
+        assert_eq!(x(&[&big], "https://a.example/", &["https://b.example/"]), XfoVerdict::Blocked);
     }
 
     #[test]
@@ -262,14 +227,8 @@ mod tests {
     fn frame_ancestors_overrides_xfo() {
         use FrameAncestors as F;
         use XfoVerdict as V;
-        assert!(
-            embedding_allowed(F::Allowed, V::Blocked),
-            "FA allow beats XFO deny"
-        );
-        assert!(
-            !embedding_allowed(F::Blocked, V::Allowed),
-            "FA block beats XFO allow"
-        );
+        assert!(embedding_allowed(F::Allowed, V::Blocked), "FA allow beats XFO deny");
+        assert!(!embedding_allowed(F::Blocked, V::Allowed), "FA block beats XFO allow");
         assert!(!embedding_allowed(F::Blocked, V::Blocked));
         assert!(embedding_allowed(F::Allowed, V::Allowed));
         assert!(embedding_allowed(F::Absent, V::Allowed));
@@ -281,10 +240,7 @@ mod tests {
         assert_eq!(parse_sandbox_attribute(None), None);
         let none = parse_sandbox_attribute(Some("")).unwrap();
         assert!(!none.allows_scripts() && none.forces_opaque_origin());
-        let f = parse_sandbox_attribute(Some(
-            "  allow-scripts\tALLOW-FORMS bogus allow-same-origin\n",
-        ))
-        .unwrap();
+        let f = parse_sandbox_attribute(Some("  allow-scripts\tALLOW-FORMS bogus allow-same-origin\n")).unwrap();
         assert!(f.allows_scripts());
         assert!(f.allows(SandboxAllow::Forms));
         assert!(f.allows(SandboxAllow::SameOrigin));
@@ -301,10 +257,7 @@ mod tests {
         assert_eq!(sandboxed_origin(None, &a), a);
         let s = sandboxed_origin(parse_sandbox_attribute(Some("allow-scripts")), &a);
         assert!(s.is_opaque() && !s.same_origin(&a));
-        let keep = sandboxed_origin(
-            parse_sandbox_attribute(Some("allow-scripts allow-same-origin")),
-            &a,
-        );
+        let keep = sandboxed_origin(parse_sandbox_attribute(Some("allow-scripts allow-same-origin")), &a);
         assert_eq!(keep, a);
     }
 

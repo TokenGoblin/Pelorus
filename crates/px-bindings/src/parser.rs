@@ -643,29 +643,11 @@ impl<'a> Parser<'a> {
                     || !is_keyword(t.text)
                     || matches!(
                         t.text,
-                        "any"
-                            | "Promise"
-                            | "undefined"
-                            | "object"
-                            | "symbol"
-                            | "sequence"
-                            | "async_sequence"
-                            | "record"
-                            | "FrozenArray"
-                            | "ObservableArray"
-                            | "boolean"
-                            | "byte"
-                            | "octet"
-                            | "bigint"
-                            | "float"
-                            | "double"
-                            | "short"
-                            | "long"
-                            | "unsigned"
-                            | "unrestricted"
-                            | "ByteString"
-                            | "DOMString"
-                            | "USVString"
+                        "any" | "Promise" | "undefined" | "object" | "symbol" | "sequence"
+                            | "async_sequence" | "record" | "FrozenArray" | "ObservableArray"
+                            | "boolean" | "byte" | "octet" | "bigint" | "float" | "double"
+                            | "short" | "long" | "unsigned" | "unrestricted" | "ByteString"
+                            | "DOMString" | "USVString"
                     )
                     || BufferType::ALL.iter().any(|(n, _)| *n == t.text)
             }

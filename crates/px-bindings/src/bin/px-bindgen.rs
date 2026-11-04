@@ -52,9 +52,7 @@ fn run() -> Result<(), Vec<String>> {
         }
     }
     if inputs.is_empty() {
-        return Err(vec![
-            "usage: px-bindgen [--lenient] [--out FILE] PATH...".to_owned(),
-        ]);
+        return Err(vec!["usage: px-bindgen [--lenient] [--out FILE] PATH...".to_owned()]);
     }
     let mut files = Vec::new();
     for i in &inputs {
@@ -72,9 +70,7 @@ fn run() -> Result<(), Vec<String>> {
     let outputs = px_bindings::generate(&sources, opts, &emitters)?;
     for o in outputs {
         match &out_path {
-            Some(p) => {
-                std::fs::write(p, o.contents).map_err(|e| vec![format!("{}: {e}", p.display())])?
-            }
+            Some(p) => std::fs::write(p, o.contents).map_err(|e| vec![format!("{}: {e}", p.display())])?,
             None => print!("{}", o.contents),
         }
     }

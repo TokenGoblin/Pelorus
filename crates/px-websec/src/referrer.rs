@@ -91,11 +91,7 @@ pub fn parse_header(value: &str) -> Option<ReferrerPolicy> {
     }
     value
         .split(',')
-        .filter_map(|t| {
-            ReferrerPolicy::from_token(
-                t.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}')),
-            )
-        })
+        .filter_map(|t| ReferrerPolicy::from_token(t.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}'))))
         .next_back()
 }
 
@@ -107,9 +103,7 @@ pub fn parse_attribute(value: &str) -> Option<ReferrerPolicy> {
     if value.len() > MAX_POLICY_INPUT {
         return None;
     }
-    ReferrerPolicy::from_token(
-        value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}')),
-    )
+    ReferrerPolicy::from_token(value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}')))
 }
 
 /// The policy that applies: the request's own (attribute) policy, else the
@@ -140,7 +134,11 @@ fn strip_for_referrer(source: &Url, origin_only: bool) -> Option<Url> {
 ///
 /// `source` is the URL of the referring document (`None` if there is none);
 /// `request_url` the URL being requested.
-pub fn compute(source: Option<&Url>, policy: ReferrerPolicy, request_url: &Url) -> Option<String> {
+pub fn compute(
+    source: Option<&Url>,
+    policy: ReferrerPolicy,
+    request_url: &Url,
+) -> Option<String> {
     trace::hit("referrer::compute");
     if !matches!(request_url.scheme(), "http" | "https") {
         return None;
@@ -213,26 +211,15 @@ mod tests {
     fn header_last_valid_wins() {
         assert_eq!(parse_header("no-referrer"), Some(P::NoReferrer));
         assert_eq!(parse_header("no-referrer, origin"), Some(P::Origin));
-        assert_eq!(
-            parse_header("origin, bogus"),
-            Some(P::Origin),
-            "unknown tokens skipped"
-        );
+        assert_eq!(parse_header("origin, bogus"), Some(P::Origin), "unknown tokens skipped");
         assert_eq!(parse_header("bogus"), None);
         assert_eq!(parse_header(""), None);
         assert_eq!(parse_header(" , ,"), None);
         assert_eq!(parse_header("ORIGIN"), Some(P::Origin));
-        assert_eq!(
-            parse_header("unsafe-url , same-origin ,"),
-            Some(P::SameOrigin)
-        );
+        assert_eq!(parse_header("unsafe-url , same-origin ,"), Some(P::SameOrigin));
         assert_eq!(parse_header("\"origin\""), None, "quoted is not a token");
         assert_eq!(parse_header("origin origin"), None);
-        assert_eq!(
-            parse_header(&"x,".repeat(MAX_POLICY_INPUT)),
-            None,
-            "oversized ignored"
-        );
+        assert_eq!(parse_header(&"x,".repeat(MAX_POLICY_INPUT)), None, "oversized ignored");
     }
 
     #[test]
@@ -256,11 +243,7 @@ mod tests {
     fn attribute_is_a_single_keyword() {
         assert_eq!(parse_attribute("  Origin\n"), Some(P::Origin));
         assert_eq!(parse_attribute("origin, no-referrer"), None);
-        assert_eq!(
-            parse_attribute("never"),
-            None,
-            "legacy keywords not accepted"
-        );
+        assert_eq!(parse_attribute("never"), None, "legacy keywords not accepted");
         assert_eq!(parse_attribute(""), None);
     }
 
@@ -268,10 +251,7 @@ mod tests {
     fn precedence_and_default() {
         assert_eq!(effective_policy(None, None), P::StrictOriginWhenCrossOrigin);
         assert_eq!(effective_policy(None, Some(P::Origin)), P::Origin);
-        assert_eq!(
-            effective_policy(Some(P::NoReferrer), Some(P::Origin)),
-            P::NoReferrer
-        );
+        assert_eq!(effective_policy(Some(P::NoReferrer), Some(P::Origin)), P::NoReferrer);
     }
 
     const SRC: &str = "https://user:pw@a.example/dir/page?x=1#frag";
@@ -290,10 +270,7 @@ mod tests {
 
     #[test]
     fn origin_only_form_has_trailing_slash() {
-        assert_eq!(
-            r(P::Origin, SRC, "https://b.example/"),
-            Some("https://a.example/".into())
-        );
+        assert_eq!(r(P::Origin, SRC, "https://b.example/"), Some("https://a.example/".into()));
         assert_eq!(
             r(P::Origin, "https://a.example:8443/p", "http://b.example/"),
             Some("https://a.example:8443/".into())
@@ -352,20 +329,11 @@ mod tests {
         let orig = Some("http://a.example/".to_string());
         // Upgrade (http -> https) is not a downgrade.
         assert_eq!(r(P::StrictOrigin, src, "https://b.example/"), orig);
-        assert_eq!(
-            r(P::StrictOriginWhenCrossOrigin, src, "https://b.example/"),
-            orig
-        );
-        assert_eq!(
-            r(P::NoReferrerWhenDowngrade, src, "https://b.example/"),
-            full
-        );
+        assert_eq!(r(P::StrictOriginWhenCrossOrigin, src, "https://b.example/"), orig);
+        assert_eq!(r(P::NoReferrerWhenDowngrade, src, "https://b.example/"), full);
         // http -> http.
         assert_eq!(r(P::StrictOrigin, src, "http://b.example/"), orig);
-        assert_eq!(
-            r(P::NoReferrerWhenDowngrade, src, "http://b.example/"),
-            full
-        );
+        assert_eq!(r(P::NoReferrerWhenDowngrade, src, "http://b.example/"), full);
         // Different scheme, same host: cross-origin.
         assert_eq!(r(P::SameOrigin, src, "https://a.example/p"), None);
     }
@@ -385,23 +353,14 @@ mod tests {
     #[test]
     fn long_referrer_falls_back_to_origin() {
         let long = format!("https://a.example/{}", "p".repeat(MAX_REFERRER_BYTES));
-        assert_eq!(
-            r(P::UnsafeUrl, &long, "https://b.example/"),
-            Some("https://a.example/".into())
-        );
+        assert_eq!(r(P::UnsafeUrl, &long, "https://b.example/"), Some("https://a.example/".into()));
         let ok = format!("https://a.example/{}", "p".repeat(100));
         assert_eq!(r(P::UnsafeUrl, &ok, "https://b.example/"), Some(ok.clone()));
     }
 
     #[test]
     fn local_schemes_and_files_never_referrer() {
-        for src in [
-            "about:blank",
-            "data:text/html,x",
-            "blob:https://a.example/i",
-            "file:///tmp/x",
-            "custom://a/",
-        ] {
+        for src in ["about:blank", "data:text/html,x", "blob:https://a.example/i", "file:///tmp/x", "custom://a/"] {
             assert_eq!(r(P::UnsafeUrl, src, "https://b.example/"), None, "{src}");
         }
         assert_eq!(compute(None, P::UnsafeUrl, &u("https://b.example/")), None);
@@ -412,11 +371,7 @@ mod tests {
     #[test]
     fn source_default_port_and_case_same_origin() {
         assert_eq!(
-            r(
-                P::SameOrigin,
-                "https://A.example:443/x",
-                "https://a.example/y"
-            ),
+            r(P::SameOrigin, "https://A.example:443/x", "https://a.example/y"),
             Some("https://a.example/x".into())
         );
     }
@@ -434,16 +389,7 @@ mod tests {
     fn hostile_input_never_panics() {
         let mut x: u64 = 0x0123_4567_89AB_CDEF;
         let alphabet = b"origin,- \t\"no-referrerunsafeurl\x00\xff";
-        let pols = [
-            P::NoReferrer,
-            P::NoReferrerWhenDowngrade,
-            P::SameOrigin,
-            P::Origin,
-            P::StrictOrigin,
-            P::OriginWhenCrossOrigin,
-            P::StrictOriginWhenCrossOrigin,
-            P::UnsafeUrl,
-        ];
+        let pols = [P::NoReferrer, P::NoReferrerWhenDowngrade, P::SameOrigin, P::Origin, P::StrictOrigin, P::OriginWhenCrossOrigin, P::StrictOriginWhenCrossOrigin, P::UnsafeUrl];
         for i in 0..10_000usize {
             let mut s = String::new();
             for _ in 0..(x % 80) {

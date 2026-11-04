@@ -400,10 +400,7 @@ impl Gen<'_> {
             }
             .into(),
             Conv::BigInt => "BigInt".into(),
-            Conv::Float {
-                double,
-                unrestricted,
-            } => format!(
+            Conv::Float { double, unrestricted } => format!(
                 "{}{}",
                 if *unrestricted { "Unrestricted" } else { "" },
                 if *double { "Double" } else { "Float" }
@@ -507,28 +504,16 @@ impl Gen<'_> {
             IrDefault::NegInfinity => float_const(c, "NEG_INFINITY"),
             IrDefault::NaN => float_const(c, "NAN"),
             IrDefault::Str(s) => match c {
-                Conv::String {
-                    kind: StringType::ByteString,
-                    ..
-                } => {
+                Conv::String { kind: StringType::ByteString, .. } => {
                     format!("{s:?}.as_bytes().to_vec()")
                 }
                 _ => format!("::std::string::String::from({s:?})"),
             },
             IrDefault::EnumValue { enum_name, value } => {
-                let e = self
-                    .b
-                    .enums
-                    .iter()
-                    .find(|e| &e.name == enum_name)
-                    .ok_or_else(bad)?;
+                let e = self.b.enums.iter().find(|e| &e.name == enum_name).ok_or_else(bad)?;
                 let vs = variant_names(&e.values);
                 let pos = e.values.iter().position(|x| x == value).ok_or_else(bad)?;
-                format!(
-                    "{}::{}",
-                    type_ident(enum_name),
-                    vs.get(pos).ok_or_else(bad)?
-                )
+                format!("{}::{}", type_ident(enum_name), vs.get(pos).ok_or_else(bad)?)
             }
             IrDefault::EmptySequence => format!("{VEC}::new()"),
             IrDefault::EmptyDictionary => match c {
@@ -664,9 +649,7 @@ impl Gen<'_> {
         ));
         self.line("        match s {");
         for (v, s) in vs.iter().zip(&e.values) {
-            self.w(format_args!(
-                "            {s:?} => {OPT}::Some({name}::{v}),"
-            ));
+            self.w(format_args!("            {s:?} => {OPT}::Some({name}::{v}),"));
         }
         self.w(format_args!("            _ => {OPT}::None,"));
         self.line("        }");
@@ -700,20 +683,13 @@ impl Gen<'_> {
             .iter()
             .map(|r| format!("{}.{}", r.owner, r.name))
             .collect();
-        self.w(format_args!(
-            "/// Script-object conversion order: {}.",
-            order.join(", ")
-        ));
+        self.w(format_args!("/// Script-object conversion order: {}.", order.join(", ")));
         self.line("#[allow(non_camel_case_types)]");
         self.line("#[derive(Debug, Clone, PartialEq)]");
         self.w(format_args!("pub struct {name} {{"));
         if let (Some(p), Some(f)) = (&d.parent, &parent_field) {
             self.w(format_args!("    /// Members inherited from `{p}`."));
-            self.w(format_args!(
-                "    pub {}: {},",
-                value_ident(f),
-                type_ident(p)
-            ));
+            self.w(format_args!("    pub {}: {},", value_ident(f), type_ident(p)));
         }
         for (ident, ty, idl, _) in &fields {
             self.w(format_args!("    /// `{idl}`"));
@@ -757,7 +733,14 @@ impl Gen<'_> {
         s
     }
 
-    fn method(&mut self, doc: &str, name: &str, this: Option<&str>, o: &Overload, ret: &str) {
+    fn method(
+        &mut self,
+        doc: &str,
+        name: &str,
+        this: Option<&str>,
+        o: &Overload,
+        ret: &str,
+    ) {
         let mut claims = Claims::new();
         claims.claim("self".to_owned());
         claims.claim("this".to_owned());
@@ -792,10 +775,7 @@ impl Gen<'_> {
         self.line("#[allow(non_camel_case_types)]");
         self.w(format_args!("pub enum {ty} {{}}"));
         self.w(format_args!("impl {ty} {{"));
-        self.w(format_args!(
-            "    pub const NAME: &'static str = {:?};",
-            i.name
-        ));
+        self.w(format_args!("    pub const NAME: &'static str = {:?};", i.name));
         for c in &i.constants {
             let t = self.rust_type(&c.conv);
             let v = match &c.value {
@@ -811,10 +791,7 @@ impl Gen<'_> {
         }
         self.line("}");
         for a in &i.ancestors {
-            self.w(format_args!(
-                "impl rt::Upcast<{}> for {ty} {{}}",
-                type_ident(a)
-            ));
+            self.w(format_args!("impl rt::Upcast<{}> for {ty} {{}}", type_ident(a)));
         }
         if i.kind == ContainerKind::CallbackInterface {
             // Implemented by script objects; the host only holds callbacks.
@@ -830,10 +807,7 @@ impl Gen<'_> {
             .as_ref()
             .map_or(String::new(), |p| format!(": {}Host", type_ident(p)));
         self.line("");
-        self.w(format_args!(
-            "/// What the host implements for `{}`.",
-            i.name
-        ));
+        self.w(format_args!("/// What the host implements for `{}`.", i.name));
         self.line("#[allow(non_camel_case_types)]");
         self.w(format_args!("pub trait {ty}Host{sup} {{"));
         let mut claims = Claims::new();
@@ -857,11 +831,7 @@ impl Gen<'_> {
             if a.flags.legacy_unforgeable {
                 notes.push("[LegacyUnforgeable]");
             }
-            let n = if notes.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", notes.join("; "))
-            };
+            let n = if notes.is_empty() { String::new() } else { format!(" {}", notes.join("; ")) };
             let g = claims.claim(snake_case(&a.name));
             self.w(format_args!("    /// Getter for `{}`.{n}", a.name));
             self.w(format_args!(
@@ -893,11 +863,7 @@ impl Gen<'_> {
                 (None, None) => "anonymous".into(),
             };
             for (n, ov) in op.overloads.iter().enumerate() {
-                let ident = if n == 0 {
-                    base.clone()
-                } else {
-                    format!("{base}_{n}")
-                };
+                let ident = if n == 0 { base.clone() } else { format!("{base}_{n}") };
                 let ident = value_ident(&claims.claim(ident));
                 let ret = self.rust_type(&ov.ret);
                 let this = (!op.is_static).then_some(this_ty);
@@ -936,16 +902,10 @@ impl Gen<'_> {
                     self.line("    // `async_iterable` is recorded in the IR; the engine emitter binds it.");
                 }
                 CollectionKind::Maplike | CollectionKind::Setlike => {
-                    let p = if col.kind == CollectionKind::Maplike {
-                        "maplike"
-                    } else {
-                        "setlike"
-                    };
+                    let p = if col.kind == CollectionKind::Maplike { "maplike" } else { "setlike" };
                     let key_ty = k.clone().unwrap_or_else(|| v.clone());
                     let n = claims.claim(format!("{p}_size"));
-                    self.w(format_args!(
-                        "    fn {n}(&mut self{this_arg}) -> {RESULT}<u32>;"
-                    ));
+                    self.w(format_args!("    fn {n}(&mut self{this_arg}) -> {RESULT}<u32>;"));
                     let n = claims.claim(format!("{p}_entry"));
                     self.w(format_args!(
                         "    fn {n}(&mut self{this_arg}, index: u32) -> {RESULT}<{OPT}<{entry}>>;"
@@ -977,9 +937,7 @@ impl Gen<'_> {
                             "    fn {n}(&mut self{this_arg}, key: {key_ty}) -> {RESULT}<bool>;"
                         ));
                         let n = claims.claim(format!("{p}_clear"));
-                        self.w(format_args!(
-                            "    fn {n}(&mut self{this_arg}) -> {RESULT}<()>;"
-                        ));
+                        self.w(format_args!("    fn {n}(&mut self{this_arg}) -> {RESULT}<()>;"));
                     }
                 }
             }
@@ -1016,8 +974,5 @@ fn float_const(c: &Conv, name: &str) -> String {
 
 fn variant_names(values: &[String]) -> Vec<String> {
     let mut claims = Claims::new();
-    values
-        .iter()
-        .map(|v| claims.claim(variant_ident(v)))
-        .collect()
+    values.iter().map(|v| claims.claim(variant_ident(v))).collect()
 }

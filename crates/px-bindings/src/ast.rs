@@ -199,10 +199,7 @@ pub enum ExtAttrValue {
     /// `[Name=(A, B)]`
     IdentList(Vec<String>),
     /// `[Name=Ident(args)]`
-    NamedArgList {
-        name: String,
-        args: Vec<Argument>,
-    },
+    NamedArgList { name: String, args: Vec<Argument> },
     /// `[Name="text"]`
     String(String),
     /// `[Name=*]`
@@ -283,21 +280,11 @@ pub enum TypeKind {
     Boolean,
     Byte,
     Octet,
-    Short {
-        unsigned: bool,
-    },
-    Long {
-        unsigned: bool,
-    },
-    LongLong {
-        unsigned: bool,
-    },
-    Float {
-        unrestricted: bool,
-    },
-    Double {
-        unrestricted: bool,
-    },
+    Short { unsigned: bool },
+    Long { unsigned: bool },
+    LongLong { unsigned: bool },
+    Float { unrestricted: bool },
+    Double { unrestricted: bool },
     Bigint,
     String(StringType),
     Object,

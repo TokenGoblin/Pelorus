@@ -52,22 +52,8 @@ fn is_sf_token_char(c: u8) -> bool {
     c.is_ascii_alphanumeric()
         || matches!(
             c,
-            b'!' | b'#'
-                | b'$'
-                | b'%'
-                | b'&'
-                | b'\''
-                | b'*'
-                | b'+'
-                | b'-'
-                | b'.'
-                | b'^'
-                | b'_'
-                | b'`'
-                | b'|'
-                | b'~'
-                | b':'
-                | b'/'
+            b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_'
+                | b'`' | b'|' | b'~' | b':' | b'/'
         )
 }
 
@@ -109,9 +95,10 @@ fn parse_sf_token_item(input: &str) -> Option<SfItem> {
             Some(c) if c.is_ascii_lowercase() || *c == b'*' => i += 1,
             _ => return None,
         }
-        while s.get(i).is_some_and(|c| {
-            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-' | b'.' | b'*')
-        }) {
+        while s
+            .get(i)
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-' | b'.' | b'*'))
+        {
             i += 1;
         }
         let key = std::str::from_utf8(s.get(ks..i)?).ok()?.to_string();
@@ -184,10 +171,7 @@ pub struct EmbedderPolicy {
 /// Absent or unparsable is `unsafe-none`.
 pub fn parse_coep(header: Option<&str>) -> EmbedderPolicy {
     trace::hit("coop::parse_coep");
-    let none = EmbedderPolicy {
-        value: Coep::UnsafeNone,
-        report_to: None,
-    };
+    let none = EmbedderPolicy { value: Coep::UnsafeNone, report_to: None };
     let Some(item) = header.and_then(parse_sf_token_item) else {
         return none;
     };
@@ -196,10 +180,7 @@ pub fn parse_coep(header: Option<&str>) -> EmbedderPolicy {
         Some("credentialless") => Coep::Credentialless,
         _ => Coep::UnsafeNone,
     };
-    EmbedderPolicy {
-        value,
-        report_to: item.report_to,
-    }
+    EmbedderPolicy { value, report_to: item.report_to }
 }
 
 impl Coep {
@@ -239,10 +220,7 @@ pub struct OpenerPolicy {
 /// (which upgrades `same-origin` to `same-origin-plus-coep`).
 pub fn parse_coop(header: Option<&str>, coep: Coep) -> OpenerPolicy {
     trace::hit("coop::parse_coop");
-    let none = OpenerPolicy {
-        value: Coop::UnsafeNone,
-        report_to: None,
-    };
+    let none = OpenerPolicy { value: Coop::UnsafeNone, report_to: None };
     let Some(item) = header.and_then(parse_sf_token_item) else {
         return none;
     };
@@ -252,10 +230,7 @@ pub fn parse_coop(header: Option<&str>, coep: Coep) -> OpenerPolicy {
         Some("same-origin-allow-popups") => Coop::SameOriginAllowPopups,
         _ => Coop::UnsafeNone,
     };
-    OpenerPolicy {
-        value,
-        report_to: item.report_to,
-    }
+    OpenerPolicy { value, report_to: item.report_to }
 }
 
 /// Whether the document is cross-origin isolated.
@@ -478,10 +453,7 @@ mod tests {
         (l.len() >= 2).then(|| l[l.len() - 2..].join("."))
     }
     fn node(s: &str) -> ContextNode {
-        ContextNode {
-            url: u(s),
-            origin: o(s),
-        }
+        ContextNode { url: u(s), origin: o(s) }
     }
 
     #[test]
@@ -491,72 +463,29 @@ mod tests {
         assert_eq!(v(Some("credentialless")), Coep::Credentialless);
         assert_eq!(v(Some("unsafe-none")), Coep::UnsafeNone);
         assert_eq!(v(None), Coep::UnsafeNone);
-        assert_eq!(
-            v(Some("Require-Corp")),
-            Coep::UnsafeNone,
-            "tokens are case-sensitive"
-        );
-        assert_eq!(
-            v(Some("\"require-corp\"")),
-            Coep::UnsafeNone,
-            "string is not a token"
-        );
-        assert_eq!(
-            v(Some("require-corp, credentialless")),
-            Coep::UnsafeNone,
-            "list"
-        );
+        assert_eq!(v(Some("Require-Corp")), Coep::UnsafeNone, "tokens are case-sensitive");
+        assert_eq!(v(Some("\"require-corp\"")), Coep::UnsafeNone, "string is not a token");
+        assert_eq!(v(Some("require-corp, credentialless")), Coep::UnsafeNone, "list");
         assert_eq!(v(Some("")), Coep::UnsafeNone);
         assert_eq!(v(Some("require-corp junk")), Coep::UnsafeNone);
         let p = parse_coep(Some("require-corp; report-to=\"ep\""));
-        assert_eq!(
-            (p.value, p.report_to.as_deref()),
-            (Coep::RequireCorp, Some("ep"))
-        );
-        assert_eq!(
-            parse_coep(Some("require-corp;report-to=ep")).report_to,
-            None,
-            "bare token is not a string"
-        );
-        assert_eq!(
-            v(Some("require-corp; report-to=\"unterminated")),
-            Coep::UnsafeNone
-        );
-        assert_eq!(
-            v(Some(&format!(
-                "require-corp; a=\"{}\"",
-                "x".repeat(MAX_HEADER_BYTES)
-            ))),
-            Coep::UnsafeNone
-        );
+        assert_eq!((p.value, p.report_to.as_deref()), (Coep::RequireCorp, Some("ep")));
+        assert_eq!(parse_coep(Some("require-corp;report-to=ep")).report_to, None, "bare token is not a string");
+        assert_eq!(v(Some("require-corp; report-to=\"unterminated")), Coep::UnsafeNone);
+        assert_eq!(v(Some(&format!("require-corp; a=\"{}\"", "x".repeat(MAX_HEADER_BYTES)))), Coep::UnsafeNone);
     }
 
     #[test]
     fn coop_parsing() {
         let v = |h: &str, c: Coep| parse_coop(Some(h), c).value;
         assert_eq!(v("same-origin", Coep::UnsafeNone), Coop::SameOrigin);
-        assert_eq!(
-            v("same-origin", Coep::RequireCorp),
-            Coop::SameOriginPlusCoep
-        );
-        assert_eq!(
-            v("same-origin", Coep::Credentialless),
-            Coop::SameOriginPlusCoep
-        );
-        assert_eq!(
-            v("same-origin-allow-popups", Coep::RequireCorp),
-            Coop::SameOriginAllowPopups
-        );
+        assert_eq!(v("same-origin", Coep::RequireCorp), Coop::SameOriginPlusCoep);
+        assert_eq!(v("same-origin", Coep::Credentialless), Coop::SameOriginPlusCoep);
+        assert_eq!(v("same-origin-allow-popups", Coep::RequireCorp), Coop::SameOriginAllowPopups);
         assert_eq!(v("unsafe-none", Coep::RequireCorp), Coop::UnsafeNone);
         assert_eq!(v("Same-Origin", Coep::UnsafeNone), Coop::UnsafeNone);
-        assert_eq!(
-            v("noopener-allow-popups", Coep::UnsafeNone),
-            Coop::UnsafeNone
-        );
-        assert_eq!(
-            v("same-origin, same-origin", Coep::UnsafeNone),
-            Coop::UnsafeNone
-        );
+        assert_eq!(v("noopener-allow-popups", Coep::UnsafeNone), Coop::UnsafeNone);
+        assert_eq!(v("same-origin, same-origin", Coep::UnsafeNone), Coop::UnsafeNone);
         assert_eq!(parse_coop(None, Coep::RequireCorp).value, Coop::UnsafeNone);
         let p = parse_coop(Some("same-origin; report-to=\"coop\""), Coep::UnsafeNone);
         assert_eq!(p.report_to.as_deref(), Some("coop"));
@@ -565,11 +494,7 @@ mod tests {
     }
 
     fn st(v: Coop, url: &str, initial: bool) -> CoopState {
-        CoopState {
-            value: v,
-            origin: o(url),
-            initial_about_blank: initial,
-        }
+        CoopState { value: v, origin: o(url), initial_about_blank: initial }
     }
 
     #[test]
@@ -577,9 +502,7 @@ mod tests {
         use Coop::*;
         let a = "https://a.example/";
         let b = "https://b.example/";
-        let sw = |c: Coop, co: &str, r: Coop, ro: &str| {
-            needs_group_switch(&st(c, co, false), &st(r, ro, false), true)
-        };
+        let sw = |c: Coop, co: &str, r: Coop, ro: &str| needs_group_switch(&st(c, co, false), &st(r, ro, false), true);
         // Both unsafe-none: never.
         assert!(!sw(UnsafeNone, a, UnsafeNone, b));
         // Same value, same origin: stay.
@@ -602,40 +525,16 @@ mod tests {
         use Coop::*;
         let a = "https://a.example/";
         // Non-top-level navigations are unaffected.
-        assert!(!needs_group_switch(
-            &st(SameOrigin, a, false),
-            &st(UnsafeNone, a, false),
-            false
-        ));
+        assert!(!needs_group_switch(&st(SameOrigin, a, false), &st(UnsafeNone, a, false), false));
         // Popup from an allow-popups opener may go to unsafe-none.
-        assert!(!needs_group_switch(
-            &st(SameOriginAllowPopups, a, true),
-            &st(UnsafeNone, "https://b.example/", false),
-            true
-        ));
+        assert!(!needs_group_switch(&st(SameOriginAllowPopups, a, true), &st(UnsafeNone, "https://b.example/", false), true));
         // ...but not once it is a real document.
-        assert!(needs_group_switch(
-            &st(SameOriginAllowPopups, a, false),
-            &st(UnsafeNone, a, false),
-            true
-        ));
+        assert!(needs_group_switch(&st(SameOriginAllowPopups, a, false), &st(UnsafeNone, a, false), true));
         // ...and the exception does not cover other policies.
-        assert!(needs_group_switch(
-            &st(SameOrigin, a, true),
-            &st(UnsafeNone, a, false),
-            true
-        ));
+        assert!(needs_group_switch(&st(SameOrigin, a, true), &st(UnsafeNone, a, false), true));
         // Opaque origins never match each other.
-        let op = CoopState {
-            value: SameOrigin,
-            origin: Origin::new_opaque(),
-            initial_about_blank: false,
-        };
-        let op2 = CoopState {
-            value: SameOrigin,
-            origin: Origin::new_opaque(),
-            initial_about_blank: false,
-        };
+        let op = CoopState { value: SameOrigin, origin: Origin::new_opaque(), initial_about_blank: false };
+        let op2 = CoopState { value: SameOrigin, origin: Origin::new_opaque(), initial_about_blank: false };
         assert!(needs_group_switch(&op, &op2, true));
     }
 
@@ -646,32 +545,17 @@ mod tests {
         assert_eq!(parse_corp(&["cross-origin"]), Some(Corp::CrossOrigin));
         assert_eq!(parse_corp(&["Same-Origin"]), None);
         assert_eq!(parse_corp(&["same-site, same-origin"]), None);
-        assert_eq!(
-            parse_corp(&["same-origin", "same-origin"]),
-            None,
-            "two headers combine and match nothing"
-        );
+        assert_eq!(parse_corp(&["same-origin", "same-origin"]), None, "two headers combine and match nothing");
         assert_eq!(parse_corp(&[]), None);
         assert_eq!(parse_corp(&[""]), None);
     }
 
-    fn check(
-        origin: &str,
-        embedder: Coep,
-        resp_url: &str,
-        corp: Option<Corp>,
-        creds: bool,
-        nav: bool,
-    ) -> CorpVerdict {
+    fn check(origin: &str, embedder: Coep, resp_url: &str, corp: Option<Corp>, creds: bool, nav: bool) -> CorpVerdict {
         let url = u(resp_url);
         corp_check(
             &o(origin),
             embedder,
-            &CorpResponse {
-                url: &url,
-                corp,
-                request_includes_credentials: creds,
-            },
+            &CorpResponse { url: &url, corp, request_includes_credentials: creds },
             nav,
             &psl,
         )
@@ -681,50 +565,10 @@ mod tests {
     fn corp_same_origin() {
         use CorpVerdict::*;
         let r = "https://a.example/img";
-        assert_eq!(
-            check(
-                "https://a.example/",
-                Coep::UnsafeNone,
-                r,
-                Some(Corp::SameOrigin),
-                false,
-                false
-            ),
-            Allowed
-        );
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::UnsafeNone,
-                r,
-                Some(Corp::SameOrigin),
-                false,
-                false
-            ),
-            Blocked
-        );
-        assert_eq!(
-            check(
-                "https://a.example:8443/",
-                Coep::UnsafeNone,
-                r,
-                Some(Corp::SameOrigin),
-                false,
-                false
-            ),
-            Blocked
-        );
-        assert_eq!(
-            check(
-                "http://a.example/",
-                Coep::UnsafeNone,
-                r,
-                Some(Corp::SameOrigin),
-                false,
-                false
-            ),
-            Blocked
-        );
+        assert_eq!(check("https://a.example/", Coep::UnsafeNone, r, Some(Corp::SameOrigin), false, false), Allowed);
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, r, Some(Corp::SameOrigin), false, false), Blocked);
+        assert_eq!(check("https://a.example:8443/", Coep::UnsafeNone, r, Some(Corp::SameOrigin), false, false), Blocked);
+        assert_eq!(check("http://a.example/", Coep::UnsafeNone, r, Some(Corp::SameOrigin), false, false), Blocked);
     }
 
     #[test]
@@ -732,96 +576,23 @@ mod tests {
         use CorpVerdict::*;
         let r = "https://img.a.example/x";
         let ss = Some(Corp::SameSite);
-        assert_eq!(
-            check(
-                "https://www.a.example/",
-                Coep::UnsafeNone,
-                r,
-                ss,
-                false,
-                false
-            ),
-            Allowed
-        );
-        assert_eq!(
-            check("https://b.example/", Coep::UnsafeNone, r, ss, false, false),
-            Blocked
-        );
+        assert_eq!(check("https://www.a.example/", Coep::UnsafeNone, r, ss, false, false), Allowed);
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, r, ss, false, false), Blocked);
         // https resource, http requester: same host but secure -> insecure mismatch blocked.
-        assert_eq!(
-            check(
-                "http://www.a.example/",
-                Coep::UnsafeNone,
-                r,
-                ss,
-                false,
-                false
-            ),
-            Blocked
-        );
+        assert_eq!(check("http://www.a.example/", Coep::UnsafeNone, r, ss, false, false), Blocked);
         // http resource, http requester: fine.
-        assert_eq!(
-            check(
-                "http://www.a.example/",
-                Coep::UnsafeNone,
-                "http://img.a.example/x",
-                ss,
-                false,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("http://www.a.example/", Coep::UnsafeNone, "http://img.a.example/x", ss, false, false), Allowed);
         // http resource, https requester: fine (schemelessly same site).
-        assert_eq!(
-            check(
-                "https://www.a.example/",
-                Coep::UnsafeNone,
-                "http://img.a.example/x",
-                ss,
-                false,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("https://www.a.example/", Coep::UnsafeNone, "http://img.a.example/x", ss, false, false), Allowed);
     }
 
     #[test]
     fn corp_cross_origin_and_absent() {
         use CorpVerdict::*;
         let r = "https://a.example/x";
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::UnsafeNone,
-                r,
-                Some(Corp::CrossOrigin),
-                false,
-                false
-            ),
-            Allowed
-        );
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::UnsafeNone,
-                r,
-                None,
-                false,
-                false
-            ),
-            Allowed
-        );
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::RequireCorp,
-                r,
-                Some(Corp::CrossOrigin),
-                false,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, r, Some(Corp::CrossOrigin), false, false), Allowed);
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, r, None, false, false), Allowed);
+        assert_eq!(check("https://b.example/", Coep::RequireCorp, r, Some(Corp::CrossOrigin), false, false), Allowed);
     }
 
     #[test]
@@ -829,52 +600,12 @@ mod tests {
         use CorpVerdict::*;
         let r = "https://a.example/x";
         // No CORP header under require-corp: treated as same-origin.
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::RequireCorp,
-                r,
-                None,
-                false,
-                false
-            ),
-            Blocked
-        );
-        assert_eq!(
-            check(
-                "https://a.example/",
-                Coep::RequireCorp,
-                r,
-                None,
-                false,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("https://b.example/", Coep::RequireCorp, r, None, false, false), Blocked);
+        assert_eq!(check("https://a.example/", Coep::RequireCorp, r, None, false, false), Allowed);
         // A same-origin CORP still blocks even when COEP is off.
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::UnsafeNone,
-                r,
-                Some(Corp::SameOrigin),
-                false,
-                false
-            ),
-            Blocked
-        );
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, r, Some(Corp::SameOrigin), false, false), Blocked);
         // same-site satisfied.
-        assert_eq!(
-            check(
-                "https://b.a.example/",
-                Coep::RequireCorp,
-                r,
-                Some(Corp::SameSite),
-                false,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("https://b.a.example/", Coep::RequireCorp, r, Some(Corp::SameSite), false, false), Allowed);
     }
 
     #[test]
@@ -882,53 +613,13 @@ mod tests {
         use CorpVerdict::*;
         let r = "https://a.example/x";
         // Credential-less no-cors request needs no CORP.
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::Credentialless,
-                r,
-                None,
-                false,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("https://b.example/", Coep::Credentialless, r, None, false, false), Allowed);
         // With credentials, a missing CORP means same-origin.
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::Credentialless,
-                r,
-                None,
-                true,
-                false
-            ),
-            Blocked
-        );
+        assert_eq!(check("https://b.example/", Coep::Credentialless, r, None, true, false), Blocked);
         // Navigations are treated like credentialed.
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::Credentialless,
-                r,
-                None,
-                false,
-                true
-            ),
-            Blocked
-        );
+        assert_eq!(check("https://b.example/", Coep::Credentialless, r, None, false, true), Blocked);
         // Explicit cross-origin passes.
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::Credentialless,
-                r,
-                Some(Corp::CrossOrigin),
-                true,
-                false
-            ),
-            Allowed
-        );
+        assert_eq!(check("https://b.example/", Coep::Credentialless, r, Some(Corp::CrossOrigin), true, false), Allowed);
     }
 
     #[test]
@@ -937,71 +628,19 @@ mod tests {
         // Fetch: with forNavigation and an unsafe-none embedder policy the
         // internal check returns allowed immediately, even for an explicit
         // same-origin CORP (it only matters to embedders that opted in).
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::UnsafeNone,
-                "https://a.example/",
-                None,
-                false,
-                true
-            ),
-            Allowed
-        );
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::UnsafeNone,
-                "https://a.example/",
-                Some(Corp::SameOrigin),
-                false,
-                true
-            ),
-            Allowed
-        );
-        assert_eq!(
-            check(
-                "https://b.example/",
-                Coep::RequireCorp,
-                "https://a.example/",
-                None,
-                false,
-                true
-            ),
-            Blocked
-        );
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, "https://a.example/", None, false, true), Allowed);
+        assert_eq!(check("https://b.example/", Coep::UnsafeNone, "https://a.example/", Some(Corp::SameOrigin), false, true), Allowed);
+        assert_eq!(check("https://b.example/", Coep::RequireCorp, "https://a.example/", None, false, true), Blocked);
     }
 
     #[test]
     fn report_only_never_changes_the_decision() {
         let url = u("https://a.example/x");
-        let resp = CorpResponse {
-            url: &url,
-            corp: None,
-            request_includes_credentials: false,
-        };
-        assert!(corp_report_only_would_block(
-            &o("https://b.example/"),
-            Coep::RequireCorp,
-            &resp,
-            false,
-            &psl
-        ));
-        assert!(!corp_report_only_would_block(
-            &o("https://b.example/"),
-            Coep::UnsafeNone,
-            &resp,
-            false,
-            &psl
-        ));
+        let resp = CorpResponse { url: &url, corp: None, request_includes_credentials: false };
+        assert!(corp_report_only_would_block(&o("https://b.example/"), Coep::RequireCorp, &resp, false, &psl));
+        assert!(!corp_report_only_would_block(&o("https://b.example/"), Coep::UnsafeNone, &resp, false, &psl));
         assert_eq!(
-            corp_check(
-                &o("https://b.example/"),
-                Coep::UnsafeNone,
-                &resp,
-                false,
-                &psl
-            ),
+            corp_check(&o("https://b.example/"), Coep::UnsafeNone, &resp, false, &psl),
             CorpVerdict::Allowed
         );
     }
@@ -1009,24 +648,11 @@ mod tests {
     #[test]
     fn coep_response_applies_only_to_opaque() {
         let url = u("https://a.example/x");
-        let resp = CorpResponse {
-            url: &url,
-            corp: None,
-            request_includes_credentials: false,
-        };
+        let resp = CorpResponse { url: &url, corp: None, request_includes_credentials: false };
         let b = o("https://b.example/");
-        assert_eq!(
-            coep_check_response(&b, Coep::RequireCorp, Tainting::Opaque, &resp, &psl),
-            CorpVerdict::Blocked
-        );
-        assert_eq!(
-            coep_check_response(&b, Coep::RequireCorp, Tainting::Cors, &resp, &psl),
-            CorpVerdict::Allowed
-        );
-        assert_eq!(
-            coep_check_response(&b, Coep::RequireCorp, Tainting::Basic, &resp, &psl),
-            CorpVerdict::Allowed
-        );
+        assert_eq!(coep_check_response(&b, Coep::RequireCorp, Tainting::Opaque, &resp, &psl), CorpVerdict::Blocked);
+        assert_eq!(coep_check_response(&b, Coep::RequireCorp, Tainting::Cors, &resp, &psl), CorpVerdict::Allowed);
+        assert_eq!(coep_check_response(&b, Coep::RequireCorp, Tainting::Basic, &resp, &psl), CorpVerdict::Allowed);
     }
 
     #[test]
@@ -1037,29 +663,15 @@ mod tests {
         assert!(!is_secure_context(&[node("http://a.example/")]));
         assert!(!is_secure_context(&[]));
         // Secure frame under an insecure parent is not secure.
-        assert!(!is_secure_context(&[
-            node("https://a.example/"),
-            node("http://top.example/")
-        ]));
+        assert!(!is_secure_context(&[node("https://a.example/"), node("http://top.example/")]));
         // Ancestor chain all secure.
-        assert!(is_secure_context(&[
-            node("https://a.example/"),
-            node("https://top.example/"),
-            node("https://t.example/")
-        ]));
+        assert!(is_secure_context(&[node("https://a.example/"), node("https://top.example/"), node("https://t.example/")]));
         // One bad apple anywhere.
-        assert!(!is_secure_context(&[
-            node("https://a.example/"),
-            node("https://mid.example/"),
-            node("http://top.example/")
-        ]));
+        assert!(!is_secure_context(&[node("https://a.example/"), node("https://mid.example/"), node("http://top.example/")]));
         // A data: document has an opaque origin: not secure.
         assert!(!is_secure_context(&[node("data:text/html,x")]));
         // ...and nests nothing secure.
-        assert!(!is_secure_context(&[
-            node("https://a.example/"),
-            node("data:text/html,x")
-        ]));
+        assert!(!is_secure_context(&[node("https://a.example/"), node("data:text/html,x")]));
     }
 
     #[test]
@@ -1071,18 +683,8 @@ mod tests {
         let a = st(Coop::SameOrigin, "https://a.example/", false);
         let _ = needs_group_switch(&a, &a, true);
         let url = u("https://a.example/x");
-        let resp = CorpResponse {
-            url: &url,
-            corp: None,
-            request_includes_credentials: false,
-        };
-        let _ = coep_check_response(
-            &o("https://b.example/"),
-            Coep::RequireCorp,
-            Tainting::Opaque,
-            &resp,
-            &psl,
-        );
+        let resp = CorpResponse { url: &url, corp: None, request_includes_credentials: false };
+        let _ = coep_check_response(&o("https://b.example/"), Coep::RequireCorp, Tainting::Opaque, &resp, &psl);
         let _ = is_secure_context(&[node("https://a.example/")]);
         trace::assert_all_hit(ENFORCEMENT_POINTS);
     }
@@ -1103,11 +705,7 @@ mod tests {
             let coep = parse_coep(Some(&s)).value;
             let _ = parse_coop(Some(&s), coep);
             let corp = parse_corp(&[&s]);
-            let resp = CorpResponse {
-                url: &url,
-                corp,
-                request_includes_credentials: x & 1 == 0,
-            };
+            let resp = CorpResponse { url: &url, corp, request_includes_credentials: x & 1 == 0 };
             let _ = corp_check(&o("https://b.example/"), coep, &resp, x & 2 == 0, &psl);
         }
     }
