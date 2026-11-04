@@ -932,6 +932,7 @@ dependencies = [
  "px-css",
  "px-dom",
  "px-layout",
+ "px-text",
 ]
 
 [[package]]

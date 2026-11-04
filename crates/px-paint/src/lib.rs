@@ -14,6 +14,8 @@ pub mod png;
 pub mod raster;
 
 pub use build::{build, build_with_viewport};
-pub use display_list::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect};
+pub use display_list::{
+    BorderSide, BorderStyle, Color, DisplayList, FontId, Item, ListError, PositionedGlyph, Rect,
+};
 pub use png::{decode, encode};
 pub use raster::{Canvas, rasterize};
