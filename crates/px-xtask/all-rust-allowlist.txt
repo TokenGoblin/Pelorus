@@ -1,0 +1,51 @@
+# Non-Rust first-party sources awaiting port to Rust (ADR 032: the project is
+# 100% Rust). Checked by `cargo xtask all-rust`.
+#
+# THIS LIST MAY ONLY SHRINK.
+#   - Do not add a line. Write the new tool in Rust (a gate in this crate).
+#   - When you port a script, delete the script AND its line in one commit.
+#   - A line whose file is gone, or which is no longer a non-Rust source, or
+#     which has no `# reason`, fails the gate.
+#
+# Format: one repository-relative path per line, then `# reason`. Blank lines
+# and lines starting with `#` are ignored.
+#
+# Excluded by rule, so never listed (see src/gates/all_rust.rs):
+#   tests/wpt/**  tests/html5lib/**  fuzz/corpus/**  .github/workflows/*.yml
+#   build-python/requirements.txt (data that pins the one named exception:
+#   stylo's Python+Mako build, ADR 023 / ADR 032)
+#
+# Grouped by porting difficulty. Every `cargo xtask <name>` below is the
+# intended destination, using the name the script passed to `verdict`.
+
+# --- Easy: short, no compilation, mostly git/grep/file checks ----------------
+ci/compare-hashes.sh       # -> cargo xtask compare-hashes: diff two hash manifests
+ci/gate-build.sh           # -> cargo xtask build: runs cargo build/test; uses xtask::proc::cargo
+ci/gate-compat-list.sh     # -> cargo xtask compat-list: wraps check_compat_sites.py
+ci/check_compat_sites.py   # -> folded into compat-list: parse tests/compat/sites.toml by hand
+ci/unsafe-audit.sh         # -> cargo xtask unsafe-audit: reads ci/unsafe-baseline.json
+ci/gate-miri.sh            # -> cargo xtask miri: runs cargo +nightly miri as a child
+ci/gate-all.sh             # -> cargo xtask all: run every registered gate in order
+
+# --- Medium: more logic, text scanning, or external tools --------------------
+ci/gate-unsafe-headers.sh  # -> cargo xtask unsafe-headers: per-crate header scan, waiver scans
+ci/gate-supply-chain.sh    # -> cargo xtask supply-chain: cargo-deny/vet/audit as children
+ci/count-lines.sh          # -> cargo xtask count-lines: line/unsafe counting
+ci/build-and-hash.sh       # -> cargo xtask build-and-hash: reproducible build + hashing (needs a SHA-256 by hand)
+ci/gate-fuzz-smoke.sh      # -> cargo xtask fuzz-smoke: runs cargo fuzz as a child
+ci/check_not_serializable.py # -> cargo xtask check-not-serializable, or a compile-fail test in px-ipc
+ci/update-psl.sh           # -> cargo xtask update-psl: HTTPS fetch + transform of the public suffix list
+ci/update-hsts.sh          # -> cargo xtask update-hsts: HTTPS fetch + transform of the HSTS preload list
+ci/make-fetch-corpus.py    # -> cargo xtask make-fetch-corpus: HAR -> corpus generator (sha256, JSON by hand)
+
+# --- Hard: large, platform-sensitive, or tied to the named exception ---------
+ci/gate-dom.sh             # -> cargo xtask dom: 298 lines, many sub-checks
+ci/gate-style.sh           # -> cargo xtask style: 353 lines, enforces ADR 024 on px-css
+ci/gate-ipc.sh             # -> cargo xtask ipc: process spawn, two build profiles
+ci/gate-sandbox.sh         # -> cargo xtask sandbox: OS-specific, runs under seccomp/job objects
+ci/gate-network.sh         # -> cargo xtask network: symbol audit of release artifacts
+ci/gate-sanitizers.sh      # -> cargo xtask sanitizers: nightly + sanitizer runtimes
+ci/setup-build-python.sh   # -> cargo xtask setup-build-python: builds the pinned venv for stylo (ADR 023 exception)
+ci/check_build_python_pin.py # -> cargo xtask check-build-python-pin: must still inspect the Python env (ADR 023 exception)
+ci/lib.sh                  # -> retire LAST: replaced by px-xtask's Gate/proc; the PYTHON3 pin export must move into xtask first
+

@@ -29,7 +29,7 @@
 //!
 //! # Integer arithmetic, deliberately
 //!
-//! No `f32` anywhere — `ci/gate-layout.sh` forbids it in this crate, because
+//! No `f32` anywhere — `cargo xtask layout` forbids it in this crate, because
 //! floating point makes a repeat run depend on the order operations happened in,
 //! and "identical box tree on repeat runs" is §9 Phase 6's second gate item. The
 //! advance is computed in app units by integer division, so it is exactly

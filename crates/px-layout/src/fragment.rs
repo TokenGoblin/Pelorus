@@ -16,7 +16,7 @@
 //!
 //! **That property is enforced by `Fragment: Copy`, not by a source scan.** A type
 //! owning a `Vec` cannot be `Copy`, so the structure simply does not compile.
-//! `ci/gate-layout.sh` carries a note about the two scans that tried to catch this
+//! `cargo xtask layout` carries a note about the two scans that tried to catch this
 //! by grepping and both fired on correct code — the second on `FragmentTree`'s own
 //! `Vec<Fragment>`, which is the arena the scan existed to encourage.
 //!
@@ -312,7 +312,7 @@ mod tests {
     /// Not a style preference. A fragment that owned its children — a
     /// `Vec<Fragment>` field — could not be `Copy`, so this assertion is the
     /// compiler refusing the structure that produces a recursive drop. Two
-    /// attempts at catching that with a source scan in `ci/gate-layout.sh` both
+    /// attempts at catching that with a source scan in `cargo xtask layout` both
     /// fired on correct code; this cannot, because it is not a heuristic.
     #[test]
     fn fragment_is_copy_so_drop_cannot_recurse() {

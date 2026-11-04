@@ -1,0 +1,13 @@
+[package]
+name = "px-xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Repository gates and developer tooling, written in Rust (ADR 032)."
+
+# std ONLY. ADR 032: the project wants as few dependencies as possible, so
+# argument parsing, file walking, glob matching and the small amount of
+# TOML/JSON extraction the gates need are written by hand. Adding a crate here
+# needs an ADR like anywhere else.
+[dependencies]

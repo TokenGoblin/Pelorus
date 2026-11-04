@@ -11,6 +11,6 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   (build-spec §2.2). Every other crate takes the constant from here.
 - The update URL and the release signing key do NOT belong here. They are
   brand-independent and permanent (§14.1); they live in px-update and are
-  explicitly out of scope for a rename. ci/gate-structure.sh enforces this.
+  explicitly out of scope for a rename. `cargo xtask structure` enforces this.
 - LEGACY_CONFIG_DIRS grows by one entry at every rename and never shrinks.
   A dropped entry silently orphans a user's profile.

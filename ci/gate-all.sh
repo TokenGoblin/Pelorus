@@ -18,33 +18,37 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-# name:script — the two after the blank comment are not §9 gate checks.
+# name:command -- `cargo xtask <gate>` once ported (ADR 032), else `bash <script>`.
+# Ported gates are added with the xtask command; this list shrinks to nothing
+# in scripts and then gate-all.sh itself becomes `cargo xtask all`.
 CHECKS="
-build:ci/gate-build.sh
-supply-chain:ci/gate-supply-chain.sh
-unsafe-headers:ci/gate-unsafe-headers.sh
-brand-leak:tests/brand/gate-brand-leak.sh
-structure:ci/gate-structure.sh
-compat-list:ci/gate-compat-list.sh
-ipc:ci/gate-ipc.sh
-sandbox:ci/gate-sandbox.sh
-network:ci/gate-network.sh
-dom:ci/gate-dom.sh
+build:bash ci/gate-build.sh
+supply-chain:bash ci/gate-supply-chain.sh
+unsafe-headers:bash ci/gate-unsafe-headers.sh
+brand-leak:cargo xtask brand-leak
+structure:cargo xtask structure
+compat-list:bash ci/gate-compat-list.sh
+ipc:bash ci/gate-ipc.sh
+sandbox:bash ci/gate-sandbox.sh
+network:bash ci/gate-network.sh
+dom:bash ci/gate-dom.sh
 "
 
 failed=""
-for entry in $CHECKS; do
+while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
     name="${entry%%:*}"
     script="${entry#*:}"
     printf '%-16s ' "$name"
-    if output="$(bash "$script" 2>&1)"; then
+    # shellcheck disable=SC2086 -- the command is deliberately word-split
+    if output="$($script 2>&1)"; then
         printf 'PASS\n'
     else
         printf 'FAIL\n'
         printf '%s\n' "$output" | grep -E '^FAIL' | sed 's/^/                 /'
         failed="$failed $name"
     fi
-done
+done <<< "$CHECKS"
 
 echo
 if [ -z "$failed" ]; then

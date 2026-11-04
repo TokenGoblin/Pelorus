@@ -154,7 +154,7 @@ fn layout_depth_drops_a_deep_fragment_tree_without_overflowing() {
 ///
 /// A `Fragment` that owned its children could not be `Copy`, so this is the type
 /// system refusing the shape that produces a recursive `Drop`. Two attempts at
-/// catching that with a source scan in `ci/gate-layout.sh` both fired on correct
+/// catching that with a source scan in `cargo xtask layout` both fired on correct
 /// code; this cannot, because it is not a heuristic.
 ///
 /// It lives in gate item 3's own test file so that removing the guarantee fails

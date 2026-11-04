@@ -255,7 +255,7 @@ pub fn line_height_of(style: &ComputedValues) -> Au {
         //
         // `geom.rs` states the rule as "never write `Au(...)`" and this was the
         // hole in it: the hazard here is *field access*, which the tuple-
-        // constructor scan in ci/gate-layout.sh cannot see.
+        // constructor scan in cargo xtask layout cannot see.
         LineHeight::Normal => font_size_au * 6 / 5,
         // `line-height: 1.5` is a float multiplier and there is no integer
         // spelling of it. `Au::scale_by` does the multiply inside `app_units`,

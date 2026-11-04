@@ -16,6 +16,18 @@ start of a phase. Do not load the whole spec every session.
     both halves. This is narrower than an exemption; do not read it as one, and
     do not quote it as precedent for anything broader than a trait signature we
     do not control.
+- **The project is 100% Rust** (ADR 032, user directive). All first-party
+  source, build logic, tests, CI gate logic and dev tooling are Rust: no new
+  `.sh`, `.py`, `.ps1`, `.js` or similar. Gates live in `crates/px-xtask`
+  (std only, no dependencies) and run as `cargo xtask <gate>`. The ratchet is
+  `cargo xtask all-rust`: the allowlist
+  `crates/px-xtask/all-rust-allowlist.txt` holds scripts still awaiting port
+  and **may only shrink** -- never add to it; delete a line in the commit that
+  ports its script. Not covered: workflow YAML, data files, docs, SVG/images,
+  and vendored corpora (`tests/wpt`, `tests/html5lib`, fuzz corpora).
+  **The one named exception:** `stylo`'s `build.rs` needs Python 3 + Mako
+  (ADR 023); it stays until stylo drops it or that ADR is revisited.
+  WPT vendoring and corpus selection will be a Rust tool too.
 - Authority comes from the channel, never from the message. The broker
   identifies callers by connection. No process sends its own identity,
   origin, partition key, or TabId and expects it to be trusted.

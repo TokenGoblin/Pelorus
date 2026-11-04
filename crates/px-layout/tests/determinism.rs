@@ -11,7 +11,7 @@
 //!
 //! # What could make it fail
 //!
-//! Nothing in this crate iterates a `HashMap`, and `ci/gate-layout.sh` forbids
+//! Nothing in this crate iterates a `HashMap`, and `cargo xtask layout` forbids
 //! `f32` and `f64` outright, because floating-point addition is not associative —
 //! summing child heights in a different order would give a different total. Those
 //! two are the usual sources. This test is what notices when a third appears.

@@ -1,7 +1,7 @@
 //! The reftest machinery shared by `flex_reftest.rs` and `grid_reftest.rs`.
 //!
 //! **Duplicated from `reftest.rs` on purpose, not shared with it.** Cargo builds one
-//! binary per file in `tests/`, and Phase 6's gate (`ci/gate-layout.sh`) is pinned to
+//! binary per file in `tests/`, and Phase 6's gate (`cargo xtask layout`) is pinned to
 //! that file's names and contents; making it depend on a module the Phase 7 harness
 //! also edits would let a Phase 7 change move a Phase 6 number. The cost is that a
 //! fix to the instrument has to be made in both places, so the comments that explain

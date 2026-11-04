@@ -35,7 +35,7 @@ done
 # Deliberately NOT fatal, and this is the one place in the gates where "fail
 # closed" is not the right reading of the rule. Two reasons:
 #
-#   - ci/gate-structure.sh and the other source-only gates compile nothing and
+#   - `cargo xtask structure` and the other source-only gates compile nothing and
 #     currently run with no network at all. Making them depend on reaching PyPI
 #     to check a shebang would be a worse gate, not a stricter one.
 #   - A gate that does compile fails on its own when stylo's build.rs cannot find
