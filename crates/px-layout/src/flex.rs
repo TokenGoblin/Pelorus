@@ -62,7 +62,6 @@ use style::values::specified::box_::{DisplayInside, DisplayOutside};
 use crate::block::{
     Content, Edges, Intrinsic, children_in_order, computed_style, intrinsic_inline_size_with,
     is_absolutely_positioned, is_block_level, is_display_none, resolve_edges, shrink_to_fit,
-    widest_word,
 };
 use crate::fragment::{FragmentId, FragmentTree};
 use crate::geom::au;
@@ -276,7 +275,7 @@ struct Cont {
     def_h: Option<Au>,
     min_h: Au,
     max_h: Option<Au>,
-    font_size: Au,
+    text: crate::text::TextStyle,
     items: Vec<Item>,
     /// All items, in order-modified document order.
     ordered: Vec<usize>,
@@ -293,7 +292,7 @@ pub(crate) struct FlexState {
 }
 
 /// Whether `style` generates a flex container.
-fn is_flex_container(style: &ComputedValues) -> bool {
+pub(crate) fn is_flex_container(style: &ComputedValues) -> bool {
     let d = style.clone_display();
     d.inside() == DisplayInside::Flex && d.outside() != DisplayOutside::None
 }
@@ -407,7 +406,7 @@ impl Cont {
             def_h,
             min_h,
             max_h,
-            font_size: Au::from(style.clone_font_size().computed_size()),
+            text: crate::text::TextStyle::of(style),
             items: Vec::new(),
             ordered: Vec::new(),
             flow: Vec::new(),
@@ -497,8 +496,7 @@ fn read_item(
 fn anonymous_item(text: &str, cont: &Cont) -> Item {
     let mut it = Item::blank();
     it.align = cont.items_align;
-    it.min_i = widest_word(text, cont.font_size);
-    it.max_i = crate::text::measure(text, cont.font_size);
+    (it.min_i, it.max_i) = crate::text::intrinsic_widths(text, cont.text);
     it
 }
 
@@ -579,7 +577,8 @@ impl FlexState {
         let mut contents: Vec<Content> = Vec::new();
 
         fn flush(run: &mut String, contents: &mut Vec<Content>, cont: &mut Cont) {
-            let collapsed = crate::inline::collapse_whitespace(run);
+            let ws = cont.text.breaking.white_space;
+            let collapsed = crate::inline::collapse_for(run, ws);
             run.clear();
             if !collapsed.trim().is_empty() {
                 cont.items.push(anonymous_item(&collapsed, cont));

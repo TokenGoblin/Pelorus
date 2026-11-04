@@ -273,8 +273,10 @@ impl Tables {
 /// could not hide a regression inside a restructure.
 struct PendingRun {
     text: String,
-    font_size: Au,
-    line_height: Au,
+    /// The text style the run is measured and broken with.
+    style: crate::text::TextStyle,
+    /// The element whose computed colour paints the run.
+    node: Option<NodeId>,
     /// Where this run sits among its container's content items.
     ///
     /// Only meaningful for a run held directly by a block container — one wrapped
@@ -682,17 +684,16 @@ pub fn layout_document(
                     // Flattening through inline elements loses their fonts, which
                     // is a limitation of `crate::text`'s single-metric stub rather
                     // than of this partition.
-                    let font_size = style.as_ref().map_or_else(
-                        || crate::geom::px(16),
-                        |s| Au::from(s.clone_font_size().computed_size()),
-                    );
-                    // The fallback is `normal` computed by hand, because the
-                    // document node has no computed style and is the container
-                    // the ICB partitions. Reaching it means the markup put text
-                    // outside `<html>`, which the tree builder normally moves in.
-                    let line_height = style
+                    //
+                    // The document node has no computed style and is the
+                    // container the ICB partitions; reaching it means the markup
+                    // put text outside `<html>`, which the tree builder normally
+                    // moves in. It gets the initial text style.
+                    let text_style = style
                         .as_ref()
-                        .map_or(font_size * 6 / 5, |s| crate::inline::line_height_of(s));
+                        .map_or_else(crate::text::TextStyle::initial, |s| {
+                            crate::text::TextStyle::of(s)
+                        });
 
                     // A slot per content item, always -- floats included, and
                     // whether or not anonymous boxes are generated. `Exit` walks
@@ -717,7 +718,7 @@ pub fn layout_document(
                             definite_block: specified.map(|h| bounds.clamp(h)),
                             min_block: bounds.min,
                             max_block: bounds.max,
-                            font_size,
+                            text: text_style,
                         };
                         let container = grid::Container::begin(&inputs, &items, &mut |n| {
                             intrinsic_inline_size(dom, arena, n)
@@ -762,8 +763,8 @@ pub fn layout_document(
                                 // `Exit` where in the sequence to build them.
                                 tables.inline_runs[fragment.index()] = Some(PendingRun {
                                     text,
-                                    font_size,
-                                    line_height,
+                                    style: text_style,
+                                    node: Some(node),
                                     slot,
                                 });
                             }
@@ -783,8 +784,8 @@ pub fn layout_document(
                                 }
                                 tables.inline_runs[anonymous.index()] = Some(PendingRun {
                                     text,
-                                    font_size,
-                                    line_height,
+                                    style: text_style,
+                                    node: Some(node),
                                     slot,
                                 });
                                 // No `Children` step, because an anonymous block
@@ -1544,8 +1545,8 @@ fn place_run(
 ) -> Au {
     let context = crate::inline::InlineContext {
         text: &run.text,
-        font_size: run.font_size,
-        line_height: run.line_height,
+        style: run.style,
+        node: run.node,
         available,
         floats: if floats.is_empty() {
             None
@@ -1891,6 +1892,9 @@ fn float_side(style: &ComputedValues) -> Option<crate::float::FloatSide> {
 fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> Vec<Content> {
     let mut out = Vec::new();
     let mut run = String::new();
+    // Inline content is white-space processed with its container's `white-space`
+    // (flattened through inline elements, as the text style is).
+    let (white_space, drop_blank) = container_white_space(dom, node);
     let mut stack: Vec<NodeId> = children_in_order(arena, node);
     stack.reverse();
 
@@ -1928,7 +1932,7 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
                 continue;
             }
             if style.is_some_and(|s| is_block_level(&s)) {
-                flush_run(&mut run, &mut out);
+                flush_run(&mut run, &mut out, white_space, drop_blank);
                 out.push(Content::Block(id));
             } else {
                 let mut kids = children_in_order(arena, id);
@@ -1942,7 +1946,7 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
             run.push_str(text);
         }
     }
-    flush_run(&mut run, &mut out);
+    flush_run(&mut run, &mut out, white_space, drop_blank);
     out
 }
 
@@ -1953,12 +1957,40 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
 /// `<div><p>a</p>\n<p>b</p></div>`, which every hand-written document has -- does
 /// not generate an empty anonymous block between them. §9.2.1.1 says as much:
 /// white space that would collapse away generates no anonymous box.
-fn flush_run(run: &mut String, out: &mut Vec<Content>) {
-    let collapsed = crate::inline::collapse_whitespace(run);
+///
+/// `drop_blank` is set for flex and grid containers, whose whitespace-only text
+/// is never rendered "even in the presence of `white-space: pre`"
+/// (css-flexbox-1 section 4; css-grid-1 section 6).
+fn flush_run(
+    run: &mut String,
+    out: &mut Vec<Content>,
+    white_space: crate::text::WhiteSpace,
+    drop_blank: bool,
+) {
+    let collapsed = crate::inline::collapse_for(run, white_space);
     run.clear();
-    if !collapsed.trim().is_empty() {
+    let blank = if drop_blank {
+        collapsed.trim().is_empty()
+    } else {
+        crate::inline::is_blank(&collapsed, white_space)
+    };
+    if !blank {
         out.push(Content::InlineRun(collapsed));
     }
+}
+
+/// `node`'s `white-space`, and whether it is a flex or grid container; `normal`
+/// and no for a node with no computed style (the document).
+pub(crate) fn container_white_space(
+    dom: px_css::view::Dom<'_>,
+    node: NodeId,
+) -> (crate::text::WhiteSpace, bool) {
+    computed_style(dom, node).map_or((crate::text::WhiteSpace::Normal, false), |s| {
+        (
+            crate::text::TextStyle::of(&s).breaking.white_space,
+            crate::flex::is_flex_container(&s) || grid::is_grid_container(&s),
+        )
+    })
 }
 
 /// Every child of `node`, elements and text alike, in document order.
@@ -2024,7 +2056,7 @@ struct GridFrame {
     /// The items being measured, in the order their results will arrive.
     order: Vec<NodeId>,
     results: Vec<Intrinsic>,
-    font_size: Au,
+    text: crate::text::TextStyle,
 }
 
 impl IntrinsicFrame {
@@ -2155,7 +2187,7 @@ pub(crate) fn intrinsic_inline_size_with(
                     continue;
                 }
 
-                let font_size = Au::from(style.clone_font_size().computed_size());
+                let text_style = crate::text::TextStyle::of(&style);
                 let (sum_min, sum_max, gap) = crate::flex::intrinsic_mode(&style);
                 if grid::is_grid_container(&style) {
                     // A grid's intrinsic size is its tracks sized under a min- or
@@ -2181,7 +2213,7 @@ pub(crate) fn intrinsic_inline_size_with(
                             contents,
                             order: order.clone(),
                             results: Vec::new(),
-                            font_size,
+                            text: text_style,
                         }),
                     });
                     stack.push(IntrinsicStep::Combine(node));
@@ -2217,10 +2249,8 @@ pub(crate) fn intrinsic_inline_size_with(
                         // against the content around it).
                         Content::Absolute(_) => {}
                         Content::InlineRun(text) => {
-                            frame.add(
-                                widest_word(&text, font_size),
-                                crate::text::measure(&text, font_size),
-                            );
+                            let (min, max) = crate::text::intrinsic_widths(&text, text_style);
+                            frame.add(min, max);
                         }
                     }
                 }
@@ -2253,7 +2283,7 @@ pub(crate) fn intrinsic_inline_size_with(
                         definite_block: None,
                         min_block: Au(0),
                         max_block: None,
-                        font_size: g.font_size,
+                        text: g.text,
                     };
                     let (min, max) = grid::Container::intrinsic(&inputs, &g.contents, &mut |n| {
                         measured.get(&n).copied().unwrap_or(Intrinsic::ZERO)
@@ -2270,19 +2300,6 @@ pub(crate) fn intrinsic_inline_size_with(
         }
     }
     result
-}
-
-/// The width of the widest word in `text`.
-///
-/// The preferred minimum width of a run of text. Trailing spaces are excluded
-/// because §16.6.1 removes them at a break, so they never contribute to how narrow
-/// a line can be.
-pub(crate) fn widest_word(text: &str, font_size: Au) -> Au {
-    crate::text::words(text, font_size)
-        .into_iter()
-        .map(|(word, _)| crate::text::width_without_trailing_spaces(word, font_size))
-        .max()
-        .unwrap_or(Au(0))
 }
 
 /// What `min-width` and `max-width` allow the inline size to be (§10.4).
@@ -2844,9 +2861,9 @@ mod tests {
             "html, body, div { display: block; margin: 0; padding: 0 } \
              #abs { position: absolute; left: 10px; font-size: 10px; line-height: 20px }",
         );
-        // Four characters at 5px. An auto width that filled would be 790.
+        // Four Ahem glyphs of 10px. An auto width that filled would be 790.
         assert!(
-            rects_of(&tree, FragmentKind::Block).contains(&(px(10), px(0), px(20), px(20))),
+            rects_of(&tree, FragmentKind::Block).contains(&(px(10), px(0), px(40), px(20))),
             "{:?}",
             rects_of(&tree, FragmentKind::Block)
         );
@@ -3272,10 +3289,10 @@ mod tests {
             .into_iter()
             .filter(|r| r.2 < px(800))
             .collect();
-        // Four characters at 5px each. An in-flow block would be 800 wide.
+        // Four Ahem glyphs, one em (10px) each. An in-flow block would be 800 wide.
         assert_eq!(
             floats,
-            vec![(px(0), px(0), px(20), px(20))],
+            vec![(px(0), px(0), px(40), px(20))],
             "the float is as wide as its text, not as wide as the page"
         );
     }

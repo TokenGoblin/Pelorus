@@ -73,7 +73,9 @@ pub(crate) struct Inputs<'d, 's> {
     pub definite_block: Option<Au>,
     pub min_block: Au,
     pub max_block: Option<Au>,
-    pub font_size: Au,
+    /// The container's text style: what its anonymous text items are measured
+    /// with.
+    pub text: crate::text::TextStyle,
 }
 
 /// What `Enter` needs to lay a grid item out: the inline-axis facts, which depend
@@ -457,9 +459,10 @@ impl Container {
                 }
                 _ => {
                     let t = text.unwrap_or("");
+                    let (min, max) = crate::text::intrinsic_widths(t, inp.text);
                     Measure {
-                        min: crate::block::widest_word(t, inp.font_size),
-                        max: crate::text::measure(t, inp.font_size),
+                        min,
+                        max,
                         ..Measure::default()
                     }
                 }

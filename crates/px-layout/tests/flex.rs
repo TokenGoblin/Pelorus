@@ -9,8 +9,9 @@
 //!
 //! - The page is `html > body > #f`, `#f` being the flex container and its
 //!   children the items, all with `margin: 0; padding: 0` unless a test says
-//!   otherwise. Fonts are 10px and lines 20px, so the stub text metric
-//!   (`crate::text`) makes a character 5px wide.
+//!   otherwise. The font is Ahem at 5px with 20px lines: Ahem is one em wide
+//!   per glyph (`crate::text`), so a character is 5px wide, the figure these
+//!   tests were written with under the Phase 6 stub metric.
 //! - [`run`] returns the rectangle of every block-level fragment from `#f`
 //!   downwards, in layout order, as `(x, y, width, height)` in **app units**
 //!   (60 to the pixel). [`p`] builds one from pixels and [`q`] from quarter
@@ -36,7 +37,7 @@ fn q(x: i32, y: i32, w: i32, h: i32) -> R {
 }
 
 const BASE: &str = "html, body, div { display: block; margin: 0; padding: 0 } \
-     * { font-size: 10px; line-height: 20px } \
+     * { font: 5px/20px Ahem } \
      #f { display: flex }";
 
 /// Lay out `<div id=f>{items}</div>` under `css` and return every block-level
