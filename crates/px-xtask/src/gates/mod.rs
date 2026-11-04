@@ -7,6 +7,7 @@ pub mod fuzz_smoke;
 pub mod layout;
 pub mod make_fetch_corpus;
 pub mod miri;
+pub mod sanitizers;
 pub mod structure;
 pub mod supply_chain;
 pub mod update_hsts;
@@ -62,6 +63,11 @@ pub static GATES: &[GateSpec] = &[
         name: "miri",
         about: "Miri over px-dom's five ADR 022 suites on the pinned nightly",
         run: miri::run,
+    },
+    GateSpec {
+        name: "sanitizers",
+        about: "ASAN (+ TSAN on Linux) over px-sandbox and px-broker; --self-check proves ASAN can still fail (ADR 011)",
+        run: sanitizers::run,
     },
     GateSpec {
         name: "structure",
