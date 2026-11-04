@@ -61,6 +61,7 @@
 //! structural claim wants a structural mechanism, and `Copy` was available the
 //! whole time.
 
+use super::suites::{self, Suite};
 use crate::Gate;
 use crate::git;
 use crate::proc;
@@ -82,7 +83,7 @@ use std::path::Path;
 /// They were invisible for the whole of Phase 6 because the vendoring script
 /// pairs a test with a `-ref.html` and a crashtest has none. Listed here so they
 /// cannot quietly stop running, not so the item count reads higher.
-pub const SUITES: &[(&str, &str, &str)] = &[
+pub const SUITES: &[Suite] = &[
     (
         "css2-reftests",
         "layout_reftest_",
@@ -132,85 +133,6 @@ fn is_space(c: char) -> bool {
 
 fn is_op(c: char) -> bool {
     matches!(c, '-' | '+' | '*' | '/')
-}
-
-/// Lines of `cargo test -- --list` output that name a test (`<name>: test`).
-pub fn count_listed_tests(listing: &str) -> usize {
-    listing.lines().filter(|l| l.ends_with(": test")).count()
-}
-
-/// Test lines of `listing` that contain `filter`.
-pub fn count_listed_matching(listing: &str, filter: &str) -> usize {
-    listing
-        .lines()
-        .filter(|l| l.ends_with(": test") && l.contains(filter))
-        .count()
-}
-
-/// How many distinct lines carrying `#[test]` sit on, or within two lines
-/// before, a line containing `fn <filter>`. This is what `grep -B2` followed by
-/// a count of `#[test]` lines measured: the attribute must be next to the
-/// function it belongs to, so a stray attribute elsewhere in the file does not
-/// satisfy the check.
-pub fn test_attrs_before(src: &str, filter: &str) -> usize {
-    let lines: Vec<&str> = src.split('\n').collect();
-    let needle = format!("fn {filter}");
-    let mut shown = vec![false; lines.len()];
-    for (i, l) in lines.iter().enumerate() {
-        if l.contains(&needle) {
-            for s in shown.iter_mut().take(i + 1).skip(i.saturating_sub(2)) {
-                *s = true;
-            }
-        }
-    }
-    lines
-        .iter()
-        .zip(&shown)
-        .filter(|(l, s)| **s && l.contains("#[test]"))
-        .count()
-}
-
-/// The same three conditions Phases 1-5 taught the gates to apply, each of
-/// which was once a way a green gate meant nothing: the filter must match a
-/// test, the named file must carry `#[test]` functions for it, and none may be
-/// `#[ignore]`d. `Ok` carries the `ok` line, `Err` the `FAIL` line.
-///
-/// `listed` is the `--list <filter>` output, `ignored` the `--list --ignored`
-/// output, `home_src` the contents of `home` (`None` if it does not exist).
-pub fn judge_suite(
-    item: &str,
-    filter: &str,
-    home: &str,
-    listed: &str,
-    home_src: Option<&str>,
-    ignored: &str,
-) -> Result<String, String> {
-    let matched = count_listed_tests(listed);
-    if matched == 0 {
-        return Err(format!(
-            "gate item '{item}' has no tests matching '{filter}'"
-        ));
-    }
-    let Some(src) = home_src else {
-        return Err(format!(
-            "gate item '{item}' expects tests in {home}, which does not exist"
-        ));
-    };
-    let in_home = test_attrs_before(src, filter);
-    if in_home == 0 {
-        return Err(format!(
-            "gate item '{item}' has no #[test] fn matching '{filter}' in {home}"
-        ));
-    }
-    let skipped = count_listed_matching(ignored, filter);
-    if skipped > 0 {
-        return Err(format!(
-            "gate item '{item}' has {skipped} #[ignore]d test(s)"
-        ));
-    }
-    Ok(format!(
-        "{item}: {matched} test(s), {in_home} in {home}, none ignored"
-    ))
 }
 
 /// Reference files among `paths`: reftest pairs are counted by their `-ref`.
@@ -365,33 +287,6 @@ pub fn scan(root: &Path, hit: fn(&str) -> bool) -> Vec<String> {
     found
 }
 
-fn cargo_program() -> String {
-    std::env::var("CARGO").unwrap_or_else(|_| "cargo".into())
-}
-
-fn list_tests(root: &Path, extra: &[&str]) -> String {
-    let mut args = vec!["test", "--workspace", "--locked", "--", "--list"];
-    args.extend_from_slice(extra);
-    // A failed listing is an empty listing, which the checks then report.
-    proc::capture(&cargo_program(), &args, Some(root))
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
-        .unwrap_or_default()
-}
-
-fn check_suites(g: &mut Gate, root: &Path) {
-    let ignored = list_tests(root, &["--ignored"]);
-    for (item, filter, home) in SUITES {
-        let listed = list_tests(root, &[filter]);
-        let src = std::fs::read(root.join(home))
-            .ok()
-            .map(|b| String::from_utf8_lossy(&b).into_owned());
-        match judge_suite(item, filter, home, &listed, src.as_deref(), &ignored) {
-            Ok(m) => g.ok(m),
-            Err(m) => g.fail(m),
-        }
-    }
-}
-
 /// Pinned corpus floors, read from the git index.
 pub fn check_corpora(g: &mut Gate, root: &Path) {
     if !root.join(REFTEST_DIR).is_dir() {
@@ -504,11 +399,11 @@ pub fn check_sources(g: &mut Gate, root: &Path) {
 }
 
 pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
-    if proc::capture(&cargo_program(), &["--version"], Some(root)).is_err() {
+    if !suites::cargo_available(root) {
         g.fail("cargo is not on PATH");
         return;
     }
-    check_suites(g, root);
+    suites::check_suites(g, root, SUITES);
     g.info("cargo test --workspace --locked");
     match proc::cargo(root, &["test", "--workspace", "--locked"]) {
         Ok(s) if s.success() => {}
@@ -522,84 +417,6 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
 mod tests {
     use super::*;
     use crate::testutil::Fixture;
-
-    const LISTING: &str =
-        "a::layout_reftest_one: test\nb::layout_reftest_two: test\n\n2 tests, 0 benchmarks\n";
-
-    #[test]
-    fn counts_only_test_lines() {
-        assert_eq!(count_listed_tests(LISTING), 2);
-        assert_eq!(count_listed_tests("x: benchmark\n"), 0);
-        assert_eq!(count_listed_tests(""), 0);
-    }
-
-    #[test]
-    fn test_attr_must_sit_within_two_lines_of_the_fn() {
-        let ok = "#[test]\nfn layout_depth_a() {}\n";
-        assert_eq!(test_attrs_before(ok, "layout_depth_"), 1);
-        let doc = "#[test]\n/// doc\nfn layout_depth_a() {}\n";
-        assert_eq!(test_attrs_before(doc, "layout_depth_"), 1);
-        let far = "#[test]\n/// a\n/// b\nfn layout_depth_a() {}\n";
-        assert_eq!(test_attrs_before(far, "layout_depth_"), 0);
-        // Overlapping contexts do not double count one attribute.
-        let two = "#[test]\nfn layout_depth_a() {}\nfn layout_depth_b() {}\n";
-        assert_eq!(test_attrs_before(two, "layout_depth_"), 1);
-        let both = "#[test]\nfn layout_depth_a() {}\n#[test]\nfn layout_depth_b() {}\n";
-        assert_eq!(test_attrs_before(both, "layout_depth_"), 2);
-        assert_eq!(test_attrs_before("fn other() {}\n", "layout_depth_"), 0);
-    }
-
-    #[test]
-    fn suite_healthy() {
-        let src = "#[test]\nfn layout_reftest_one() {}\n";
-        let r = judge_suite("css2", "layout_reftest_", "t.rs", LISTING, Some(src), "");
-        assert_eq!(r.unwrap(), "css2: 2 test(s), 1 in t.rs, none ignored");
-    }
-
-    #[test]
-    fn suite_with_no_matching_test_fails() {
-        let src = Some("#[test]\nfn layout_x_a(){}");
-        let r = judge_suite("i", "layout_x_", "t.rs", "", src, "");
-        assert_eq!(
-            r.unwrap_err(),
-            "gate item 'i' has no tests matching 'layout_x_'"
-        );
-    }
-
-    #[test]
-    fn suite_with_missing_home_fails() {
-        let r = judge_suite("i", "layout_reftest_", "t.rs", LISTING, None, "");
-        assert_eq!(
-            r.unwrap_err(),
-            "gate item 'i' expects tests in t.rs, which does not exist"
-        );
-    }
-
-    #[test]
-    fn suite_whose_home_has_no_test_attribute_fails() {
-        let r = judge_suite(
-            "i",
-            "layout_reftest_",
-            "t.rs",
-            LISTING,
-            Some("fn layout_reftest_one() {}\n"),
-            "",
-        );
-        assert_eq!(
-            r.unwrap_err(),
-            "gate item 'i' has no #[test] fn matching 'layout_reftest_' in t.rs"
-        );
-    }
-
-    #[test]
-    fn suite_with_ignored_test_fails_but_other_ignores_do_not() {
-        let src = Some("#[test]\nfn layout_reftest_one() {}\n");
-        let ign = "x::layout_reftest_one: test\ny::layout_reftest_two: test\n";
-        let r = judge_suite("i", "layout_reftest_", "t.rs", LISTING, src, ign);
-        assert_eq!(r.unwrap_err(), "gate item 'i' has 2 #[ignore]d test(s)");
-        let other = "z::unrelated: test\nsummary layout_reftest_ not a test line\n";
-        assert!(judge_suite("i", "layout_reftest_", "t.rs", LISTING, src, other).is_ok());
-    }
 
     #[test]
     fn floors_count_the_right_suffixes() {

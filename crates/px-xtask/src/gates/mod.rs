@@ -5,6 +5,7 @@ pub mod brand_leak;
 pub mod flex_grid;
 pub mod layout;
 pub mod structure;
+pub mod suites;
 pub mod vendor_wpt;
 
 use crate::Gate;
