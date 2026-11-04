@@ -42,7 +42,7 @@ jobs:
         run: rustc --version && cargo --version
       - name: Gate check 1
         shell: bash
-        run: ci/gate-build.sh
+        run: cargo xtask build
 
   reproducible:
     name: reproducible (${{ matrix.os }})

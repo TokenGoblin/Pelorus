@@ -22,7 +22,7 @@ cd "$(git rev-parse --show-toplevel)"
 # Ported gates are added with the xtask command; this list shrinks to nothing
 # in scripts and then gate-all.sh itself becomes `cargo xtask all`.
 CHECKS="
-build:bash ci/gate-build.sh
+build:cargo xtask build
 supply-chain:bash ci/gate-supply-chain.sh
 unsafe-headers:bash ci/gate-unsafe-headers.sh
 brand-leak:cargo xtask brand-leak

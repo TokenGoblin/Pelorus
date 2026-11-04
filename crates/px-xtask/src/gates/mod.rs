@@ -2,6 +2,7 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod build;
 pub mod check_build_python_pin;
 pub mod compare_hashes;
 pub mod flex_grid;
@@ -34,6 +35,11 @@ pub static GATES: &[GateSpec] = &[
         name: "brand-leak",
         about: "the product name appears only where tests/brand/allowlist.txt permits (build-spec §2.2)",
         run: brand_leak::run,
+    },
+    GateSpec {
+        name: "build",
+        about: "Phase 0: release build, clippy -D warnings and fmt --check, all --locked",
+        run: build::run,
     },
     GateSpec {
         name: "check-build-python-pin",
