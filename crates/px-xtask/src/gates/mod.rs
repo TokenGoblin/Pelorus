@@ -5,6 +5,7 @@ pub mod brand_leak;
 pub mod flex_grid;
 pub mod layout;
 pub mod structure;
+pub mod vendor_wpt;
 
 use crate::Gate;
 use std::path::Path;
@@ -45,6 +46,11 @@ pub static GATES: &[GateSpec] = &[
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
+    },
+    GateSpec {
+        name: "vendor-wpt",
+        about: "TOOL: vendor a WPT subset into tests/wpt (CSS2, or --module css-flexbox|css-grid)",
+        run: vendor_wpt::run,
     },
 ];
 
