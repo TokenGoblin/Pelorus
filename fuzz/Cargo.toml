@@ -32,6 +32,9 @@ px-block = { path = "../crates/px-block" }
 px-bindings = { path = "../crates/px-bindings" }
 # Phase 16: the accessibility tree is built from attacker-controlled markup.
 px-a11y = { path = "../crates/px-a11y" }
+# Phase 20: the update manifest, signature file and Ed25519 verifier read
+# attacker-controlled bytes.
+px-update = { path = "../crates/px-update" }
 
 [[bin]]
 name = "frame_request"
@@ -155,6 +158,13 @@ bench = false
 [[bin]]
 name = "filter_parse"
 path = "fuzz_targets/filter_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "update_manifest"
+path = "fuzz_targets/update_manifest.rs"
 test = false
 doc = false
 bench = false

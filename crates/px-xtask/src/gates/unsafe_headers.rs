@@ -48,6 +48,7 @@ const PANIC_LINT_CRATES: [&str; 9] = [
     "px-store",
     "px-a11y",
     "px-block",
+    "px-update",
 ];
 
 const PANIC_LINTS: [&str; 4] = ["unwrap_used", "expect_used", "indexing_slicing", "panic"];

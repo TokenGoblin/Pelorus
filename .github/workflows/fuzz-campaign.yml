@@ -84,6 +84,9 @@ jobs:
           - { target: csp_parse, shard: 1 }
           # Phase 16: untrusted markup through the accessibility tree builder.
           - { target: a11y_build, shard: 1 }
+          # Phase 20: attacker-controlled update manifest, signature file,
+          # request audit and Ed25519 inputs.
+          - { target: update_manifest, shard: 1 }
           # Phase 19: untrusted filter-list text through px-block.
           - { target: filter_parse, shard: 1 }
           # Phase 11: arbitrary IDL text through parse, resolve, lower and emit.
