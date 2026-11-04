@@ -308,13 +308,13 @@ mod tests {
     #[test]
     fn newer_version_and_unknown_flags_are_refused() {
         let mut h = header_bytes();
-        h.get_mut(4).map(|b| *b = 2);
+        h[4] = 2;
         assert_eq!(
             check_header(&h),
             Err(FormatError::UnsupportedVersion { version: 2, flags: 0 })
         );
         let mut h = header_bytes();
-        h.get_mut(8).map(|b| *b = 1);
+        h[8] = 1;
         assert_eq!(
             check_header(&h),
             Err(FormatError::UnsupportedVersion { version: 1, flags: 1 })
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn damaged_header_checksum_is_refused() {
         let mut h = header_bytes();
-        h.get_mut(15).map(|b| *b ^= 0xff);
+        h[15] ^= 0xff;
         assert_eq!(check_header(&h), Err(FormatError::BadHeader));
     }
 
@@ -381,7 +381,7 @@ mod tests {
         for i in 0..rec.len() {
             for bit in 0..8 {
                 let mut bad = rec.clone();
-                bad.get_mut(i).map(|b| *b ^= 1 << bit);
+                bad[i] ^= 1 << bit;
                 assert_eq!(decode_record(&bad), Next::Torn, "byte {i} bit {bit}");
             }
         }

@@ -57,9 +57,11 @@ pub mod checksum;
 mod engine;
 pub mod error;
 pub mod format;
+pub mod store;
 
 pub use engine::{
     ENTRY_OVERHEAD_BYTES, GLOBAL_QUOTA_BYTES, MAX_ENTRIES_PER_PARTITION, MAX_KEY_BYTES,
     MAX_PARTITION_ID_BYTES, MAX_VALUE_BYTES, Namespace, PARTITION_QUOTA_BYTES,
 };
 pub use error::{FormatError, QuotaError, StoreError};
+pub use store::Store;

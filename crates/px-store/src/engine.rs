@@ -479,10 +479,12 @@ mod tests {
 
     #[test]
     fn global_quota() {
-        let mut e = Engine::default();
-        // 16 partitions of 4 MiB minus a little fill 64 MiB; fabricate by
-        // direct accounting rather than writing 64 MiB of values.
-        e.total = GLOBAL_QUOTA_BYTES - 10;
+        // Fabricate a nearly full store by direct accounting rather than
+        // writing 64 MiB of values.
+        let e = Engine {
+            total: GLOBAL_QUOTA_BYTES - 10,
+            ..Engine::default()
+        };
         let p = id("a.example", "cdn.example");
         assert!(matches!(
             e.check_put(&p, Namespace::Storage, b"k", b"v"),
@@ -490,7 +492,9 @@ mod tests {
         ));
     }
 
-    fn log_of(ops: &[(&PartId, Namespace, &[u8], Option<&[u8]>)]) -> Vec<u8> {
+    type LogOp<'a> = (&'a PartId, Namespace, &'a [u8], Option<&'a [u8]>);
+
+    fn log_of(ops: &[LogOp<'_>]) -> Vec<u8> {
         let mut out = format::header_bytes();
         for (pid, ns, key, value) in ops {
             let pid = pid.encode().unwrap();
@@ -524,7 +528,7 @@ mod tests {
     fn truncating_the_log_at_every_offset_yields_a_consistent_prefix() {
         let p = id("a.example", "cdn.example");
         let q = id("b.example", "cdn.example");
-        let ops: Vec<(&PartId, Namespace, &[u8], Option<&[u8]>)> = vec![
+        let ops: Vec<LogOp<'_>> = vec![
             (&p, Namespace::Storage, b"k1", Some(b"first")),
             (&q, Namespace::Storage, b"k1", Some(b"other")),
             (&p, Namespace::Storage, b"k1", Some(b"second")),
@@ -534,13 +538,12 @@ mod tests {
         let log = log_of(&ops);
         // Record end offsets, derived independently of the decoder.
         let mut ends = vec![format::HEADER_LEN];
-        for (pid, ns, key, value) in &ops {
+        for (pid, _ns, key, value) in &ops {
             let n = 8 + 1 + 1 + 2 + pid.encode().unwrap().len() + 2 + key.len()
                 + value.map_or(0, <[u8]>::len);
             ends.push(ends.last().unwrap() + n);
         }
         assert_eq!(*ends.last().unwrap(), log.len());
-        let _ = ops.iter().map(|o| o.1).count();
 
         for cut in 0..=log.len() {
             let r = Engine::recover(log.get(..cut).unwrap())
