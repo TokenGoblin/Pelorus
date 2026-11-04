@@ -214,6 +214,12 @@ pub enum ScriptRequest {
         /// The new limit, in milliseconds.
         millis: u32,
     },
+    /// Testing only: attempt the escape operations of the content-profile
+    /// suite from inside the process and report what the kernel answered
+    /// (Phase 17, ADR 043). A report is evidence about behaviour, never about
+    /// authority: the broker's verdict is the kernel's account of the process.
+    #[cfg(feature = "testing")]
+    EscapeProbe,
 }
 
 /// Content process to broker. `non_exhaustive` for the reason on [`ScriptRequest`].
@@ -232,6 +238,31 @@ pub enum ScriptResponse {
         /// At most [`MAX_CLOCK_LOG`] values.
         nanos: crate::gpu::Bounded<u64, MAX_CLOCK_LOG>,
     },
+    /// Testing only: what the escape attempts did.
+    #[cfg(feature = "testing")]
+    EscapeProbe {
+        /// The Landlock ABI the kernel enforces, 0 if none.
+        landlock_abi: u32,
+        /// One entry per attempt, in the order the probe ran them.
+        attempts: crate::gpu::Bounded<EscapeResult, MAX_ESCAPE_ATTEMPTS>,
+    },
+}
+
+/// Most attempts one [`ScriptResponse::EscapeProbe`] carries.
+#[cfg(feature = "testing")]
+pub const MAX_ESCAPE_ATTEMPTS: usize = 64;
+
+/// One escape attempt's result (testing only).
+#[cfg(feature = "testing")]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct EscapeResult {
+    /// The attempt's name, from the probe's fixed vocabulary.
+    pub name: BoundedStr<32>,
+    /// Whether the operation worked. Anything but `false` for an operation the
+    /// profile forbids is a failure of the profile.
+    pub succeeded: bool,
+    /// `errno` when it failed, else 0.
+    pub errno: i32,
 }
 
 /// Most clock values one [`ScriptResponse::ClockLog`] carries.

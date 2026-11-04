@@ -1177,10 +1177,33 @@ follows.
 - **Why deferred:** each needs inline boxes (the box tree has none) or a style-engine change;
   neither fits a unit that replaces the text metric.
 
-## A script memory bomb is not contained until Phase 17
+## A script memory bomb: contained on Linux (Phase 17), NOT on Windows
 
-- **Found in:** phase 10 unit 4 (resource limits), ADR 040 layer 3
-- **Belongs to:** Phase 17 (cgroup `memory.max` on Linux, a job object on Windows)
+- **Status, Phase 17 unit 2 (Linux closed, Windows open):** `px_sandbox::spawn` now
+  applies `RLIMIT_AS` (1 GiB, the specification's figure) between fork and exec and the
+  parent confirms it from `/proc/<pid>/limits` (ADR 043). Proven against the real content
+  binary by `sandbox_memory_cap_*` (crates/px-content/tests/sandbox_memory.rs, in the
+  `sandbox` gate's suites): the doubling string and `repeat(2**30)` (a 24 GiB request that
+  was unrunnable on a shared runner) end by allocation failure, the process dies by
+  SIGABRT with its address space never past the cap, and the broker, a broker-held frame
+  and a second content process are untouched. **What is contained:** a content process
+  cannot map more than 1 GiB on Linux. **What is not:**
+  - **Windows has no memory cap.** The job-object limit (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`)
+    cannot be built or run in the container this was written in; `SandboxedChild::
+    memory_limit()` returns `None` there and the cap is not in `applied()`. Do not read the
+    Linux result as the Windows one. Phase 17's gate is still open on Windows.
+  - **The cap is address space, not resident memory.** A tab that maps 1 GiB and touches
+    little of it is within policy; a host short of RAM can still OOM before the cap. The
+    cgroup `memory.max` the spec also names is not done (unprivileged cgroup delegation is
+    not generally available; ADR 043).
+  - **Arrays grow slowly enough that the watchdog ends them first** on an unoptimised build
+    (about 6 MiB/s measured; `sandbox_memory_cap_array_growth_never_passes_the_cap` asserts
+    the ceiling, not that the cap was the killer). A faster build reaches the cap.
+  - A tab dying at the cap is a crash to the broker; no user-facing "this tab ran out of
+    memory" page exists yet.
+
+(Original entry, phase 10 unit 4, ADR 040 layer 3, kept for the history:)
+
 - **What:** nothing caps a content process's heap. Measured on Boa 0.22.0, unoptimised:
   `var s = 'x'; for (;;) s += s;` reached about 1.1 GiB resident in 1.5 s and keeps
   doubling until the 10 s watchdog (or the allocator, or the kernel's OOM killer) ends it.
@@ -1238,3 +1261,46 @@ follows.
   deserves its own reviewed commit. px-image must never depend on px-paint.
 - **Do:** make px-paint call `px_image::png::decode` (keep its encoder), delete its inflate,
   and re-run the baseline tests.
+
+## Phase 17 sandbox hardening: what the content profile still lets through
+
+- **Found in:** phase 17 (escape-attempt suite, ADR 043)
+- **Belongs to:** Phase 17 (open: the gate is not met on Windows, and the Linux profile is
+  still a deny list)
+- **What the suite proves on Linux:** the real content binary, created through
+  `px_sandbox::spawn` and confined by stage two on startup (kernel-verified by
+  `verify_stage_two`), is refused with `EPERM` for: opening a file, `/dev/null`,
+  `/dev` enumeration and a render node, creating a file or directory, unlink, rename,
+  `socket(AF_INET/AF_UNIX)`, `connect` (inet, and the X11 display socket path), `bind`,
+  `execve`, fork+exec through `std::process`, `/proc/<peer>/mem`, `process_vm_readv`,
+  `ptrace`, `mount`, `unshare`, `setns`, `chroot`, `io_uring_setup`, `perf_event_open`,
+  `bpf`, `pidfd_open` on the broker. `sandbox_escape_*` in
+  `crates/px-content/tests/sandbox_escape.rs`. Before stage two was applied to the content
+  process, open, socket, exec, fork+exec, `/proc/<peer>/mem` and `pidfd_open` all SUCCEEDED
+  (stage one is a deny list of escalation primitives only); that is the failing run the
+  suite was written against.
+- **Permitted today, on purpose and listed in the test (`PERMITTED`):**
+  - `stat` and friends: they share a syscall with `fstat`, which the allocator and `std`
+    use, and a number-only deny list cannot split them. Leaks existence and mode of a path,
+    not content. Needs the allow list.
+  - Signalling the broker (`kill(peer, 0)`): refused with `EPERM` only where Landlock has a
+    signal scope (ABI 6, Linux 6.12; the test machine is ABI 7). On an older kernel a content
+    process can signal same-user processes, including the broker, because `tgkill` is how it
+    aborts itself and cannot be denied by number. The user-namespace rung (separate PID
+    namespace) would close it and is not applied. The suite prints `KNOWN GAP` there.
+- **Not done:**
+  - **Windows.** There is no stage two, no memory cap and no escape suite on Windows; the
+    Phase 17 gate ("fails every attempt on both OSes") is NOT met. `enter_content_profile`
+    refuses there, so the content binary does not call it on Windows.
+  - **An allow list.** The gate wants one; the profile is still two deny lists
+    (`docs/research/phase-17-syscall-audit.md` says how far it is and what the measured set
+    suggests).
+  - **The broker does not yet call `verify_stage_two` on spawn** (`ContentProcess` now
+    exposes it); wiring waits for the broker to drive `RunScript`. Until it does, nothing
+    refuses a content process whose stage two failed except that the process exits.
+  - **Landlock is best effort for the content process** (no Landlock on the kernel: stage two
+    is seccomp alone, still verified by the filter count). The ladder floor is unchanged.
+  - The user-namespace rung (mount/PID/network isolation) and cgroup membership are still
+    not applied by `spawn`; the grandchild-orphan case in `SandboxedChild::kill` stays open.
+  - Clipboard: Linux has none without a display; a display-server connection is the
+    `socket_unix` / `connect_unix_display` attempts. Windows clipboard attempts do not exist.

@@ -10,6 +10,8 @@
 
 #![allow(dead_code)] // each test file uses a different part
 
+pub mod sandboxed;
+
 use std::io::{BufReader, Write};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};

@@ -66,6 +66,14 @@ pub enum Rung {
     /// Windows: the object that makes killing a process tree possible, and
     /// that carries the memory cap at Phase 17.
     JobObject,
+    /// Linux: a hard address-space limit (`RLIMIT_AS`), applied at creation and
+    /// read back from the kernel by the parent (Phase 17, ADR 043). It is not in
+    /// [`FLOOR`]: a machine that cannot cap memory still sandboxes. It is
+    /// *required* by [`spawn`] all the same (a policy that carries a limit
+    /// refuses to launch without it), and it appears in
+    /// [`SandboxedChild::applied`] only once the kernel has confirmed it.
+    /// Windows has no implementation yet (the job object's memory cap).
+    MemoryCap,
 }
 
 impl Rung {
@@ -78,6 +86,7 @@ impl Rung {
             Self::UserNamespaces => "user namespaces",
             Self::RestrictedToken => "restricted token",
             Self::JobObject => "job object",
+            Self::MemoryCap => "address-space limit",
         }
     }
 }
@@ -316,6 +325,18 @@ fn detect_linux(caps: &mut Capabilities) {
     }
 
     detect_user_namespaces(caps);
+
+    // The address-space limit is a plain `setrlimit`, present on every Linux.
+    // What is checked is the interface the parent will later read the limit
+    // back through: if `/proc/self/limits` has no such row, a limit could be
+    // applied but never confirmed, and an unconfirmed limit is not reported.
+    match read_trimmed("/proc/self/limits") {
+        Some(text) if linux::parse_limit(&text, linux::ADDRESS_SPACE_ROW).is_some() => {
+            caps.offer(Rung::MemoryCap);
+        }
+        Some(_) => caps.deny(Rung::MemoryCap, Restriction::NotSupported),
+        None => caps.deny(Rung::MemoryCap, Restriction::Inconclusive),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -409,6 +430,87 @@ impl fmt::Display for PolicyError {
 
 impl std::error::Error for PolicyError {}
 
+/// A hard cap on a sandboxed process's virtual address space.
+///
+/// Virtual, not resident: `RLIMIT_AS` counts every mapping, including thread
+/// stacks and the allocator's reserved arenas, so a value here is a ceiling on
+/// what the process may *map*, which a process using far less than that can
+/// still approach (ADR 043 records the measurement behind each default).
+///
+/// Zero and "unlimited" are not limits and cannot be constructed, so a policy
+/// that carries a `MemoryLimit` always asks the kernel for a real cap.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MemoryLimit {
+    bytes: u64,
+}
+
+impl MemoryLimit {
+    /// A limit of `bytes`, or `None` for zero (nothing could start) or for
+    /// `u64::MAX` (the kernel's spelling of "no limit").
+    pub const fn from_bytes(bytes: u64) -> Option<Self> {
+        if bytes == 0 || bytes == u64::MAX {
+            None
+        } else {
+            Some(Self { bytes })
+        }
+    }
+
+    /// The limit in bytes.
+    pub const fn bytes(self) -> u64 {
+        self.bytes
+    }
+
+    const fn mib(count: u64) -> Self {
+        Self {
+            bytes: count * 1024 * 1024,
+        }
+    }
+}
+
+/// The content process's address-space cap: the build specification's 1 GiB.
+///
+/// Measured (ADR 043): the content process running the Phase 10 workload peaks
+/// at about 218 MiB of address space, so the specification's figure leaves
+/// roughly 800 MiB for a page's heap and nothing had to be weakened.
+pub const CONTENT_MEMORY_LIMIT: MemoryLimit = MemoryLimit::mib(1024);
+
+/// The GPU process's address-space cap. It is a software rasterizer today and
+/// the test frames run under 8 MiB of address space (and fail under 1 MiB);
+/// 1 GiB leaves room for large frames. A hardware driver reserves far more
+/// address space than it uses, so this figure must be revisited when one is
+/// linked (ADR 043).
+pub const GPU_MEMORY_LIMIT: MemoryLimit = MemoryLimit::mib(1024);
+
+/// What a process is created with, beyond the ladder.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Policy {
+    /// The address-space cap the process is created under.
+    pub memory: MemoryLimit,
+}
+
+impl Policy {
+    /// The policy of a content process.
+    pub const fn content() -> Self {
+        Self {
+            memory: CONTENT_MEMORY_LIMIT,
+        }
+    }
+
+    /// The policy of the GPU process.
+    pub const fn gpu() -> Self {
+        Self {
+            memory: GPU_MEMORY_LIMIT,
+        }
+    }
+
+    /// The same policy with a different cap. For tests that need a process to
+    /// hit its cap quickly, and for nothing else: shipping callers use
+    /// [`Policy::content`] and [`Policy::gpu`].
+    pub const fn with_memory(self, memory: MemoryLimit) -> Self {
+        Self { memory }
+    }
+}
+
 /// A content process that was created under a policy.
 ///
 /// The policy is not applied to this child; it is the policy the child was
@@ -424,6 +526,8 @@ pub struct SandboxedChild {
     /// The parent's end of the child's stdout. Taken once by the supervisor.
     stdout: Option<std::fs::File>,
     applied: Vec<Rung>,
+    /// The cap the kernel confirmed, or `None` when none is in force.
+    memory: Option<MemoryLimit>,
     #[cfg(target_os = "windows")]
     inner: windows::Child,
     #[cfg(not(target_os = "windows"))]
@@ -449,6 +553,16 @@ impl SandboxedChild {
     /// authority taken from a message, which invariant 9 forbids.
     pub fn applied(&self) -> &[Rung] {
         &self.applied
+    }
+
+    /// The address-space cap the kernel reports for this child, or `None`.
+    ///
+    /// `Some` only if the parent read the limit back from the operating system
+    /// after the child was created and it equals what the policy asked for. It
+    /// is never the child's word. `None` means no cap is in force (Windows, for
+    /// now: its job-object memory cap is not built).
+    pub fn memory_limit(&self) -> Option<MemoryLimit> {
+        self.memory
     }
 
     /// The child's process identifier.
@@ -496,6 +610,15 @@ impl SandboxedChild {
     /// process is never used until its profile exists: the session renders in
     /// software instead.
     pub fn verify_gpu_profile(&self) -> Result<Vec<Rung>, PolicyError> {
+        self.verify_stage_two()
+    }
+
+    /// Ask the kernel whether this child has entered stage two (ADR 035, ADR
+    /// 043): the creation-time filter plus the one the process installed on
+    /// itself. The content profile and the GPU profile share it, so this is
+    /// the same check as [`verify_gpu_profile`](Self::verify_gpu_profile) under
+    /// the name that does not say which process.
+    pub fn verify_stage_two(&self) -> Result<Vec<Rung>, PolicyError> {
         #[cfg(target_os = "linux")]
         {
             gpu_linux::verify_pid(self.id())
@@ -568,6 +691,23 @@ pub fn enter_gpu_profile(read_only: &[std::path::PathBuf]) -> Result<GpuProfile,
     }
 }
 
+/// Stage two of the content profile, applied by the content process to itself.
+///
+/// The same second stage as [`enter_gpu_profile`] (ADR 043 reuses ADR 035's
+/// mechanism rather than inventing a second one), with nothing granted: a
+/// content process reads no file after it starts. Call it first thing in
+/// `main`, single-threaded, before the channel is touched. Threads created
+/// afterwards inherit the filter and the Landlock domain, so the process may
+/// use threads, clocks, memory and its pipes freely; it may not open, create,
+/// connect, execute or enumerate anything.
+///
+/// Fails closed; the caller must exit rather than serve. Windows refuses (no
+/// stage two exists there yet), so callers apply it on Linux only and the
+/// Windows content process keeps the creation-time profile alone.
+pub fn enter_content_profile() -> Result<GpuProfile, PolicyError> {
+    enter_gpu_profile(&[])
+}
+
 /// Spawn a content process under a sandbox policy.
 ///
 /// Fails closed, in this order and for this reason:
@@ -582,13 +722,31 @@ pub fn enter_gpu_profile(read_only: &[std::path::PathBuf]) -> Result<GpuProfile,
 /// machine said it offered the mechanism and applying it did not work, which
 /// is a fault here rather than a missing kernel feature. Both stop the launch.
 pub fn spawn(executable: &std::path::Path) -> Result<SandboxedChild, PolicyError> {
+    spawn_with(executable, &Policy::content())
+}
+
+/// [`spawn`] under an explicit [`Policy`]. The GPU process uses
+/// [`Policy::gpu`]; everything else uses [`spawn`].
+///
+/// On Linux the address-space cap is applied in the child between `fork` and
+/// `exec` and confirmed by the parent from `/proc/<pid>/limits` before this
+/// returns; a cap that cannot be applied or confirmed kills the child and
+/// returns an error (invariant 8).
+pub fn spawn_with(
+    executable: &std::path::Path,
+    policy: &Policy,
+) -> Result<SandboxedChild, PolicyError> {
     let caps = detect();
     admit(&caps).map_err(PolicyError::Refused)?;
 
     #[cfg(target_os = "windows")]
     {
+        // The job object's memory cap is not built (docs/backlog.md): the
+        // policy's limit is not applied here and is not reported.
+        let _ = policy;
         let spawned = windows::spawn(executable)?;
         Ok(SandboxedChild {
+            memory: None,
             stdin: Some(windows::into_file(spawned.stdin)),
             stdout: Some(windows::into_file(spawned.stdout)),
             applied: spawned.applied,
@@ -597,8 +755,9 @@ pub fn spawn(executable: &std::path::Path) -> Result<SandboxedChild, PolicyError
     }
     #[cfg(target_os = "linux")]
     {
-        let spawned = linux::spawn(executable)?;
+        let spawned = linux::spawn(executable, policy)?;
         Ok(SandboxedChild {
+            memory: Some(spawned.memory),
             stdin: Some(spawned.stdin),
             stdout: Some(spawned.stdout),
             applied: spawned.applied,
@@ -607,7 +766,7 @@ pub fn spawn(executable: &std::path::Path) -> Result<SandboxedChild, PolicyError
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
-        let _ = executable;
+        let _ = (executable, policy);
         // Unreachable in practice: FLOOR on an unknown platform lists rungs
         // nothing offers, so `admit` above has already refused. Kept so that
         // adding a platform to FLOOR without adding a policy fails to build
@@ -682,6 +841,48 @@ mod tests {
                 "{rung} is in FLOOR but was not applied; the launch should not have happened"
             );
         }
+    }
+
+    /// The cap is reported only because the parent read it back from the
+    /// kernel, and what the kernel shows is what the policy asked for.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sandbox_memory_cap_is_reported_only_as_the_kernel_shows_it() {
+        if !can_exercise_a_policy() {
+            return;
+        }
+        let policy = Policy::content().with_memory(MemoryLimit::from_bytes(768 << 20).unwrap());
+        let mut child = spawn_with(&a_spawnable_executable(), &policy).expect("a sandboxed child");
+        let pid = child.id();
+        let applied = child.applied().to_vec();
+        let reported = child.memory_limit();
+        let table = std::fs::read_to_string(format!("/proc/{pid}/limits")).expect("limits");
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(applied.contains(&Rung::MemoryCap), "{applied:?}");
+        assert_eq!(reported, Some(policy.memory));
+        let row = table
+            .lines()
+            .find(|line| line.starts_with("Max address space"))
+            .expect("the kernel lists the limit");
+        assert!(
+            row.split_whitespace().filter(|f| *f == "805306368").count() == 2,
+            "soft and hard must both be 768 MiB: {row}"
+        );
+    }
+
+    /// A child that is not capped does not become capped by being reported so:
+    /// this process is not under the limit, and the parser says so.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sandbox_memory_cap_the_default_policy_is_the_spec_figure_or_documented() {
+        assert_eq!(Policy::content().memory, CONTENT_MEMORY_LIMIT);
+        assert!(Policy::gpu().memory >= Policy::content().memory);
+        // The caller's own table (this test process) is not under any cap
+        // here, so the confirmation function refuses it.
+        let own = std::fs::read_to_string("/proc/self/limits").expect("limits");
+        assert!(linux::judge_address_space(&own, CONTENT_MEMORY_LIMIT).is_err());
     }
 
     /// Nothing may be reported applied that detection says is unavailable.

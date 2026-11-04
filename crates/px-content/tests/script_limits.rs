@@ -282,7 +282,7 @@ fn script_limits_isolation_a_dead_script_process_leaves_the_broker_and_its_frame
     );
 }
 
-// ---- memory: documented, not contained ---------------------------------------
+// ---- memory: not capped by the engine; the sandbox caps it (Phase 17) ---------
 
 #[test]
 fn script_limits_memory_a_buffer_over_the_engine_cap_is_refused_and_the_process_lives() {
@@ -305,12 +305,14 @@ fn script_limits_memory_a_buffer_over_the_engine_cap_is_refused_and_the_process_
 
 #[test]
 fn script_limits_memory_allocations_the_engine_does_not_see_are_not_capped() {
-    // This documents the gap; it does not close it (ADR 040 layer 3: Phase 17,
-    // cgroup `memory.max` / job object). Nothing in the engine or in this
-    // process caps the heap: strings, plain arrays and objects are not checked
-    // against `max_buffer_size`. A script that allocates a few hundred MiB in a
-    // few loop iterations is simply allowed. 2**24 characters here (a doubling
-    // loop, 24 iterations) is small enough for a shared runner.
+    // This peer is NOT sandboxed (std::process::Command), so it shows what the
+    // engine itself does not cap. Nothing in the engine caps the heap: strings,
+    // plain arrays and objects are not checked against `max_buffer_size`. The
+    // cap that contains this lives in the sandbox (Phase 17, ADR 043) and is
+    // proven by `sandbox_memory_cap_*` in sandbox_memory.rs, which runs these
+    // shapes to the end under `px_sandbox::spawn`. Windows has no cap yet.
+    // 2**24 characters here (a doubling loop, 24 iterations) is small enough
+    // for a shared runner.
     let mut peer = Peer::spawn(1);
     assert_eq!(
         peer.run("var s = 'x'; for (var i = 0; i < 24; i++) s += s; s.length"),

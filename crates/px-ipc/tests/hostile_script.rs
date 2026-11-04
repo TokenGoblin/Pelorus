@@ -213,7 +213,8 @@ fn script_hostile_the_other_directions_bytes_do_not_decode() {
 
 #[test]
 fn script_hostile_unknown_variants_and_reasons_are_refused() {
-    for variant in [5u64, 6, 127, 128, 300, u64::from(u32::MAX)] {
+    // 5 is the testing-only EscapeProbe; a shipping build refuses it too (below).
+    for variant in [6u64, 7, 127, 128, 300, u64::from(u32::MAX)] {
         assert!(rejected::<ScriptRequest>(&framed(
             ScriptRequest::TAG,
             &varint(variant)
@@ -239,19 +240,19 @@ fn script_hostile_unknown_variants_and_reasons_are_refused() {
     );
 }
 
-/// Variants 2, 3 and 4 of `ScriptRequest` and 1 and 2 of `ScriptResponse` are the
+/// Variants 2 to 5 of `ScriptRequest` and 1 to 3 of `ScriptResponse` are the
 /// testing vocabulary. A release build must not decode them: they would be a
 /// way for a peer to ask the content process for its internals.
 #[cfg(not(feature = "testing"))]
 #[test]
 fn script_hostile_the_testing_variants_do_not_exist_in_a_shipping_build() {
-    for variant in [2u64, 3, 4] {
+    for variant in [2u64, 3, 4, 5] {
         assert!(rejected::<ScriptRequest>(&framed(
             ScriptRequest::TAG,
             &varint(variant)
         )));
     }
-    for variant in [1u64, 2] {
+    for variant in [1u64, 2, 3] {
         assert!(rejected::<ScriptResponse>(&framed(
             ScriptResponse::TAG,
             &varint(variant)

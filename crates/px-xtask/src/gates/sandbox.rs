@@ -35,6 +35,19 @@ pub const SUITES: &[Suite] = &[
         "crates/px-content/tests/sandbox.rs",
     ),
     ("ladder", "sandbox_ladder", "crates/px-sandbox/src/lib.rs"),
+    // Phase 17: the memory cap, proven against the real content binary
+    // created through the sandbox (docs/adr/043).
+    (
+        "memory-cap",
+        "sandbox_memory_cap",
+        "crates/px-content/tests/sandbox_memory.rs",
+    ),
+    // Phase 17: the escape-attempt suite for the content profile.
+    (
+        "escape-attempts",
+        "sandbox_escape",
+        "crates/px-content/tests/sandbox_escape.rs",
+    ),
     // Phase 8: the GPU process boundary, proven by spawning the real binary
     // under the profile (docs/phase-08-plan.md, gate items 3 and 4).
     (
@@ -64,6 +77,11 @@ pub const OVERRIDE_ENV: &str = "PX_TEST_FORCE_SANDBOX_UNAVAILABLE";
 /// probe of forbidden operations was compiled in. Phase 8's second test-only
 /// capability, scanned for the same way.
 pub const PROBE_MARKER: &str = "px-sandbox-testing-probe-of-forbidden-operations";
+
+/// The marker `px_sandbox::probe::ESCAPE_MARKER` carries (Phase 17): present in a
+/// binary only if the content profile's escape suite was compiled in. A test in
+/// px-sandbox holds this string equal to its constant.
+pub const ESCAPE_MARKER: &str = "px-sandbox-testing-escape-suite-of-the-content-profile";
 
 /// The marker `px_script::COUNTERS_MARKER` carries (Phase 10): present in a
 /// binary only if the loop's testing-only high-water counters were compiled in.
@@ -229,6 +247,12 @@ fn check_release_artifacts(g: &mut Gate, root: &Path) {
             g.fail(format!("{stem} contains the forbidden-operations probe"));
             leaked = true;
         }
+        if contains_bytes(&bytes, ESCAPE_MARKER.as_bytes()) {
+            g.fail(format!(
+                "{stem} contains the content profile's escape suite"
+            ));
+            leaked = true;
+        }
         if contains_bytes(&bytes, SCRIPT_COUNTERS_MARKER.as_bytes()) {
             g.fail(format!(
                 "{stem} contains the script loop's testing counters"
@@ -338,6 +362,17 @@ mod tests {
             SCRIPT_COUNTERS_MARKER.as_bytes()
         ));
         assert!(SCRIPT_COUNTERS_MARKER.starts_with("px-script-"));
+    }
+
+    #[test]
+    fn the_escape_marker_is_found_in_a_binary_that_carries_it() {
+        let mut binary = b"\x7fELF....".to_vec();
+        binary.extend_from_slice(ESCAPE_MARKER.as_bytes());
+        assert!(contains_bytes(&binary, ESCAPE_MARKER.as_bytes()));
+        // The older probe marker is a different string: scanning for one does
+        // not cover the other, which is why both are scanned.
+        assert!(!contains_bytes(&binary, PROBE_MARKER.as_bytes()));
+        assert!(ESCAPE_MARKER.starts_with("px-sandbox-testing-"));
     }
 
     #[test]

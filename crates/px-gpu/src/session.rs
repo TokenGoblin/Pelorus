@@ -233,7 +233,7 @@ impl GpuProcess {
     /// ask the kernel whether it really is confined. Nothing derived from a
     /// page is sent before the last of those.
     fn start(config: &GpuConfig, executable: &std::path::Path) -> Result<Self, Cause> {
-        let mut child = px_sandbox::spawn(executable)
+        let mut child = px_sandbox::spawn_with(executable, &px_sandbox::Policy::gpu())
             .map_err(|error| Cause::SpawnRefused(error.to_string()))?;
         let stdout = child
             .take_stdout()
