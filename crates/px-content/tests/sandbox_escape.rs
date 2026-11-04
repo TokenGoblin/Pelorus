@@ -39,11 +39,13 @@ use px_sandbox::probe::ESCAPES;
 const EPERM: i32 = 1;
 
 /// What the probe reported: the Landlock ABI and each attempt by name.
+#[cfg(test)]
 struct Report {
     landlock_abi: u32,
     attempts: Vec<(String, bool, i32)>,
 }
 
+#[cfg(test)]
 impl Report {
     fn get(&self, name: &str) -> (bool, i32) {
         self.attempts
