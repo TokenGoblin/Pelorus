@@ -50,14 +50,20 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::time::{Duration, Instant};
 
+use std::sync::Arc;
+
 use px_ipc::gpu::{
-    GpuFailure, GpuRequest, GpuResponse, ItemChunk, MAX_DISPLAY_ITEMS, MAX_ITEMS_PER_MESSAGE,
+    GlyphChunk, GpuFailure, GpuRequest, GpuResponse, ItemChunk, MAX_DISPLAY_GLYPHS,
+    MAX_DISPLAY_ITEMS, MAX_FONT_BYTES, MAX_FONTS, MAX_GLYPHS_PER_MESSAGE, MAX_ITEMS_PER_MESSAGE,
+    MAX_TOTAL_FONT_BYTES,
 };
+use px_ipc::gpu_fonts::font_requests;
 use px_ipc::{Channel, IpcError};
 use px_paint::raster::MAX_CLIP_DEPTH;
 use px_paint::{Canvas, DisplayList, Item};
 use px_sandbox::{Rung, SandboxedChild};
 
+use crate::fonts::FontSet;
 use crate::rasterizer::{Rasterizer, RenderError, SoftwareRasterizer};
 use crate::wire::{self, FrameAssembler};
 
@@ -163,12 +169,55 @@ pub enum GpuEvent {
     },
 }
 
+/// Why [`GpuSession::register_font`] refused a font.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontRegisterError {
+    /// Empty, or longer than [`MAX_FONT_BYTES`].
+    BadLength,
+    /// The id is already registered.
+    Duplicate,
+    /// More than [`MAX_FONTS`] fonts or [`MAX_TOTAL_FONT_BYTES`] bytes.
+    OverCap,
+}
+
+/// A font the session will send to any process that needs it, and uses itself
+/// for the software fallback.
+struct RegisteredFont {
+    id: u32,
+    bytes: Arc<[u8]>,
+}
+
 struct GpuProcess {
+    /// Fonts this process has been sent, by id. Fonts are per process: a
+    /// replacement starts empty and is sent what its first frame needs.
+    sent: Vec<u32>,
     child: SandboxedChild,
     inbound: Receiver<Result<GpuResponse, IpcError>>,
     outbound: SyncSender<Vec<u8>>,
     applied: Vec<Rung>,
     reported_landlock_abi: u32,
+}
+
+/// One frame to send: what [`GpuProcess::exchange`] needs besides the fonts.
+struct FrameRequest<'a> {
+    serial: u32,
+    list: &'a DisplayList,
+    width: u32,
+    height: u32,
+    deadline: Instant,
+}
+
+/// The distinct fonts a list's glyph runs name, in first-use order.
+fn fonts_needed(list: &DisplayList) -> Vec<u32> {
+    let mut needed = Vec::new();
+    for item in &list.items {
+        if let Item::GlyphRun { font, .. } = item
+            && !needed.contains(&font.0)
+        {
+            needed.push(font.0);
+        }
+    }
+    needed
 }
 
 fn from_ipc(error: IpcError) -> Cause {
@@ -222,6 +271,7 @@ impl GpuProcess {
         });
 
         let mut process = Self {
+            sent: Vec::new(),
             child,
             inbound,
             outbound,
@@ -267,7 +317,17 @@ impl GpuProcess {
         loop {
             match self.outbound.try_send(frame) {
                 Ok(()) => return Ok(()),
-                Err(TrySendError::Disconnected(_)) => return Err(Cause::WriteFailed),
+                Err(TrySendError::Disconnected(_)) => {
+                    // The write half is gone because the process stopped
+                    // reading, usually because it said why and exited. Give
+                    // that explanation a moment to arrive: it is what tells a
+                    // refused font from a crash.
+                    let grace = Instant::now() + Duration::from_millis(500);
+                    return match self.recv(grace.min(deadline)) {
+                        Ok(GpuResponse::Failed { why }) => Err(Cause::Reported(why)),
+                        _ => Err(Cause::WriteFailed),
+                    };
+                }
                 Err(TrySendError::Full(back)) => {
                     frame = back;
                     match self.inbound.try_recv() {
@@ -286,25 +346,60 @@ impl GpuProcess {
     }
 
     /// One whole exchange: send the list, receive and reassemble the frame.
+    ///
+    /// Fonts the list needs and this process lacks go first, between frames as
+    /// far as the process is concerned. Each one that was completely sent is
+    /// pushed to `fresh`, so that if the process answers that a font is
+    /// malformed the session knows which fonts were the suspects.
     fn exchange(
-        &self,
-        serial: u32,
-        list: &DisplayList,
-        width: u32,
-        height: u32,
-        deadline: Instant,
+        &mut self,
+        registry: &[RegisteredFont],
+        frame: FrameRequest<'_>,
+        fresh: &mut Vec<u32>,
     ) -> Result<Canvas, Cause> {
+        let FrameRequest {
+            serial,
+            list,
+            width,
+            height,
+            deadline,
+        } = frame;
         let item_count =
             u32::try_from(list.items.len()).map_err(|_| Cause::Protocol("too many items"))?;
+        let glyph_count =
+            u32::try_from(list.glyphs.len()).map_err(|_| Cause::Protocol("too many glyphs"))?;
+        for id in fonts_needed(list) {
+            if self.sent.contains(&id) {
+                continue;
+            }
+            let font = registry
+                .iter()
+                .find(|font| font.id == id)
+                .ok_or(Cause::Protocol("a run names an unregistered font"))?;
+            let requests = font_requests(id, &font.bytes)
+                .ok_or(Cause::Protocol("a font could not be chunked"))?;
+            for request in requests {
+                self.send(&request, deadline)?;
+            }
+            self.sent.push(id);
+            fresh.push(id);
+        }
         self.send(
             &GpuRequest::Begin {
                 serial,
                 width,
                 height,
                 item_count,
+                glyph_count,
             },
             deadline,
         )?;
+        for chunk in list.glyphs.chunks(MAX_GLYPHS_PER_MESSAGE) {
+            let wire_glyphs: Vec<_> = chunk.iter().map(wire::glyph_to_wire).collect();
+            let glyphs = GlyphChunk::new(wire_glyphs)
+                .map_err(|_| Cause::Protocol("a chunk exceeded its bound"))?;
+            self.send(&GpuRequest::Glyphs { glyphs }, deadline)?;
+        }
         for chunk in list.items.chunks(MAX_ITEMS_PER_MESSAGE) {
             let wire_items: Vec<_> = chunk.iter().map(wire::item_to_wire).collect();
             let items = ItemChunk::new(wire_items)
@@ -382,6 +477,16 @@ pub struct GpuSession {
     config: GpuConfig,
     process: Option<GpuProcess>,
     software: SoftwareRasterizer,
+    /// Fonts the broker registered; sent to a process on first use.
+    registry: Vec<RegisteredFont>,
+    registry_bytes: u64,
+    /// The same fonts, parsed here, for the software fallback. A font that
+    /// does not parse is simply absent: its runs draw nothing, in software and
+    /// (once the process has refused it) everywhere.
+    local: FontSet,
+    /// Fonts a process refused as malformed. Never sent again; a list that
+    /// names one is rendered in software.
+    rejected: Vec<u32>,
     /// Failures of any kind, over the session's life.
     failures: u32,
     /// Processes created, over the session's life.
@@ -401,6 +506,10 @@ impl GpuSession {
             config,
             process: None,
             software: SoftwareRasterizer,
+            registry: Vec::new(),
+            registry_bytes: 0,
+            local: FontSet::new(),
+            rejected: Vec::new(),
             failures: 0,
             spawned: 0,
             serial: 0,
@@ -411,6 +520,42 @@ impl GpuSession {
             session.record(GpuEvent::Disabled);
         }
         session
+    }
+
+    /// Register a font under `id`, the number display lists use in
+    /// [`px_paint::Item::GlyphRun`]. The same caps as the wire's apply (the
+    /// process would refuse more). The bytes are not validated here: a font
+    /// that does not parse is exactly what the process boundary is for, and the
+    /// session finds out from the process (see [`Cause::Reported`]) and stops
+    /// sending it. The session parses its own copy for the software fallback.
+    pub fn register_font(
+        &mut self,
+        id: u32,
+        bytes: impl Into<Arc<[u8]>>,
+    ) -> Result<(), FontRegisterError> {
+        let bytes: Arc<[u8]> = bytes.into();
+        let len = u32::try_from(bytes.len()).map_err(|_| FontRegisterError::BadLength)?;
+        if len == 0 || len > MAX_FONT_BYTES {
+            return Err(FontRegisterError::BadLength);
+        }
+        if self.registry.iter().any(|font| font.id == id) {
+            return Err(FontRegisterError::Duplicate);
+        }
+        if self.registry.len() >= MAX_FONTS
+            || self.registry_bytes.saturating_add(u64::from(len)) > MAX_TOTAL_FONT_BYTES
+        {
+            return Err(FontRegisterError::OverCap);
+        }
+        self.registry_bytes += u64::from(len);
+        // Best effort: a font that does not parse is not drawn.
+        let _ = self.local.insert(id, Arc::clone(&bytes));
+        self.registry.push(RegisteredFont { id, bytes });
+        Ok(())
+    }
+
+    /// Fonts a process has refused as malformed, in the order refused.
+    pub fn rejected_fonts(&self) -> &[u32] {
+        &self.rejected
     }
 
     /// Start the process now rather than at the first frame. A no-op in
@@ -436,21 +581,36 @@ impl GpuSession {
             self.ensure_process();
             let serial = self.next_serial();
             let deadline = Instant::now() + self.config.frame_deadline;
-            let outcome = self
-                .process
-                .as_ref()
-                .map(|process| process.exchange(serial, list, width, height, deadline));
+            let mut fresh = Vec::new();
+            let outcome = self.process.as_mut().map(|process| {
+                let frame = FrameRequest {
+                    serial,
+                    list,
+                    width,
+                    height,
+                    deadline,
+                };
+                process.exchange(&self.registry, frame, &mut fresh)
+            });
             match outcome {
                 Some(Ok(canvas)) => {
                     self.last = Backend::Gpu;
                     return Ok(canvas);
                 }
-                Some(Err(cause)) => self.fail(cause),
+                Some(Err(cause)) => {
+                    // The process said a font did not parse. The fonts it was
+                    // sent for this frame are the suspects (at most those the
+                    // frame needed and it lacked); none is sent again.
+                    if cause == Cause::Reported(GpuFailure::BadFont) {
+                        self.rejected.extend(fresh);
+                    }
+                    self.fail(cause);
+                }
                 None => {}
             }
         }
         self.last = Backend::Software;
-        self.software.rasterize(list, width, height)
+        self.software.rasterize(list, width, height, &self.local)
     }
 
     /// Which renderer produced the most recent frame.
@@ -560,6 +720,19 @@ impl GpuSession {
             return false;
         };
         if count > MAX_DISPLAY_ITEMS || !list.clips_balanced() {
+            return false;
+        }
+        // Glyph runs the wire can carry: a well-formed arena, and only fonts
+        // that are registered and have not been refused. Anything else is
+        // software's to draw (or refuse), with the same answer.
+        let glyphs_fit = u32::try_from(list.glyphs.len()).is_ok_and(|n| n <= MAX_DISPLAY_GLYPHS);
+        if !glyphs_fit || list.validate().is_err() {
+            return false;
+        }
+        let fonts_ok = fonts_needed(list).iter().all(|id| {
+            !self.rejected.contains(id) && self.registry.iter().any(|font| font.id == *id)
+        });
+        if !fonts_ok {
             return false;
         }
         let mut depth = 0usize;

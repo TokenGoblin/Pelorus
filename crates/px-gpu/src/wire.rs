@@ -18,10 +18,10 @@
 
 use px_ipc::gpu::{
     MAX_FRAME_DIMENSION, MAX_FRAME_PIXELS, MAX_STRIP_BYTES, WireBorderSide, WireBorderStyle,
-    WireColor, WireItem, WireRect,
+    WireColor, WireGlyph, WireItem, WireRect,
 };
 use px_layout::geom::{Au, au};
-use px_paint::{BorderSide, BorderStyle, Canvas, Color, Item, Rect};
+use px_paint::{BorderSide, BorderStyle, Canvas, Color, FontId, Item, PositionedGlyph, Rect};
 
 /// A wire value that is not a display item layout could have produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,7 +121,38 @@ pub fn item_to_wire(item: &Item) -> WireItem {
             rect: rect_to_wire(rect),
         },
         Item::PopClip => WireItem::PopClip,
+        Item::GlyphRun {
+            font,
+            size,
+            color,
+            start,
+            len,
+        } => WireItem::GlyphRun {
+            font: font.0,
+            size: size.0,
+            color: color_to_wire(*color),
+            start: *start,
+            len: *len,
+        },
     }
+}
+
+/// A glyph of the arena as it crosses the boundary.
+pub fn glyph_to_wire(glyph: &PositionedGlyph) -> WireGlyph {
+    WireGlyph {
+        glyph: glyph.glyph_id,
+        x: glyph.x.0,
+        y: glyph.y.0,
+    }
+}
+
+/// A glyph from the wire, or why it is refused.
+pub fn glyph_from_wire(glyph: &WireGlyph) -> Result<PositionedGlyph, BadCoordinate> {
+    Ok(PositionedGlyph {
+        glyph_id: glyph.glyph,
+        x: to_au(glyph.x)?,
+        y: to_au(glyph.y)?,
+    })
 }
 
 /// A display item from the wire, or why it is refused.
@@ -148,6 +179,19 @@ pub fn item_from_wire(item: &WireItem) -> Result<Item, BadCoordinate> {
             rect: rect_from_wire(rect)?,
         },
         WireItem::PopClip => Item::PopClip,
+        WireItem::GlyphRun {
+            font,
+            size,
+            color,
+            start,
+            len,
+        } => Item::GlyphRun {
+            font: FontId(*font),
+            size: to_au(*size)?,
+            color: color_from_wire(*color),
+            start: *start,
+            len: *len,
+        },
     })
 }
 
@@ -346,10 +390,54 @@ mod tests {
             Item::TextRun { rect, color },
             Item::PushClip { rect },
             Item::PopClip,
+            Item::GlyphRun {
+                font: FontId(u32::MAX),
+                size: px(16),
+                color,
+                start: 5,
+                len: 9,
+            },
         ];
         for item in items {
             assert_eq!(item_from_wire(&item_to_wire(&item)), Ok(item));
         }
+        let glyph = PositionedGlyph {
+            glyph_id: 70_000,
+            x: px(-3),
+            y: au(7),
+        };
+        assert_eq!(glyph_from_wire(&glyph_to_wire(&glyph)), Ok(glyph));
+    }
+
+    #[test]
+    fn glyph_and_run_coordinates_outside_layouts_range_are_refused() {
+        let bad = WireGlyph {
+            glyph: 1,
+            x: i32::MAX,
+            y: 0,
+        };
+        assert_eq!(glyph_from_wire(&bad), Err(BadCoordinate));
+        let run = WireItem::GlyphRun {
+            font: 0,
+            size: i32::MIN,
+            color: WireColor {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0,
+            },
+            start: 0,
+            len: 0,
+        };
+        assert_eq!(item_from_wire(&run), Err(BadCoordinate));
+    }
+
+    #[test]
+    fn the_two_glyph_arena_caps_agree() {
+        assert_eq!(
+            px_ipc::gpu::MAX_DISPLAY_GLYPHS as usize,
+            px_paint::display_list::MAX_GLYPHS
+        );
     }
 
     #[test]

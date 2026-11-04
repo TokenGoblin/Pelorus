@@ -16,6 +16,9 @@ app_units = "0.7.8"
 # was computed against. Same versions the rest of the workspace resolves.
 px-css = { path = "../px-css", version = "0.0.0" }
 px-dom = { path = "../px-dom", version = "0.0.0" }
+# Shaping, line break opportunities and bidi (Phase 9, ADR 036). A workspace
+# crate: it adds no entry to the external lock.
+px-text = { path = "../px-text", version = "0.0.0" }
 stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
 
 [dev-dependencies]

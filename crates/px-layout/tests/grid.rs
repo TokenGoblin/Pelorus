@@ -9,9 +9,10 @@
 //!
 //! The fixture has no user-agent stylesheet, so every box says what it is. The
 //! viewport is 800px wide, `body` has no margin, and every element has
-//! `font-size: 10px; line-height: 20px`, which with the fixed-advance test font
-//! (`src/text.rs`: half the font size per character) makes one character 5px wide
-//! and one line 20px tall.
+//! `font: 5px/20px Ahem`. Ahem (the only font the engine has) is one em wide per
+//! glyph, so a 5px font makes one character 5px wide and the line height makes
+//! one line 20px tall: the numbers these tests were written with under the
+//! Phase 6 stub metric, now produced by real shaped text.
 //!
 //! A pixel is 60 app units. Most expected values are whole pixels and are written
 //! with [`r`]; the ones that are not (`1fr` of 800px split three ways) are written
@@ -36,7 +37,7 @@ fn ra(x: i32, y: i32, w: i32, h: i32) -> Rect {
 }
 
 const BASE: &str = "html, body, div { display: block; margin: 0; padding: 0 } \
-     * { font-size: 10px; line-height: 20px } \
+     * { font: 5px/20px Ahem } \
      #g { display: grid }";
 
 /// Lay `<html><body>{body}</body></html>` out with `css` after [`BASE`].

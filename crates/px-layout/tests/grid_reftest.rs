@@ -75,7 +75,28 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 ///
 /// Measure with a clean build: a stale baseline binary reused through
 /// `CARGO_TARGET_DIR` once made this read 75.
-const MATCH_FLOOR: usize = 71;
+///
+/// 67 once real shaped text replaced the half-em stub (Phase 9 unit 3, ADR 036):
+/// **lowered deliberately, four pairs read, none gained.** 4 of 405 is 1% of the
+/// suite. All four matched only because the stub ignored a property the real
+/// text path reads, and in all four the document that would show the property
+/// working is not the one laid out, because `/css/support/grid.css` is not
+/// vendored (so `.grid` is a plain block and `.directionRTL` does nothing):
+/// - `grid-items/whitespace-in-grid-item-001.html`: `.grid { white-space: pre }`
+///   around a grid item and whitespace-only text. The reference has a real grid
+///   container, whose whitespace-only text generates nothing (css-grid-1 section
+///   6); the test has a plain block, where `white-space: pre` correctly keeps the
+///   newlines and spaces as lines. With the stub those collapsed on both sides.
+/// - `grid-model/grid-container-scrollbar-001.html` and its `-vertical-lr` and
+///   `-vertical-rl` siblings: the reference sets `direction: rtl` inline and the
+///   test relies on the missing `.directionRTL`. `text-align: start` now follows
+///   `direction`, so the reference's text is right-aligned and the test's is not.
+///
+/// The harness now also satisfies WPT's `/fonts/ahem.css` (Ahem comes from the
+/// font registry whether or not an `@font-face` names it). That moved 56 pairs
+/// from "stylesheet not vendored" to "differ in layout" (113 to 57) and matched
+/// none of them: they test baselines, writing modes, subgrid and the like.
+const MATCH_FLOOR: usize = 67;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 405).
 const MIN_PAIRS: usize = 400;

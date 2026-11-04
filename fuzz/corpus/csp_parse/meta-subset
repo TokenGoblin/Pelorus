@@ -1,0 +1,1 @@
+€default-src 'none'; frame-ancestors *; sandbox; style-src 'unsafe-inline'
