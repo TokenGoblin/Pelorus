@@ -1764,7 +1764,10 @@ mod tests {
         let u = url("https://a.test/");
         assert!(set.check_form_action(&u, &page(), 0).is_blocked());
         assert!(set.check_base_uri(&u, &page()).is_blocked());
-        assert!(set.check_frame_ancestors(&u, std::slice::from_ref(&u)).is_blocked());
+        assert!(
+            set.check_frame_ancestors(&u, std::slice::from_ref(&u))
+                .is_blocked()
+        );
         assert!(set.check_eval(EvalKind::Eval).is_blocked());
         assert!(set.check_inline(InlineType::Script, None, "x").is_blocked());
         assert!(
@@ -1809,7 +1812,10 @@ mod tests {
         assert!(set.check_eval(EvalKind::Eval).is_blocked());
         assert!(set.check_form_action(&u, &page(), 0).is_blocked());
         assert!(set.check_base_uri(&u, &page()).is_blocked());
-        assert!(set.check_frame_ancestors(&u, std::slice::from_ref(&u)).is_blocked());
+        assert!(
+            set.check_frame_ancestors(&u, std::slice::from_ref(&u))
+                .is_blocked()
+        );
         assert!(set.sandbox_flags().is_some_and(|f| !f.allows_scripts()));
     }
 

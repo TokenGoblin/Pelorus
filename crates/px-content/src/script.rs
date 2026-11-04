@@ -167,6 +167,11 @@ impl<W: Write> Session<W> {
                 self.out.send(&ScriptResponse::ClockLog { nanos })?;
                 Ok(Flow::Go)
             }
+            // A request this build does not serve: the testing-only variants reach
+            // a content process built WITHOUT its own `testing` feature whenever
+            // another crate in the same workspace build enables `px-ipc/testing`.
+            // Fail closed: it is a protocol violation, and it ends the channel.
+            Ok(_) => Err(IpcError::Malformed),
             Err(IpcError::PeerClosed) => Ok(Flow::Stop),
             Err(other) => Err(other),
         }

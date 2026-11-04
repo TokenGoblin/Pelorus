@@ -172,7 +172,16 @@ pub enum ScriptResult {
 }
 
 /// Broker to content process.
+///
+/// `non_exhaustive`: the testing-only variants exist whenever ANY crate in the build
+/// turns on `px-ipc/testing` (Cargo unifies features across a workspace build), not
+/// only when the crate matching on this enum has its own `testing` feature. Without
+/// this, `cargo test --workspace` failed to compile `px-content` because `px-gpu`'s
+/// dev-dependency enabled the variants behind its back. Downstream matches must now
+/// say what happens to a variant they do not know, and the content process says:
+/// refuse it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ScriptRequest {
     /// The first message the broker sends, and only the first: entropy for the
     /// coarse clock's jitter and `Math.random` (ADR 040). The process needs no
@@ -194,8 +203,9 @@ pub enum ScriptRequest {
     ClockLog,
 }
 
-/// Content process to broker.
+/// Content process to broker. `non_exhaustive` for the reason on [`ScriptRequest`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ScriptResponse {
     /// The outcome of the most recent [`ScriptRequest::RunScript`], or an
     /// unsolicited [`ScriptResult::Terminated`].
