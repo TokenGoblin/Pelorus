@@ -1,6 +1,6 @@
 //! The slice of computed style that painting reads, as plain data.
 //!
-//! Paint needs seven things from a box's computed style: whether it is visible,
+//! Paint needs ten things from a box's computed style: whether it is visible,
 //! its text colour, its background colour and clip, its four borders and whether
 //! it clips overflow. Reading them needs stylo's types (`AbsoluteColor`,
 //! `BorderStyle`, the `background-clip` list), and `px-layout` forbids floats while
@@ -14,9 +14,11 @@
 
 use app_units::Au;
 use px_dom::NodeId;
+use style::computed_values::float::T as Float;
+use style::computed_values::position::T as Position;
 use style::properties::ComputedValues;
 use style::properties::longhands::visibility::computed_value::T as Visibility;
-use style::values::computed::{BorderStyle, Overflow};
+use style::values::computed::{BorderStyle, Overflow, ZIndex};
 
 use crate::view::Dom;
 
@@ -61,6 +63,16 @@ pub struct PaintStyle {
     /// `overflow-x` or `overflow-y` is not `visible`. `clip` also counts: it
     /// clips, it merely cannot scroll.
     pub clips_overflow: bool,
+    /// `position` is anything but `static` (relative, absolute, fixed, sticky).
+    pub positioned: bool,
+    /// `position` is `absolute` or `fixed`: the box is out of flow and its
+    /// containing block, not its parent, decides which `overflow` clips it.
+    pub position_absolute: bool,
+    /// The computed `z-index`: `None` for `auto`.
+    pub z_index: Option<i32>,
+    /// `float` is not `none` (and the box is not absolutely positioned, which
+    /// computes `float` to `none` by CSS 2.1 section 9.7).
+    pub floated: bool,
 }
 
 /// Convert a resolved colour to 8-bit sRGB.
@@ -140,6 +152,14 @@ pub fn paint_style_of(style: &ComputedValues) -> PaintStyle {
         ],
         clips_overflow: style.clone_overflow_x() != Overflow::Visible
             || style.clone_overflow_y() != Overflow::Visible,
+        positioned: !matches!(style.clone_position(), Position::Static),
+        position_absolute: matches!(style.clone_position(), Position::Absolute | Position::Fixed),
+        z_index: match style.clone_z_index() {
+            ZIndex::Integer(n) => Some(n),
+            ZIndex::Auto => None,
+        },
+        floated: !matches!(style.clone_float(), Float::None)
+            && !matches!(style.clone_position(), Position::Absolute | Position::Fixed),
     }
 }
 
