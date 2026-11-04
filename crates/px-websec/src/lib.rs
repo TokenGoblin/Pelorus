@@ -16,3 +16,4 @@ pub mod csp;
 pub mod mixed;
 pub mod origin;
 pub mod referrer;
+pub mod sri;
