@@ -174,7 +174,7 @@ fn mix(s: u8, d: u8, a: u32) -> u8 {
     ((s as u32 * a + d as u32 * (255 - a) + 127) / 255) as u8
 }
 
-fn blend_px(px: &mut [u8], c: Color) {
+pub(crate) fn blend_px(px: &mut [u8], c: Color) {
     match c.a {
         0 => {}
         255 => {

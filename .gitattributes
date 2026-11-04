@@ -17,3 +17,7 @@ data/**                 binary
 # commit, and the test would then be asserting something the corpus does not
 # say. Marked binary so the question stops arising.
 tests/html5lib/**/*.dat binary
+
+# Committed fonts are binary.
+tests/fonts/**/*.ttf binary
+tests/fonts/**/*.otf binary
