@@ -379,7 +379,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Forty-site compat list
-        run: ci/gate-compat-list.sh
+        run: cargo xtask compat-list
 
   structure:
     name: structure
