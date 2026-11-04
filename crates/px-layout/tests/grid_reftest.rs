@@ -54,8 +54,28 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// plain blocks and stopped matching when flex's shared alignment code changed
 /// their layout; `abspos/grid-abspos-staticpos-align-items-center.html` and its
 /// `-large-border-padding` sibling started matching. Neither is a grid defect:
-/// grid layout does not exist yet, and these will be re-measured when it does.
-const MATCH_FLOOR: usize = 75;
+/// grid layout did not exist yet, and these were to be re-measured when it did.
+///
+/// 71 once grid layout landed (`grid.rs`): **lowered deliberately, user-approved,
+/// with every moved pair read.** Grid gained 37 pairs and lost 41 against the
+/// plain-block baseline. None of the 41 is a grid defect:
+/// - 26 are `subgrid/` pairs that matched only because grid laid out as plain
+///   blocks. Subgrid is out of scope (ADR 031).
+/// - Text metrics (the stub, no Ahem): the four `grid-percent-*-shrinkwrap` pairs
+///   and `grid-intrinsic-maximums`.
+/// - ADR 029's superset shape (the grid container is a box the reference lacks):
+///   `grid-item-block-axis-content-contribution-001..003` and `auto-margins-008`.
+/// - Baselines, fragmentation and vertical writing modes: `grid-baseline-align-
+///   cycles-001`, `grid-justify-baseline-001`,
+///   `grid-fragmentation-between-rows-001-print` and the `abspos` `vertWM` pairs.
+/// - Grid-area placement of absolutely positioned children (not implemented):
+///   `grid-abspos-staticpos-align-self-safe-outer-cb-003`.
+/// - Flex-in-grid and form controls: `min-size-auto-overflow-clip` (flex's
+///   min-size handling) and `stretch-grid-item-text-input-overflow`.
+///
+/// Measure with a clean build: a stale baseline binary reused through
+/// `CARGO_TARGET_DIR` once made this read 75.
+const MATCH_FLOOR: usize = 71;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 405).
 const MIN_PAIRS: usize = 400;
