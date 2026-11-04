@@ -1,0 +1,53 @@
+Source
+------
+The *.idl files (except external.idl) are copied from the IDL blocks
+(<pre class=idl>) of the DOM Standard source, dom.bs:
+
+  https://raw.githubusercontent.com/whatwg/dom/main/dom.bs
+  repository  https://github.com/whatwg/dom
+  retrieved   2026-11-04
+  HEAD at retrieval (git ls-remote https://github.com/whatwg/dom.git HEAD):
+              6cc24159f1fe0857686d6712affb37d33229777e
+  (The commit was read with ls-remote immediately after the raw fetch; if
+  main moved in between, diff against that commit before trusting this line.)
+
+The grammar the parser implements was checked against the WebIDL source,
+https://raw.githubusercontent.com/whatwg/webidl/main/index.bs
+(HEAD 628f447a9f5af8955fd55d73318c4afb0b9ba17a at retrieval).
+
+Licence
+-------
+The DOM Standard is Copyright (c) WHATWG (Apple, Google, Mozilla,
+Microsoft). Its LICENSE file says: the work is licensed under Creative
+Commons Attribution 4.0 International; "to the extent portions of it are
+incorporated into source code, such portions in the source code are licensed
+under the BSD 3-Clause License instead". IDL blocks copied into source files
+are such portions, so these files are BSD-3-Clause. (They are NOT CC0; the
+CC0 dedication applies to some WHATWG tooling, not to the DOM Standard text.)
+Copyright notice and BSD-3-Clause conditions:
+https://github.com/whatwg/dom/blob/main/LICENSE
+The project's own licence is open decision 9 in docs/build-spec.md section 13;
+these files stay under their upstream licence whatever is decided.
+
+Modifications (the subset)
+--------------------------
+Selected: Event, EventInit, EventTarget, EventListener,
+EventListenerOptions, AddEventListenerOptions, Node, GetRootNodeOptions,
+NodeList, Element, Document, XMLDocument, ElementCreationOptions,
+CharacterData, Text, DOMTokenList, and the mixins NonElementParentNode,
+ParentNode, NonDocumentTypeChildNode and ChildNode with the `includes`
+statements that name a selected interface.
+
+Edits, all mechanical (see the commands in the Phase 11 commit message):
+  * `&lt;`, `&gt;`, `&amp;` decoded (Bikeshed source escapes them).
+  * `(TrustedType or DOMString)` replaced by `DOMString` (Trusted Types is
+    outside the subset).
+  * Every line naming a type outside the subset was deleted: HTMLCollection,
+    NamedNodeMap, Attr, DOMImplementation, DocumentType, DocumentFragment,
+    CDATASection, ProcessingInstruction, Comment, Range, NodeIterator,
+    TreeWalker, NodeFilter, CustomElementRegistry, HTMLSlotElement,
+    AbortSignal, ShadowRoot (and its dictionary/enums), ImportNodeOptions.
+    This removes members (for example Document.createRange) and
+    `includes` statements; no line was otherwise altered.
+  * external.idl adds the one typedef DOMHighResTimeStamp.
+  * Blank lines collapsed.
