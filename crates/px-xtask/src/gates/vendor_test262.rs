@@ -49,12 +49,24 @@ pub const ALWAYS_HARNESS: &[&str] = &["assert.js", "sta.js", "doneprintHandle.js
 pub const EXCLUDED_DIRS: &[(&str, &str)] = &[
     ("intl402", "Intl is absent in v1 (ADR 040)"),
     ("staging", "staging tests are unstable and engine-specific"),
-    ("harness", "tests of the harness files themselves, not of the language"),
+    (
+        "harness",
+        "tests of the harness files themselves, not of the language",
+    ),
     ("built-ins/Temporal", "Temporal is absent in v1 (ADR 040)"),
     ("built-ins/ShadowRealm", "ShadowRealm proposal, not shipped"),
-    ("built-ins/SharedArrayBuffer", "SharedArrayBuffer is absent in v1 (ADR 040)"),
-    ("built-ins/Atomics", "Atomics works on SharedArrayBuffer, absent in v1"),
-    ("built-ins/AbstractModuleSource", "source-phase-imports proposal"),
+    (
+        "built-ins/SharedArrayBuffer",
+        "SharedArrayBuffer is absent in v1 (ADR 040)",
+    ),
+    (
+        "built-ins/Atomics",
+        "Atomics works on SharedArrayBuffer, absent in v1",
+    ),
+    (
+        "built-ins/AbstractModuleSource",
+        "source-phase-imports proposal",
+    ),
 ];
 
 /// Features dropped by exact name or by prefix (see [`excluded_feature`]).
@@ -584,7 +596,10 @@ pub fn rule_text(target: u64) -> String {
         .map(|(d, why)| format!("  - test/{d}/ ({why})"))
         .collect();
     let must: Vec<String> = MUST_KEEP.iter().map(|d| format!("  - test/{d}/")).collect();
-    let hard: Vec<String> = SAMPLE_HARD.iter().map(|d| format!("  - test/{d}/")).collect();
+    let hard: Vec<String> = SAMPLE_HARD
+        .iter()
+        .map(|d| format!("  - test/{d}/"))
+        .collect();
     let abs: Vec<&str> = ABSENT_FEATURE_PREFIXES.iter().map(|(p, _)| *p).collect();
     format!(
         "Selection rule (crates/px-xtask/src/gates/vendor_test262.rs):
@@ -692,7 +707,11 @@ fn fetch(rev: &str) -> Result<Scratch, String> {
     } else {
         proc::capture("git", &["init", "-q"], Some(&dir))?;
         proc::capture("git", &["remote", "add", "origin", UPSTREAM], Some(&dir))?;
-        proc::capture("git", &["fetch", "-q", "--depth", "1", "origin", rev], Some(&dir))?;
+        proc::capture(
+            "git",
+            &["fetch", "-q", "--depth", "1", "origin", rev],
+            Some(&dir),
+        )?;
         proc::capture("git", &["checkout", "-q", "FETCH_HEAD"], Some(&dir))?;
     }
     Ok(guard)
@@ -858,7 +877,9 @@ fn vendor(g: &mut Gate, root: &Path, opts: &Opts) -> Result<(), String> {
     let (_guard, checkout): (Option<Scratch>, PathBuf) = match &opts.checkout {
         Some(d) => (None, d.clone()),
         None => {
-            g.info(format!("cloning {UPSTREAM} (shallow) into a scratch directory"));
+            g.info(format!(
+                "cloning {UPSTREAM} (shallow) into a scratch directory"
+            ));
             let s = fetch(&opts.rev)?;
             let p = s.0.clone();
             (Some(s), p)
@@ -947,8 +968,14 @@ mod tests {
 
     #[test]
     fn args() {
-        let o = parse_args(&s(&["--rev", "abcdef1", "--from-checkout=/x", "--target-bytes", "1_000"]))
-            .unwrap();
+        let o = parse_args(&s(&[
+            "--rev",
+            "abcdef1",
+            "--from-checkout=/x",
+            "--target-bytes",
+            "1_000",
+        ]))
+        .unwrap();
         assert_eq!(o.rev, "abcdef1");
         assert_eq!(o.checkout, Some(PathBuf::from("/x")));
         assert_eq!(o.target_bytes, 1000);
@@ -997,7 +1024,9 @@ mod tests {
         assert_eq!(m.negative.unwrap().kind, "ReferenceError");
         assert_eq!(m.flags, ["raw"]);
         assert_eq!(parse_frontmatter("var x;").unwrap(), None);
-        assert!(parse_frontmatter("/*---\nnegative:\n  phase: sometime\n  type: E\n---*/").is_err());
+        assert!(
+            parse_frontmatter("/*---\nnegative:\n  phase: sometime\n  type: E\n---*/").is_err()
+        );
         assert!(parse_frontmatter("/*---\nnegative:\n  phase: parse\n---*/").is_err());
         assert!(parse_frontmatter("/*---\nflags: [a\n---*/").is_err());
     }
@@ -1006,7 +1035,10 @@ mod tests {
     fn proposals_are_read_up_to_the_standard_section() {
         let t = "## Proposed language features\n# c\n\nShadowRealm\n## https://x\ndecorators  # note\n## Standard language features\nSymbol\n";
         let p = proposed_features(t);
-        assert_eq!(p.into_iter().collect::<Vec<_>>(), ["ShadowRealm", "decorators"]);
+        assert_eq!(
+            p.into_iter().collect::<Vec<_>>(),
+            ["ShadowRealm", "decorators"]
+        );
     }
 
     #[test]
@@ -1028,7 +1060,13 @@ mod tests {
         ] {
             assert!(excluded_feature(f, &prop), "{f}");
         }
-        for f in ["Symbol", "Promise", "async-iteration", "Float16Array", "Array.fromAsync"] {
+        for f in [
+            "Symbol",
+            "Promise",
+            "async-iteration",
+            "Float16Array",
+            "Array.fromAsync",
+        ] {
             assert!(!excluded_feature(f, &prop), "{f}");
         }
     }
@@ -1067,7 +1105,12 @@ mod tests {
             Err(Reason::Agent)
         );
         assert_eq!(
-            classify("a/b.js", Some("/*---\n---*/\n$262.agent.start('')"), &none(), &|_| true),
+            classify(
+                "a/b.js",
+                Some("/*---\n---*/\n$262.agent.start('')"),
+                &none(),
+                &|_| true
+            ),
             Err(Reason::Agent)
         );
         assert_eq!(
@@ -1078,7 +1121,10 @@ mod tests {
             classify("a/b.js", Some("var x;"), &none(), &|_| true),
             Err(Reason::NoFrontmatter)
         );
-        assert_eq!(classify("a/b.js", None, &none(), &|_| true), Err(Reason::NotUtf8));
+        assert_eq!(
+            classify("a/b.js", None, &none(), &|_| true),
+            Err(Reason::NotUtf8)
+        );
         assert_eq!(
             cls("a/b.js", "negative:\n  phase: nope\n  type: E"),
             Err(Reason::BadFrontmatter)
@@ -1178,7 +1224,10 @@ mod tests {
     fn hard_sampled_directories_keep_fewer() {
         let mut c = Vec::new();
         for i in 0..800 {
-            c.push(cand(&format!("built-ins/RegExp/property-escapes/generated/{i:04}.js"), 10));
+            c.push(cand(
+                &format!("built-ins/RegExp/property-escapes/generated/{i:04}.js"),
+                10,
+            ));
             c.push(cand(&format!("built-ins/RegExp/other/{i:04}.js"), 10));
         }
         c.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1194,7 +1243,10 @@ mod tests {
     }
 
     fn mini_checkout(fx: &Fixture) {
-        fx.write("features.txt", "## Proposed language features\ndecorators\n## Standard language features\nSymbol\n");
+        fx.write(
+            "features.txt",
+            "## Proposed language features\ndecorators\n## Standard language features\nSymbol\n",
+        );
         for h in ALWAYS_HARNESS {
             fx.write(&format!("harness/{h}"), "// h\n");
         }
@@ -1206,11 +1258,20 @@ mod tests {
                 &test_src("includes: [compareArray.js]\nflags: [noStrict]"),
             );
         }
-        fx.write("test/language/b/neg.js", &test_src("negative:\n  phase: parse\n  type: SyntaxError"));
+        fx.write(
+            "test/language/b/neg.js",
+            &test_src("negative:\n  phase: parse\n  type: SyntaxError"),
+        );
         fx.write("test/language/b/mod.js", &test_src("flags: [module]"));
-        fx.write("test/language/b/dec.js", &test_src("features: [decorators]"));
+        fx.write(
+            "test/language/b/dec.js",
+            &test_src("features: [decorators]"),
+        );
         fx.write("test/intl402/x.js", &test_src("description: i"));
-        fx.write("test/built-ins/Promise/p.js", &test_src("flags: [async]\nincludes: [compareArray.js]"));
+        fx.write(
+            "test/built-ins/Promise/p.js",
+            &test_src("flags: [async]\nincludes: [compareArray.js]"),
+        );
     }
 
     #[test]

@@ -21,3 +21,7 @@ tests/html5lib/**/*.dat binary
 # Committed fonts are binary.
 tests/fonts/**/*.ttf binary
 tests/fonts/**/*.otf binary
+
+# The vendored test262 subset is byte-exact. Several tests deliberately contain
+# CR, LS and PS characters, which line-ending normalisation would change.
+tests/test262/** binary

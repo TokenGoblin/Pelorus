@@ -108,7 +108,10 @@ impl IndexEntry {
         }
         let f: Vec<&str> = line.split('\t').collect();
         let [path, flags, neg, includes, features] = f.as_slice() else {
-            return Err(format!("INDEX line needs 5 fields, got {}: {line}", f.len()));
+            return Err(format!(
+                "INDEX line needs 5 fields, got {}: {line}",
+                f.len()
+            ));
         };
         if path.is_empty() {
             return Err("INDEX line with an empty path".to_string());
@@ -119,8 +122,8 @@ impl IndexEntry {
             let (p, k) = neg
                 .split_once(':')
                 .ok_or_else(|| format!("bad negative field `{neg}` for {path}"))?;
-            let phase =
-                Phase::parse(p).ok_or_else(|| format!("unknown negative phase `{p}` for {path}"))?;
+            let phase = Phase::parse(p)
+                .ok_or_else(|| format!("unknown negative phase `{p}` for {path}"))?;
             if k.is_empty() {
                 return Err(format!("negative field without a type for {path}"));
             }
@@ -149,14 +152,13 @@ pub fn parse_index(text: &str) -> Result<Vec<IndexEntry>, String> {
     let mut out: Vec<IndexEntry> = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for (n, l) in text.lines().enumerate() {
-        match IndexEntry::parse_line(l).map_err(|e| format!("INDEX line {}: {e}", n + 1))? {
-            Some(e) => {
-                if !seen.insert(e.path.clone()) {
-                    return Err(format!("INDEX line {}: duplicate path {}", n + 1, e.path));
-                }
-                out.push(e);
+        if let Some(e) =
+            IndexEntry::parse_line(l).map_err(|e| format!("INDEX line {}: {e}", n + 1))?
+        {
+            if !seen.insert(e.path.clone()) {
+                return Err(format!("INDEX line {}: duplicate path {}", n + 1, e.path));
             }
-            None => {}
+            out.push(e);
         }
     }
     Ok(out)
