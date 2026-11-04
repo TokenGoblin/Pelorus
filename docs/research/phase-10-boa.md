@@ -295,3 +295,30 @@ too much (the whole of `tests/wpt` is 8.9 MB); see the plan for the options.
 3. Section 6 says Boa has "zero panics". The 0.22 changelog is converting
    remaining panics into `EngineError::Panic`, so there are some. With
    `panic = "abort"` it is contained either way.
+
+## 10. The 73 crates new to `Cargo.lock` (recommended feature set, Linux)
+
+`aligned-vec 0.6.4`, `allocator-api2 0.2.21`, `async-channel 2.5.0`, `boa_ast`,
+`boa_engine`, `boa_gc`, `boa_interner`, `boa_macros`, `boa_parser`,
+`boa_string` (all 0.22.0), `bytemuck 1.25.2`, `bytemuck_derive 1.12.1`,
+`chacha20 0.10.2`, `concurrent-queue 2.5.0`, `cow-utils 0.1.3`, `cpufeatures
+0.3.1`, `dashmap 6.2.1`, `deranged 0.5.9`, `dynify 0.1.2`, `dynify-macros 0.1.2`,
+`equator 0.4.2`, `equator-macro 0.4.2`, `event-listener 5.4.2`,
+`event-listener-strategy 0.5.4`, `fast-float2 0.2.4`, `fixedbitset 0.5.7`,
+`foldhash 0.2.0`, `futures-concurrency 7.7.1`, `futures-core 0.3.34`,
+`futures-io 0.3.34`, `futures-lite 2.6.1`, `getrandom 0.4.3`, `hashbrown
+0.14.5`, `intrusive-collections 0.10.3`, `itertools 0.15.0`, `memchr 2.8.3`,
+`num-bigint 0.5.1`, `num-conv 0.2.2`, `num_enum 0.7.6`, `num_enum_derive 0.7.6`,
+`num_threads 0.1.8`, `oneshot 0.2.1`, `parking 2.2.1`, `pastey 0.2.3`, `phf
+0.14.0`, `phf_generator 0.14.0`, `phf_macros 0.14.0`, `phf_shared 0.14.0`,
+`pin-project 1.1.13`, `pin-project-internal 1.1.13`, `pin-project-lite 0.2.17`,
+`portable-atomic 1.15.0`, `powerfmt 0.2.1`, `proc-macro-crate 3.5.0`, `rand
+0.10.3`, `rand_core 0.10.1`, `regress 0.12.0`, `ryu-js 1.0.3`, `serde_json
+1.0.154`, `small_btree 0.1.0`, `synstructure 0.14.0`, `tag_ptr 0.1.0`, `tap
+1.0.1`, `time 0.3.55`, `time-core 0.1.9`, `time-macros 0.2.32`, `toml_datetime
+1.1.2`, `toml_edit 0.25.18`, `toml_parser 1.1.5`, `utf16_iter 1.1.0`, `utf_types
+1.0.0`, `write16 1.0.0`, `zmij 1.0.23`.
+
+Versions are those the probe resolved. Where one differs from what the repo
+has locked (for example `toml_parser`, `getrandom`) it shows as new although a
+crate of that name exists, which is why "new by name" is 63.
