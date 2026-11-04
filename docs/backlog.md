@@ -1109,6 +1109,31 @@ follows.
   missing part is the internal table model — rows, cells, column widths, the
   anonymous table boxes §17.2.1 generates.
 
+## ADR 040 timer property 4 contradicts property 5; broker side of the script channel is unwired
+
+- **Found in:** phase 10 units 1 and 3, `px-script` clock and `px-content`
+- **Belongs to:** phase 10 (user decision on the ADR wording); the broker half
+  to whichever unit first needs a broker to drive a content process (unit 4's
+  "two tabs" test, or Phase 11)
+- **What (1):** ADR 040 says reads "within one quantum" return identical values
+  and that 10 ms of reads give 100 distinct values. Both cannot hold: if a whole
+  quantum returned one value, consecutive quanta that round to the same grid
+  point would duplicate it and the distinct count would fall to about 75. The
+  implemented rule is the ADR's own formula, `up = hash(seed, q) % Q < frac`,
+  which gives 100 +- 1 and changes at most once inside a quantum (down to up, at
+  an instant fixed by the seed). Re-reading one raw instant is always stable.
+  The tests assert that, and say why. The user should confirm the formula over
+  the wording, or change the formula to a per-quantum bit and give up property 5.
+- **What (2):** `ContentProcess` in `px-broker` still decodes only `Request`
+  from a content process and sends only `Response`, so the broker cannot yet
+  send `ScriptRequest::Init`/`RunScript` or read a `ScriptResponse`. Phase 10's
+  tests drive the real content binary over its real pipes from the test side
+  (unsandboxed); the broker relay, and a test of script under the sandbox
+  profile, are not written. The broker links no engine either way.
+- **Also:** Boa 0.22 defines `SharedArrayBuffer` and has no feature to remove
+  it, so the host deletes the global; `import()` through Boa's default module
+  loader reads the working directory, so the host installs the idle loader.
+
 ## Reconsider css-grid/grid-lanes after Phase 7
 
 - **Found in:** phase 7, ADR 031
