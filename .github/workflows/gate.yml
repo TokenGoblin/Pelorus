@@ -342,6 +342,26 @@ jobs:
         shell: bash
         run: cargo xtask render
 
+  # Phase 10 gate (`cargo xtask script`). `continue-on-error` is set in the phase's
+  # first commit and must be deleted in its last, so the gate's CI behaviour is
+  # exercised all along rather than discovered on the closing day. It fails by
+  # design until units 4 to 7 (limits, test262, fixtures, report) exist; the gate
+  # prints them as "remaining". px-content builds twice (ADR 004) and Boa adds 73
+  # crates to each build, so record this job's time when unit 1 first runs.
+  script:
+    name: script (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 10 gate
+        shell: bash
+        run: cargo xtask script
+
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
   # explicitly rather than by directory override, so the fence assertion in

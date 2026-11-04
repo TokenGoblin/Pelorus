@@ -65,6 +65,12 @@ pub const OVERRIDE_ENV: &str = "PX_TEST_FORCE_SANDBOX_UNAVAILABLE";
 /// capability, scanned for the same way.
 pub const PROBE_MARKER: &str = "px-sandbox-testing-probe-of-forbidden-operations";
 
+/// The marker `px_script::COUNTERS_MARKER` carries (Phase 10): present in a
+/// binary only if the loop's testing-only high-water counters were compiled in.
+/// Scanned in the content binary like the other two. A test in px-script holds
+/// this string equal to its constant, so the two cannot drift apart.
+pub const SCRIPT_COUNTERS_MARKER: &str = "px-script-testing-high-water-counters";
+
 /// The mechanisms a refusal must be able to name (section 14.5 requires the
 /// message to say what is missing). Matched case-insensitively.
 pub const MECHANISMS: &[&str] = &["seccomp", "no_new_privs", "restricted token", "job object"];
@@ -223,6 +229,12 @@ fn check_release_artifacts(g: &mut Gate, root: &Path) {
             g.fail(format!("{stem} contains the forbidden-operations probe"));
             leaked = true;
         }
+        if contains_bytes(&bytes, SCRIPT_COUNTERS_MARKER.as_bytes()) {
+            g.fail(format!(
+                "{stem} contains the script loop's testing counters"
+            ));
+            leaked = true;
+        }
     }
     // As in the script, printed whenever nothing leaked, even if a binary was
     // missing (that case has its own failure above).
@@ -312,6 +324,20 @@ mod tests {
             missing_rungs("user\nnamespace", &["user namespace"]),
             ["user namespace"]
         );
+    }
+
+    #[test]
+    fn the_script_counters_marker_is_found_in_a_binary_that_carries_it() {
+        let mut binary = b"\x7fELF....".to_vec();
+        binary.extend_from_slice(SCRIPT_COUNTERS_MARKER.as_bytes());
+        binary.extend_from_slice(b"\0\0");
+        assert!(contains_bytes(&binary, SCRIPT_COUNTERS_MARKER.as_bytes()));
+        // A release binary has the engine's own text but not the marker.
+        assert!(!contains_bytes(
+            b"px-script",
+            SCRIPT_COUNTERS_MARKER.as_bytes()
+        ));
+        assert!(SCRIPT_COUNTERS_MARKER.starts_with("px-script-"));
     }
 
     #[test]

@@ -51,6 +51,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 pub mod gpu;
 pub mod message;
+pub mod script;
 
 pub use message::{FrameHost, FrameId, Request, Response};
 
@@ -179,6 +180,13 @@ impl<R: Read, W: Write> Channel<R, W> {
     #[cfg(feature = "testing")]
     pub fn raw_writer(&mut self) -> &mut W {
         &mut self.writer
+    }
+
+    /// Take the transport back, to give each half to its own thread. Anything
+    /// buffered in the channel's scratch is dropped, so call it between
+    /// messages (which a peer that speaks only when spoken to guarantees).
+    pub fn into_parts(self) -> (R, W) {
+        (self.reader, self.writer)
     }
 
     /// Whether an earlier error may have left the stream misaligned.
