@@ -64,6 +64,30 @@ pub const MAX_ITEMS_PER_MESSAGE: usize = 1024;
 /// without bound by declaring a huge count and then feeding it.
 pub const MAX_DISPLAY_ITEMS: u32 = 1 << 18;
 
+/// Most glyphs one [`GpuRequest::Glyphs`] may carry. A glyph is at most 15 bytes
+/// on the wire (three varints), so a full message is about 60 KiB.
+pub const MAX_GLYPHS_PER_MESSAGE: usize = 4096;
+
+/// Most glyphs one frame's arena may declare: the display list's own
+/// `MAX_GLYPHS` (a test in `px-gpu` keeps the two equal). 3 MiB in memory.
+pub const MAX_DISPLAY_GLYPHS: u32 = 1 << 18;
+
+/// Most bytes of one [`GpuRequest::FontChunk`]. A quarter of the message
+/// ceiling, as strips are, so a chunk plus framing is far inside it.
+pub const MAX_FONT_CHUNK_BYTES: usize = 256 * 1024;
+
+/// Largest single font. 16 MiB admits a large CJK face; a font is parsed by
+/// the sandboxed process, so the cap is also the most data one hostile font
+/// can make it parse.
+pub const MAX_FONT_BYTES: u32 = 16 * 1024 * 1024;
+
+/// Most fonts one process holds over its life. Fonts are never evicted, so
+/// this is also the most a process is ever asked to retain.
+pub const MAX_FONTS: usize = 64;
+
+/// Most font bytes one process holds in total (64 MiB).
+pub const MAX_TOTAL_FONT_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Largest frame edge, matching the software rasterizer's own limit.
 pub const MAX_FRAME_DIMENSION: u32 = 16384;
 
@@ -166,6 +190,24 @@ pub type ItemChunk = Bounded<WireItem, MAX_ITEMS_PER_MESSAGE>;
 /// One strip's pixels: RGBA8, rows top to bottom.
 pub type StripPixels = Bounded<u8, MAX_STRIP_BYTES>;
 
+/// One chunk of the frame's glyph arena.
+pub type GlyphChunk = Bounded<WireGlyph, MAX_GLYPHS_PER_MESSAGE>;
+
+/// One chunk of a font file.
+pub type FontBytes = Bounded<u8, MAX_FONT_CHUNK_BYTES>;
+
+/// One positioned glyph: the glyph's index in its font and its origin in app
+/// units, page space.
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
+pub struct WireGlyph {
+    /// Glyph index.
+    pub glyph: u32,
+    /// Origin x.
+    pub x: i32,
+    /// Origin y (baseline).
+    pub y: i32,
+}
+
 /// A rectangle in app units (1/60 px), page space.
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct WireRect {
@@ -247,6 +289,20 @@ pub enum WireItem {
     },
     /// End the innermost clip.
     PopClip,
+    /// Draw glyphs `start .. start + len` of the frame's glyph arena
+    /// ([`GpuRequest::Glyphs`]) from a font previously transferred.
+    GlyphRun {
+        /// The font, by the number the broker gave it in [`GpuRequest::FontBegin`].
+        font: u32,
+        /// Em size in app units.
+        size: i32,
+        /// Colour.
+        color: WireColor,
+        /// First glyph.
+        start: u32,
+        /// How many.
+        len: u32,
+    },
 }
 
 /// Why the GPU process declined to produce a frame.
@@ -269,6 +325,17 @@ pub enum GpuFailure {
     BadCoordinate,
     /// The backend failed for a reason of its own.
     Backend,
+    /// A font transfer broke the protocol: a chunk for no font, out of order,
+    /// of the wrong size, a duplicate id, or over a cap.
+    BadFontTransfer,
+    /// A completed font did not parse. The process exits after saying so: a
+    /// malformed font costs the process that met it and nothing else.
+    BadFont,
+    /// A declared glyph count over [`MAX_DISPLAY_GLYPHS`], more or fewer glyphs
+    /// than declared, or a glyph run outside the arena.
+    BadGlyphs,
+    /// A glyph run names a font that was never transferred.
+    UnknownFont,
 }
 
 /// Broker to GPU process.
@@ -285,6 +352,10 @@ pub enum GpuRequest {
         /// How many items the following [`GpuRequest::Items`] will carry in
         /// total. At most [`MAX_DISPLAY_ITEMS`].
         item_count: u32,
+        /// How many glyphs the following [`GpuRequest::Glyphs`] will carry in
+        /// total (the arena the frame's glyph runs window into). At most
+        /// [`MAX_DISPLAY_GLYPHS`].
+        glyph_count: u32,
     },
     /// The next items, in paint order.
     Items {
@@ -293,6 +364,32 @@ pub enum GpuRequest {
     },
     /// All items sent; rasterize and reply.
     Draw,
+    /// The next glyphs of the frame's arena, in arena order. All arrive after
+    /// `Begin` and before `Draw`.
+    Glyphs {
+        /// At most [`MAX_GLYPHS_PER_MESSAGE`].
+        glyphs: GlyphChunk,
+    },
+    /// Start transferring a font: its id and its exact length. The font's bytes
+    /// follow in [`GpuRequest::FontChunk`]s, each of exactly
+    /// `min(MAX_FONT_CHUNK_BYTES, remaining)` bytes, in order. The receiver
+    /// works the arithmetic out; see [`crate::gpu_fonts::FontAssembler`].
+    FontBegin {
+        /// The id display lists will use for this font. Chosen by the broker;
+        /// the receiver refuses a duplicate.
+        font: u32,
+        /// Total bytes, `1 ..= MAX_FONT_BYTES`.
+        len: u32,
+    },
+    /// The next bytes of the font being transferred.
+    FontChunk {
+        /// Which font; must be the one `FontBegin` started.
+        font: u32,
+        /// Offset of this chunk: must equal the bytes received so far.
+        offset: u32,
+        /// At most [`MAX_FONT_CHUNK_BYTES`].
+        bytes: FontBytes,
+    },
     /// Testing only: attempt the forbidden operations and report.
     #[cfg(feature = "testing")]
     Probe,
@@ -421,6 +518,7 @@ mod tests {
             width: 800,
             height: 600,
             item_count: 2,
+            glyph_count: 3,
         };
         let frame = encode_frame(&begin).expect("encode");
         assert_eq!(decode_frame::<GpuRequest>(&frame).expect("decode"), begin);

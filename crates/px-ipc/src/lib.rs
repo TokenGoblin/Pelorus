@@ -50,6 +50,7 @@ use std::io::{Read, Write};
 use serde::{Serialize, de::DeserializeOwned};
 
 pub mod gpu;
+pub mod gpu_fonts;
 pub mod message;
 
 pub use message::{FrameHost, FrameId, Request, Response};
