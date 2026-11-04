@@ -45,7 +45,5 @@ ci/gate-ipc.sh             # -> cargo xtask ipc: process spawn, two build profil
 ci/gate-sandbox.sh         # -> cargo xtask sandbox: OS-specific, runs under seccomp/job objects
 ci/gate-network.sh         # -> cargo xtask network: symbol audit of release artifacts
 ci/gate-sanitizers.sh      # -> cargo xtask sanitizers: nightly + sanitizer runtimes
-ci/setup-build-python.sh   # -> cargo xtask setup-build-python: builds the pinned venv for stylo (ADR 023 exception)
-ci/check_build_python_pin.py # -> cargo xtask check-build-python-pin: must still inspect the Python env (ADR 023 exception)
 ci/lib.sh                  # -> retire LAST: replaced by px-xtask's Gate/proc; the PYTHON3 pin export must move into xtask first
 

@@ -2,8 +2,10 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod check_build_python_pin;
 pub mod flex_grid;
 pub mod layout;
+pub mod setup_build_python;
 pub mod structure;
 pub mod vendor_wpt;
 
@@ -33,6 +35,11 @@ pub static GATES: &[GateSpec] = &[
         run: brand_leak::run,
     },
     GateSpec {
+        name: "check-build-python-pin",
+        about: "TOOL: a Python env holds exactly the pins in build-python/requirements.txt (ADR 023)",
+        run: check_build_python_pin::run,
+    },
+    GateSpec {
         name: "flex-grid",
         about: "Phase 7: flexbox/grid reftest and crashtest suites, corpus floors, grid-lanes excluded",
         run: flex_grid::run,
@@ -41,6 +48,11 @@ pub static GATES: &[GateSpec] = &[
         name: "layout",
         about: "Phase 6: CSS2 reftest subset, box-tree determinism, deep nesting, Au source scans",
         run: layout::run,
+    },
+    GateSpec {
+        name: "setup-build-python",
+        about: "TOOL: build the pinned Python venv stylo's build.rs needs; prints the interpreter path (ADR 023)",
+        run: setup_build_python::run,
     },
     GateSpec {
         name: "structure",

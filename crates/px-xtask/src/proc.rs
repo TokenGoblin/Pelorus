@@ -30,11 +30,17 @@ pub fn capture(prog: &str, args: &[&str], cwd: Option<&Path>) -> Result<Vec<u8>,
 /// Run `cargo args` in `root` with inherited stdio (the user sees cargo's own
 /// output). Honours `$CARGO`, which cargo sets when it runs `cargo xtask`, so
 /// the child is the same toolchain as the parent.
+///
+/// Every workspace build compiles px-css and so stylo's `build.rs`, so the
+/// pinned Python (ADR 023) is applied here, once, as `ci/lib.sh` did for the
+/// gate scripts: `PYTHON3` is exported to the child when the pinned environment
+/// can be built (`pybuild::pinned_python_lenient`; not fatal, see there).
 pub fn cargo(root: &Path, args: &[&str]) -> Result<ExitStatus, String> {
     let prog = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    Command::new(&prog)
-        .args(args)
-        .current_dir(root)
-        .status()
-        .map_err(|e| format!("cannot run cargo: {e}"))
+    let mut c = Command::new(&prog);
+    c.args(args).current_dir(root);
+    if let Some(py) = crate::pybuild::pinned_python_lenient(root) {
+        crate::pybuild::apply_pin(&mut c, &py);
+    }
+    c.status().map_err(|e| format!("cannot run cargo: {e}"))
 }
