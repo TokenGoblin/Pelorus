@@ -41,7 +41,7 @@ fn main() -> ExitCode {
 /// Exercise the boundary, then wait for the broker to go away.
 fn run<R, W>(mut channel: Channel<R, W>) -> Result<(), IpcError>
 where
-    R: std::io::Read,
+    R: std::io::Read + Send + 'static,
     W: std::io::Write,
 {
     channel.send(&Request::Ping)?;
@@ -64,7 +64,8 @@ where
     // exits immediately cannot be killed by a test, and a process that goes
     // quiet is exactly the shape the broker's deadline exists for: before the
     // broker sends its seed, this waits silently.
-    script::serve(channel)
+    let (reader, writer) = channel.into_parts();
+    script::serve(reader, writer)
 }
 
 fn expect(actual: &Response, wanted: &Response) -> Result<(), IpcError> {

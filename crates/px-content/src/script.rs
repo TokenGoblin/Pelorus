@@ -1,56 +1,180 @@
 //! The script half of the content process: the receive loop for
-//! [`ScriptRequest`], and the mapping from the host's outcomes to wire data.
+//! [`ScriptRequest`], the event loop that runs timers between requests, and the
+//! mapping from the host's outcomes to wire data.
 //!
 //! The process learns nothing about itself from the wire and says nothing about
 //! itself on it. What arrives is a seed and script text; what leaves is a
 //! result string, an error string, or the fact that script was stopped. All of
 //! it is bounded by the types in `px_ipc::script`.
 //!
-//! A peer that breaks the protocol (a `RunScript` before the `Init`, a second
-//! `Init`, a frame the codec refuses) ends the process. Fail closed: a content
-//! process that cannot tell what state its peer believes it is in is not one
-//! to keep running script in.
+//! # One thread owns the engine
+//!
+//! A reader thread blocks on the pipe and forwards decoded requests over a
+//! small bounded queue. The main thread owns the engine and alternates: handle
+//! every request already waiting, run one loop step, and when there is nothing
+//! to do wait for the next request, or for the next timer to come due. A page
+//! whose timer re-arms itself therefore never starves the channel: a request is
+//! seen after at most one task.
+//!
+//! # Protocol breaks end the process
+//!
+//! A `RunScript` before the `Init`, a second `Init`, a frame the codec refuses:
+//! each ends the process. Fail closed: a content process that cannot tell what
+//! state its peer believes it is in is not one to keep running script in.
 
 use std::io::{Read, Write};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, sync_channel};
+use std::time::Duration;
 
-use px_ipc::script::{ErrorText, ResultText, ScriptRequest, ScriptResponse, ScriptResult};
+use px_ipc::script::{
+    ErrorText, ResultText, ScriptRequest, ScriptResponse, ScriptResult, TerminateReason as Wire,
+};
 use px_ipc::{Channel, IpcError};
-use px_script::{Host, Outcome};
+use px_script::{Host, Outcome, Step, TerminateReason};
+
+/// Requests the reader thread may hold ahead of the engine. A full queue blocks
+/// the reader, which stops reading the pipe: backpressure, not growth.
+const INBOX_DEPTH: usize = 8;
+
+type Inbox = Receiver<Result<ScriptRequest, IpcError>>;
 
 /// Serve [`ScriptRequest`]s until the broker closes the channel.
-pub fn serve<R, W>(mut channel: Channel<R, W>) -> Result<(), IpcError>
+pub fn serve<R, W>(reader: R, writer: W) -> Result<(), IpcError>
 where
-    R: Read,
+    R: Read + Send + 'static,
     W: Write,
 {
-    // The seed is the first message and only the first (ADR 040). Until it has
-    // arrived there is no host, so there is nothing a RunScript could run in.
-    let _seed = match channel.recv::<ScriptRequest>() {
-        Ok(ScriptRequest::Init { seed }) => seed,
-        Ok(_) => return Err(IpcError::Malformed),
-        Err(IpcError::PeerClosed) => return Ok(()),
-        Err(other) => return Err(other),
+    let (tx, inbox) = sync_channel(INBOX_DEPTH);
+    std::thread::spawn(move || {
+        let mut inbound = Channel::new(reader, std::io::sink());
+        loop {
+            let message = inbound.recv::<ScriptRequest>();
+            let finished = message.is_err();
+            if tx.send(message).is_err() || finished {
+                return;
+            }
+        }
+    });
+    let mut session = Session {
+        out: Channel::new(std::io::empty(), writer),
+        host: None,
+        told_of_termination: false,
     };
-    let mut host = Host::new();
+    session.run(&inbox)
+}
 
-    loop {
-        match channel.recv::<ScriptRequest>() {
-            Ok(ScriptRequest::RunScript { source }) => {
-                let result = to_wire(host.eval(source.as_str()));
-                channel.send(&ScriptResponse::Result(result))?;
+struct Session<W: Write> {
+    out: Channel<std::io::Empty, W>,
+    /// Absent until the seed arrives: there is nothing a `RunScript` could run
+    /// in before that.
+    host: Option<Host>,
+    /// Whether the broker has been told script is stopped.
+    told_of_termination: bool,
+}
+
+/// What the loop decided to wait for.
+enum Wait {
+    Forever,
+    For(Duration),
+}
+
+impl<W: Write> Session<W> {
+    fn run(&mut self, inbox: &Inbox) -> Result<(), IpcError> {
+        loop {
+            // Requests first, so a busy page cannot starve the channel.
+            match inbox.try_recv() {
+                Ok(message) => {
+                    if self.handle(message)? == Flow::Stop {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => return Ok(()),
+                Err(TryRecvError::Empty) => {}
             }
-            // The testing vocabulary is served from unit 2 (counters) and
-            // unit 3 (clock log); until then it is a protocol error.
-            #[cfg(feature = "testing")]
-            Ok(ScriptRequest::Counters | ScriptRequest::ClockLog) => {
-                return Err(IpcError::Malformed);
+            let wait = match self.host.as_mut().map(Host::step) {
+                Some(Step::Ran) => continue,
+                Some(Step::Waiting(delay)) => Wait::For(delay),
+                Some(Step::Terminated(reason)) => {
+                    self.tell_of_termination(reason)?;
+                    Wait::Forever
+                }
+                Some(Step::Idle) | None => Wait::Forever,
+            };
+            let message = match wait {
+                Wait::Forever => match inbox.recv() {
+                    Ok(message) => message,
+                    Err(_) => return Ok(()),
+                },
+                Wait::For(delay) => match inbox.recv_timeout(delay) {
+                    Ok(message) => message,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return Ok(()),
+                },
+            };
+            if self.handle(message)? == Flow::Stop {
+                return Ok(());
             }
-            // A second Init would let a confused peer re-seed the clock mid-run.
-            Ok(ScriptRequest::Init { .. }) => return Err(IpcError::Malformed),
-            Err(IpcError::PeerClosed) => return Ok(()),
-            Err(other) => return Err(other),
         }
     }
+
+    fn handle(&mut self, message: Result<ScriptRequest, IpcError>) -> Result<Flow, IpcError> {
+        match message {
+            Ok(ScriptRequest::Init { seed }) => {
+                // A second Init would let a confused peer re-seed the clock
+                // mid-run.
+                if self.host.is_some() {
+                    return Err(IpcError::Malformed);
+                }
+                let _ = seed; // wired to the clock in unit 3
+                let host = Host::new().map_err(|e| IpcError::Io(std::io::Error::other(e)))?;
+                self.host = Some(host);
+                Ok(Flow::Go)
+            }
+            Ok(ScriptRequest::RunScript { source }) => {
+                let Some(host) = self.host.as_mut() else {
+                    return Err(IpcError::Malformed);
+                };
+                let outcome = host.eval(source.as_str());
+                if matches!(outcome, Outcome::Terminated(_)) {
+                    self.told_of_termination = true;
+                }
+                self.out.send(&ScriptResponse::Result(to_wire(outcome)))?;
+                Ok(Flow::Go)
+            }
+            #[cfg(feature = "testing")]
+            Ok(ScriptRequest::Counters) => {
+                let Some(host) = self.host.as_ref() else {
+                    return Err(IpcError::Malformed);
+                };
+                self.out.send(&ScriptResponse::Counters(counters(host)))?;
+                Ok(Flow::Go)
+            }
+            // Served in unit 3; until then it is a protocol error.
+            #[cfg(feature = "testing")]
+            Ok(ScriptRequest::ClockLog) => Err(IpcError::Malformed),
+            Err(IpcError::PeerClosed) => Ok(Flow::Stop),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// A timer task, not a request, stopped script: say so once, unasked.
+    fn tell_of_termination(&mut self, reason: TerminateReason) -> Result<(), IpcError> {
+        if self.told_of_termination {
+            return Ok(());
+        }
+        self.told_of_termination = true;
+        self.out
+            .send(&ScriptResponse::Result(ScriptResult::Terminated {
+                reason: wire_reason(reason),
+            }))
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum Flow {
+    Go,
+    Stop,
 }
 
 /// An outcome as wire data. Over-long text is cut, never refused: a script that
@@ -63,5 +187,33 @@ fn to_wire(outcome: Outcome) -> ScriptResult {
         Outcome::Error(message) => ScriptResult::Error {
             message: ErrorText::truncated(message),
         },
+        Outcome::Terminated(reason) => ScriptResult::Terminated {
+            reason: wire_reason(reason),
+        },
+    }
+}
+
+/// No wildcard: a new reason in the host must be mapped here or this does not
+/// compile.
+fn wire_reason(reason: TerminateReason) -> Wire {
+    match reason {
+        TerminateReason::TaskQueueOverflow => Wire::TaskQueueOverflow,
+        TerminateReason::MicrotaskQueueOverflow => Wire::MicrotaskQueueOverflow,
+        TerminateReason::TimerOverflow => Wire::TimerOverflow,
+        TerminateReason::MicrotaskBudget => Wire::MicrotaskBudget,
+    }
+}
+
+#[cfg(feature = "testing")]
+fn counters(host: &Host) -> px_ipc::script::CounterReport {
+    let marks = host.high_water();
+    let caps = host.caps();
+    let n = |v: usize| u32::try_from(v).unwrap_or(u32::MAX);
+    px_ipc::script::CounterReport {
+        marker: px_ipc::script::BoundedStr::truncated(px_script::COUNTERS_MARKER.to_string()),
+        tasks: (n(marks.tasks), n(caps.tasks)),
+        microtasks: (n(marks.microtasks), n(caps.microtasks)),
+        timers: (n(marks.timers), n(caps.timers)),
+        checkpoint: (n(marks.checkpoint), n(caps.checkpoint_budget)),
     }
 }

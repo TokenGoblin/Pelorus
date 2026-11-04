@@ -182,6 +182,13 @@ impl<R: Read, W: Write> Channel<R, W> {
         &mut self.writer
     }
 
+    /// Take the transport back, to give each half to its own thread. Anything
+    /// buffered in the channel's scratch is dropped, so call it between
+    /// messages (which a peer that speaks only when spoken to guarantees).
+    pub fn into_parts(self) -> (R, W) {
+        (self.reader, self.writer)
+    }
+
     /// Whether an earlier error may have left the stream misaligned.
     pub fn is_poisoned(&self) -> bool {
         self.poisoned

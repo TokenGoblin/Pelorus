@@ -50,6 +50,11 @@ pub const SUITES: &[Suite] = &[
     ),
     // Unit 2: the loop, the queues, the bounds.
     (
+        "content-loop-and-counters",
+        "script_loop_",
+        "crates/px-content/tests/script_loop.rs",
+    ),
+    (
         "event-ordering",
         "script_order_",
         "crates/px-script/tests/ordering.rs",
