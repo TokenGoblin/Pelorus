@@ -1,7 +1,9 @@
 # Phase 18 window and input stack: what the candidates measure
 
 *Research only. No `Cargo.toml`, `Cargo.lock` or source file in this repository
-was changed. Date: 2026-11-04. Measured against `origin/main` at `7844b785`.
+was changed. Date: 2026-11-04. Measured against `origin/main` at `7844b785`
+(main later moved to `33a92651`; the only `Cargo.lock` change between them is a
+first-party edge `px-block -> px-websec`, so no figure here is affected).
 Nothing here is a decision; ADR 044 (proposed) turns it into one.*
 
 Build-spec Appendix A settles "hand-rolled widgets on winit + wgpu; no general UI
