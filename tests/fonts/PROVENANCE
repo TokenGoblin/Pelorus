@@ -1,0 +1,18 @@
+Committed fonts used by the render and text tests (Phase 9, ADR 036).
+
+Ahem.ttf
+  Verbatim, byte for byte, no modification.
+  Source:   web-platform-tests/wpt, path fonts/Ahem.ttf
+  WPT commit: e78a5cab66814cd992090e480329f57791eb8e40 (default branch, fetched
+              with a sparse, blob-filtered shallow clone on 2026-11-04)
+  Size:     21,768 bytes
+  SHA-256:  b719ecb31c5b21fc573c03f6421c74ac63c271a5a3ff841e34f9705fb94b8448
+  Version:  Ahem 1.50 (name table), by Todd Fahrner and Myles C. Maxfield
+  Licence:  public domain; CC0 where public domain is not recognised. The text is
+            in the font's own name table and reproduced in LICENSE-Ahem.txt.
+  Role:     the WPT standard test font. 278 glyphs, 1000 units per em, ascent 800,
+            descent 200, glyf + cmap only. Reproduce by copying fonts/Ahem.ttf from
+            that WPT commit and comparing the SHA-256 above.
+
+Noto subsets are not here yet; they come with the subsetter recipe (plan unit 1,
+later commit).

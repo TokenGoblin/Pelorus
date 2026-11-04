@@ -1,0 +1,11 @@
+Ahem, version 1.50. Licence text as embedded in the font's own `name` table
+(Ahem.ttf, name id 13):
+
+The Ahem font belongs to the public domain. In jurisdictions that do not
+recognize public domain ownership of these files, the following Creative Commons
+Zero declaration applies:
+http://labs.creativecommons.org/licenses/zero-waive/1.0/us/legalcode
+
+Designers: Todd Fahrner and Myles C. Maxfield, "to help test
+writers develop predictable tests". Licence URL:
+http://dev.w3.org/CSS/fonts/ahem/COPYING
