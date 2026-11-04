@@ -9,3 +9,9 @@ publish.workspace = true
 # ADR 033: paint reads layout's geometry type and nothing else third-party.
 # `Au` is the one geometry type in the project (build-spec 4.2).
 px-layout = { path = "../px-layout", version = "0.0.0" }
+# The display-list builder reads computed style (through `px_css::paint`, which
+# hands out plain data, no stylo type) and the DOM the fragments point into.
+# Workspace crates only: no third-party crate is added to the tree, and
+# `app_units::Au` still arrives through `px_layout::geom`.
+px-css = { path = "../px-css", version = "0.0.0" }
+px-dom = { path = "../px-dom", version = "0.0.0" }

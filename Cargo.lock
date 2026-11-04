@@ -873,6 +873,8 @@ dependencies = [
 name = "px-paint"
 version = "0.0.0"
 dependencies = [
+ "px-css",
+ "px-dom",
  "px-layout",
 ]
 
