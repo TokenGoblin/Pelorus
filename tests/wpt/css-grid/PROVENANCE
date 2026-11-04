@@ -1,0 +1,50 @@
+WPT css-grid reftest subset (ADR 031).
+
+repository  https://github.com/web-platform-tests/wpt
+commit      b875b21fd9e6b688e37c10d1b6366cab7418f91e  (css/css-grid, sparse checkout)
+paths       preserved relative to css/css-grid/
+
+counts
+  candidates (files with a <link rel=match|mismatch>, crashtests/ and
+    grid-lanes/ excluded)                                                       769
+  kept as test+reference pairs                                                  405
+  distinct reference files among them (shared references vendored once)         326
+  support files (images) a kept test or reference needs                           7
+  files vendored (tests + references + support, excluding this file)           738
+
+  dropped-scripted (<script> or an on* attribute in the test)                    94
+  dropped-other                                                                 270
+      reference is .xht (no XML path in px-dom, ADR 029)                        159
+      reference outside this module: /css/reference/*.html, the shared
+        "green square" references, absent from the pinned sparse checkout
+        (one of the 111 is a cross-module reference to css-flexbox)             111
+  excluded before counting: css-grid/grid-lanes/ (1711 files), ADR 031 item 2.
+  There are no rel=mismatch tests and no non-.html tests in the remainder.
+
+Selection rule (reproducible without a script; this is what was run)
+  1. Walk css/css-grid/ excluding directories named crashtests (vendored in
+     tests/wpt/css-grid-crashtests/) and grid-lanes (ADR 031).
+  2. A file is a candidate if it has a <link> whose rel contains "match" or
+     "mismatch". Read with an HTML tokenizer, not a regex.
+  3. Drop the candidate if it is not .html/.htm, if it has rel=mismatch, or if
+     it contains a <script> element or any attribute whose name starts with
+     "on" (the same test reftest.rs's needs_script applies). Scripted tests are
+     counted as dropped-scripted.
+  4. Resolve the single rel=match href against the test's own directory
+     (absolute /css/css-grid/... hrefs resolve inside the module).
+  5. Drop the pair if the reference is not .html/.htm, is outside css/css-grid/
+     (or inside grid-lanes), is missing, or itself contains script or on*
+     attributes (none did).
+  6. Vendor the test, its reference (once if shared), and any file named by
+     <link rel=stylesheet href>, <img src>, <source|video|audio|iframe|embed
+     src> or <object data> in either, if that file exists inside css/css-grid/.
+
+Known gaps that remain in the denominator (nothing was removed to hide them)
+  128 kept pairs link a stylesheet that is not in the pinned sparse checkout and
+  so is NOT vendored: /css/support/grid.css (99 files), /css/support/alignment.css
+  (59), /css/support/width-keyword-classes.css (4), /fonts/ahem.css (182). The
+  tests that use grid.css lean on its classes for their layout, so they cannot
+  match until css/support/ is vendored. The harness reports these as "support
+  file not vendored".
+
+Refresh by repeating the rule against a new commit; the diff is the record.
