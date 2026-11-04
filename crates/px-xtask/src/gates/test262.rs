@@ -311,9 +311,11 @@ mod tests {
             &["--engine".to_string(), "none".to_string()],
         )
         .unwrap();
-        // 3 tests is under the corpus floor.
-        assert_eq!(g.fail_count(), 1, "{:?}", g.failures());
-        assert!(g.failures()[0].contains("floor"));
+        // 3 tests is under the corpus floor, and nothing passes (the match floor).
+        assert_eq!(g.fail_count(), 2, "{:?}", g.failures());
+        assert!(g.failures().iter().all(|f| f.contains("floor")));
+        // Nothing was recorded.
+        assert!(!fx.path().join(RESULTS_PATH).exists());
         assert!(engine_named("v8").is_err());
         assert!(parse_args(&["--nope".to_string()]).is_err());
     }
