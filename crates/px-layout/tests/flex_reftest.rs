@@ -9,7 +9,7 @@
 //! # What the numbers mean
 //!
 //! [`MATCH_FLOOR`] is a ratchet over a pinned corpus, as in Phase 6: it may not fall,
-//! the corpus size is pinned by the test below and by `ci/gate-flex-grid.sh`, and so
+//! the corpus size is pinned by the test below and by `cargo xtask flex-grid`, and so
 //! it cannot be met by deleting tests (ADR 019). The report also prints the ungraded
 //! figures -- tests dropped at vendoring, from PROVENANCE -- beside the graded one,
 //! and splits the non-matches into categories: needs a script host,
@@ -63,7 +63,7 @@ fn layout_flex_reftest_the_subset_is_present_and_paired() {
     let found = outcomes().len();
     assert!(
         found >= MIN_PAIRS,
-        "ci/gate-flex-grid.sh pins the corpus at {MIN_PAIRS} pairs or more; found {found}"
+        "cargo xtask flex-grid pins the corpus at {MIN_PAIRS} pairs or more; found {found}"
     );
     assert!(
         outcomes().iter().all(|o| !o.name.contains("grid-lanes")),
