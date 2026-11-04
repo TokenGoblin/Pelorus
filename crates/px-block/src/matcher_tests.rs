@@ -1,8 +1,8 @@
 //! Matcher behaviour through the public API. Expectations are derived by hand
 //! from the Adblock Plus filter semantics documented in the crate.
 
-use px_block::filter::{ResourceType, parse_list};
-use px_block::matcher::{Matcher, Request, RuleId, Verdict, check_request, is_third_party};
+use crate::filter::{ResourceType, parse_list};
+use crate::matcher::{Matcher, Request, RuleId, Verdict, check_request, is_third_party};
 use px_websec::origin::{Origin, Url};
 
 fn psl(host: &str) -> Option<String> {
@@ -39,22 +39,45 @@ const BLOCK0: Verdict = Verdict::Block { rule_id: RuleId(0) };
 fn host_anchored_block() {
     let m = matcher("||ads.example.com^\n");
     let p = Some("https://news.org/");
-    assert_eq!(check(&m, p, "https://ads.example.com/x.js", ResourceType::Script), BLOCK0);
-    assert_eq!(check(&m, p, "https://sub.ads.example.com/", ResourceType::Image), BLOCK0);
-    assert_eq!(check(&m, p, "https://example.com/", ResourceType::Image), Verdict::Allow);
-    assert_eq!(check(&m, p, "https://xads.example.com/", ResourceType::Image), Verdict::Allow);
     assert_eq!(
-        check(&m, p, "https://news.org/?u=https://ads.example.com/", ResourceType::Image),
+        check(&m, p, "https://ads.example.com/x.js", ResourceType::Script),
+        BLOCK0
+    );
+    assert_eq!(
+        check(&m, p, "https://sub.ads.example.com/", ResourceType::Image),
+        BLOCK0
+    );
+    assert_eq!(
+        check(&m, p, "https://example.com/", ResourceType::Image),
         Verdict::Allow
     );
-    assert_eq!(check(&m, p, "http://ads.example.com:8080/a", ResourceType::Other), BLOCK0);
+    assert_eq!(
+        check(&m, p, "https://xads.example.com/", ResourceType::Image),
+        Verdict::Allow
+    );
+    assert_eq!(
+        check(
+            &m,
+            p,
+            "https://news.org/?u=https://ads.example.com/",
+            ResourceType::Image
+        ),
+        Verdict::Allow
+    );
+    assert_eq!(
+        check(&m, p, "http://ads.example.com:8080/a", ResourceType::Other),
+        BLOCK0
+    );
 }
 
 #[test]
 fn exception_overrides_block() {
     let m = matcher("||tracker.net^\n@@||tracker.net/ok.js^\n");
     let p = Some("https://a.com/");
-    assert_eq!(check(&m, p, "https://tracker.net/a.js", ResourceType::Script), BLOCK0);
+    assert_eq!(
+        check(&m, p, "https://tracker.net/a.js", ResourceType::Script),
+        BLOCK0
+    );
     assert_eq!(
         check(&m, p, "https://tracker.net/ok.js", ResourceType::Script),
         Verdict::AllowedByException { rule_id: RuleId(1) }
@@ -88,7 +111,10 @@ fn important_beats_exception_and_exception_beats_block() {
 #[test]
 fn lowest_matching_id_is_reported() {
     let m = matcher("||a.com/x^\n||a.com^\n/x^\n");
-    assert_eq!(check(&m, None, "https://a.com/x/y", ResourceType::Image), BLOCK0);
+    assert_eq!(
+        check(&m, None, "https://a.com/x/y", ResourceType::Image),
+        BLOCK0
+    );
     assert_eq!(
         check(&m, None, "https://a.com/z", ResourceType::Image),
         Verdict::Block { rule_id: RuleId(1) }
@@ -100,39 +126,79 @@ fn third_party_option() {
     let m = matcher("||cdn.net^$third-party\n||own.org^$~third-party\n");
     // cdn.net requested by a.com: third-party -> blocked.
     assert_eq!(
-        check(&m, Some("https://a.com/"), "https://cdn.net/x", ResourceType::Script),
+        check(
+            &m,
+            Some("https://a.com/"),
+            "https://cdn.net/x",
+            ResourceType::Script
+        ),
         BLOCK0
     );
     // cdn.net asking for itself, and its own subdomain: first-party -> allowed.
     assert_eq!(
-        check(&m, Some("https://cdn.net/"), "https://cdn.net/x", ResourceType::Script),
+        check(
+            &m,
+            Some("https://cdn.net/"),
+            "https://cdn.net/x",
+            ResourceType::Script
+        ),
         Verdict::Allow
     );
     assert_eq!(
-        check(&m, Some("https://www.cdn.net/"), "https://static.cdn.net/x", ResourceType::Script),
+        check(
+            &m,
+            Some("https://www.cdn.net/"),
+            "https://static.cdn.net/x",
+            ResourceType::Script
+        ),
         Verdict::Allow
     );
     // ~third-party rule blocks only first-party.
     assert_eq!(
-        check(&m, Some("https://own.org/"), "https://own.org/x", ResourceType::Script),
+        check(
+            &m,
+            Some("https://own.org/"),
+            "https://own.org/x",
+            ResourceType::Script
+        ),
         Verdict::Block { rule_id: RuleId(1) }
     );
     assert_eq!(
-        check(&m, Some("https://a.com/"), "https://own.org/x", ResourceType::Script),
+        check(
+            &m,
+            Some("https://a.com/"),
+            "https://own.org/x",
+            ResourceType::Script
+        ),
         Verdict::Allow
     );
     // co.uk handled through the resolver: two sites under one public suffix.
     assert_eq!(
-        check(&m, Some("https://a.co.uk/"), "https://cdn.net/x", ResourceType::Script),
+        check(
+            &m,
+            Some("https://a.co.uk/"),
+            "https://cdn.net/x",
+            ResourceType::Script
+        ),
         BLOCK0
     );
     let m2 = matcher("||b.co.uk^$third-party\n");
     assert_eq!(
-        check(&m2, Some("https://a.co.uk/"), "https://b.co.uk/", ResourceType::Script),
+        check(
+            &m2,
+            Some("https://a.co.uk/"),
+            "https://b.co.uk/",
+            ResourceType::Script
+        ),
         BLOCK0
     );
     assert_eq!(
-        check(&m2, Some("https://www.b.co.uk/"), "https://b.co.uk/", ResourceType::Script),
+        check(
+            &m2,
+            Some("https://www.b.co.uk/"),
+            "https://b.co.uk/",
+            ResourceType::Script
+        ),
         Verdict::Allow
     );
 }
@@ -148,16 +214,28 @@ fn opaque_and_missing_sources() {
 fn resource_types() {
     let m = matcher("||x.com^$script,image\n||y.com^$~image\n");
     let p = Some("https://a.com/");
-    assert_eq!(check(&m, p, "https://x.com/a", ResourceType::Script), BLOCK0);
+    assert_eq!(
+        check(&m, p, "https://x.com/a", ResourceType::Script),
+        BLOCK0
+    );
     assert_eq!(check(&m, p, "https://x.com/a", ResourceType::Image), BLOCK0);
-    assert_eq!(check(&m, p, "https://x.com/a", ResourceType::Stylesheet), Verdict::Allow);
+    assert_eq!(
+        check(&m, p, "https://x.com/a", ResourceType::Stylesheet),
+        Verdict::Allow
+    );
     assert_eq!(
         check(&m, p, "https://y.com/a", ResourceType::Font),
         Verdict::Block { rule_id: RuleId(1) }
     );
-    assert_eq!(check(&m, p, "https://y.com/a", ResourceType::Image), Verdict::Allow);
+    assert_eq!(
+        check(&m, p, "https://y.com/a", ResourceType::Image),
+        Verdict::Allow
+    );
     // Top-level navigations are never blocked.
-    assert_eq!(check(&m, p, "https://y.com/a", ResourceType::Document), Verdict::Allow);
+    assert_eq!(
+        check(&m, p, "https://y.com/a", ResourceType::Document),
+        Verdict::Allow
+    );
 }
 
 #[test]
@@ -170,38 +248,62 @@ fn domain_option() {
     assert_eq!(r("https://q.b.a.com/"), Verdict::Allow);
     assert_eq!(r("https://other.org/"), Verdict::Allow);
     assert_eq!(r("https://nota.com/"), Verdict::Allow);
-    assert_eq!(check(&m, None, "https://x.com/", ResourceType::Script), Verdict::Allow);
+    assert_eq!(
+        check(&m, None, "https://x.com/", ResourceType::Script),
+        Verdict::Allow
+    );
 }
 
 #[test]
 fn case_sensitivity() {
     let m = matcher("/Banner/x^$match-case\n/AdS/y^\n");
-    assert_eq!(check(&m, None, "https://a.com/Banner/x", ResourceType::Image), BLOCK0);
-    assert_eq!(check(&m, None, "https://a.com/banner/x", ResourceType::Image), Verdict::Allow);
+    assert_eq!(
+        check(&m, None, "https://a.com/Banner/x", ResourceType::Image),
+        BLOCK0
+    );
+    assert_eq!(
+        check(&m, None, "https://a.com/banner/x", ResourceType::Image),
+        Verdict::Allow
+    );
     assert_eq!(
         check(&m, None, "https://a.com/ADS/Y", ResourceType::Image),
         Verdict::Block { rule_id: RuleId(1) }
     );
     // The host is case-insensitive regardless.
     let m = matcher("||Ads.Example.com^\n");
-    assert_eq!(check(&m, None, "https://ADS.example.COM/", ResourceType::Image), BLOCK0);
+    assert_eq!(
+        check(&m, None, "https://ADS.example.COM/", ResourceType::Image),
+        BLOCK0
+    );
 }
 
 #[test]
 fn separators_and_wildcards_end_to_end() {
     let m = matcher("/ad*banner^\n|https://t.example/p|\n.swf|\n");
-    assert_eq!(check(&m, None, "https://a.com/ad/x/banner/1", ResourceType::Image), BLOCK0);
-    assert_eq!(check(&m, None, "https://a.com/ad/x/banners", ResourceType::Image), Verdict::Allow);
+    assert_eq!(
+        check(&m, None, "https://a.com/ad/x/banner/1", ResourceType::Image),
+        BLOCK0
+    );
+    assert_eq!(
+        check(&m, None, "https://a.com/ad/x/banners", ResourceType::Image),
+        Verdict::Allow
+    );
     assert_eq!(
         check(&m, None, "https://t.example/p", ResourceType::Image),
         Verdict::Block { rule_id: RuleId(1) }
     );
-    assert_eq!(check(&m, None, "https://t.example/p/", ResourceType::Image), Verdict::Allow);
+    assert_eq!(
+        check(&m, None, "https://t.example/p/", ResourceType::Image),
+        Verdict::Allow
+    );
     assert_eq!(
         check(&m, None, "https://a.com/m.swf", ResourceType::Other),
         Verdict::Block { rule_id: RuleId(2) }
     );
-    assert_eq!(check(&m, None, "https://a.com/m.swf?x", ResourceType::Other), Verdict::Allow);
+    assert_eq!(
+        check(&m, None, "https://a.com/m.swf?x", ResourceType::Other),
+        Verdict::Allow
+    );
 }
 
 #[test]
@@ -209,9 +311,17 @@ fn untokenized_rules_still_match() {
     // Tokens next to `*` or at free edges are not index keys.
     let m = matcher("/ads*\n*$third-party,domain=a.com\n");
     assert_eq!(m.untokenized_len(), 2);
-    assert_eq!(check(&m, None, "https://x.com/adserver", ResourceType::Image), BLOCK0);
     assert_eq!(
-        check(&m, Some("https://a.com/"), "https://z.net/q", ResourceType::Image),
+        check(&m, None, "https://x.com/adserver", ResourceType::Image),
+        BLOCK0
+    );
+    assert_eq!(
+        check(
+            &m,
+            Some("https://a.com/"),
+            "https://z.net/q",
+            ResourceType::Image
+        ),
         Verdict::Block { rule_id: RuleId(1) }
     );
 }
@@ -230,23 +340,43 @@ fn query_and_userinfo_handling() {
     );
     // Query text is matched by plain patterns.
     let m = matcher("?affiliate=\n");
-    assert_eq!(check(&m, None, "https://a.com/p?affiliate=7", ResourceType::Other), BLOCK0);
+    assert_eq!(
+        check(&m, None, "https://a.com/p?affiliate=7", ResourceType::Other),
+        BLOCK0
+    );
     // Fragments are not part of the request.
     let m = matcher("#frag\n");
-    assert_eq!(check(&m, None, "https://a.com/p#frag", ResourceType::Other), Verdict::Allow);
+    assert_eq!(
+        check(&m, None, "https://a.com/p#frag", ResourceType::Other),
+        Verdict::Allow
+    );
 }
 
 #[test]
 fn non_network_schemes_and_ip_hosts() {
     let m = matcher("||ads.example.com^\n||10.0.0.1^\n");
-    assert_eq!(check(&m, None, "data:text/plain,ads.example.com", ResourceType::Image), Verdict::Allow);
-    assert_eq!(check(&m, None, "https://10.0.0.1/x", ResourceType::Image), Verdict::Block { rule_id: RuleId(1) });
-    assert_eq!(check(&m, None, "wss://ads.example.com/s", ResourceType::Other), BLOCK0);
+    assert_eq!(
+        check(
+            &m,
+            None,
+            "data:text/plain,ads.example.com",
+            ResourceType::Image
+        ),
+        Verdict::Allow
+    );
+    assert_eq!(
+        check(&m, None, "https://10.0.0.1/x", ResourceType::Image),
+        Verdict::Block { rule_id: RuleId(1) }
+    );
+    assert_eq!(
+        check(&m, None, "wss://ads.example.com/s", ResourceType::Other),
+        BLOCK0
+    );
 }
 
 #[test]
 fn multiple_lists_keep_order_and_provenance() {
-    use px_block::matcher::MatcherBuilder;
+    use crate::matcher::MatcherBuilder;
     let m = MatcherBuilder::new()
         .add_list("one", parse_list("! c\n||a.com^\n"))
         .add_list("two", parse_list("||b.com^\n"))
@@ -258,7 +388,10 @@ fn multiple_lists_keep_order_and_provenance() {
     };
     assert_eq!(rule_id, RuleId(1));
     let info = m.rule_info(rule_id).unwrap();
-    assert_eq!((info.list, info.list_name, info.line, info.text), (1, "two", 1, "||b.com^"));
+    assert_eq!(
+        (info.list, info.list_name, info.line, info.text),
+        (1, "two", 1, "||b.com^")
+    );
     assert_eq!(m.rule_info(RuleId(0)).unwrap().line, 2);
     assert!(m.rule_info(RuleId(2)).is_none());
 }
@@ -315,7 +448,7 @@ fn scale_100k_rules() {
     for k in 0..10_000u32 {
         let i = k * 10 + (k % 4); // i % 4 == k % 4
         let url = match k % 5 {
-            0 | 1 | 2 | 3 => match i % 4 {
+            0..=3 => match i % 4 {
                 0 => format!("https://trk{i}.net{}.com/p", i % 1000),
                 1 => format!("https://s.org/ads{i}/banner{}.gif", i % 97),
                 2 => format!("https://cdn{i}.example/x.js"),
@@ -362,6 +495,9 @@ fn scale_100k_rules() {
             _ => exp_block += 1,
         }
     }
-    assert_eq!((blocked, excepted, allowed), (exp_block, exp_exc, exp_allow));
+    assert_eq!(
+        (blocked, excepted, allowed),
+        (exp_block, exp_exc, exp_allow)
+    );
     assert!(exp_block > 0 && exp_exc > 0 && exp_allow > 0);
 }

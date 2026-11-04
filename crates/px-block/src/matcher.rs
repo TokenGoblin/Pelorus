@@ -132,7 +132,8 @@ impl Target {
         if !matches!(url.scheme(), "http" | "https" | "ws" | "wss" | "ftp") {
             return None;
         }
-        let mut full = String::with_capacity(url.scheme().len() + host.len() + url.path().len() + 16);
+        let mut full =
+            String::with_capacity(url.scheme().len() + host.len() + url.path().len() + 16);
         full.push_str(url.scheme());
         full.push_str("://");
         let hs = full.len();
@@ -214,18 +215,13 @@ impl MatcherBuilder {
         let mut untokenized: Vec<u32> = Vec::new();
         for (i, e) in entries.iter().enumerate() {
             let id = u32::try_from(i).unwrap_or(u32::MAX);
-            let best = e
-                .rule
-                .pattern
-                .index_tokens()
-                .into_iter()
-                .min_by(|a, b| {
-                    let fa = freq.get(a).copied().unwrap_or(0);
-                    let fb = freq.get(b).copied().unwrap_or(0);
-                    fa.cmp(&fb)
-                        .then_with(|| b.len().cmp(&a.len()))
-                        .then_with(|| a.cmp(b))
-                });
+            let best = e.rule.pattern.index_tokens().into_iter().min_by(|a, b| {
+                let fa = freq.get(a).copied().unwrap_or(0);
+                let fb = freq.get(b).copied().unwrap_or(0);
+                fa.cmp(&fb)
+                    .then_with(|| b.len().cmp(&a.len()))
+                    .then_with(|| a.cmp(b))
+            });
             match best {
                 Some(t) => index.entry(t.into()).or_default().push(id),
                 None => untokenized.push(id),
@@ -358,14 +354,20 @@ impl Matcher {
             if r.exception {
                 exception.get_or_insert(id);
             } else if r.important {
-                return Verdict::Block { rule_id: RuleId(id) };
+                return Verdict::Block {
+                    rule_id: RuleId(id),
+                };
             } else {
                 block.get_or_insert(id);
             }
         }
         match (exception, block) {
-            (Some(id), _) => Verdict::AllowedByException { rule_id: RuleId(id) },
-            (None, Some(id)) => Verdict::Block { rule_id: RuleId(id) },
+            (Some(id), _) => Verdict::AllowedByException {
+                rule_id: RuleId(id),
+            },
+            (None, Some(id)) => Verdict::Block {
+                rule_id: RuleId(id),
+            },
             (None, None) => Verdict::Allow,
         }
     }
@@ -385,5 +387,10 @@ pub fn check_request(matcher: &Matcher, req: &Request<'_>) -> Verdict {
         return Verdict::Allow;
     };
     let host = source_host(req.source_origin);
-    matcher.check_target(&target, host.as_deref(), req.resource_type, req.is_third_party)
+    matcher.check_target(
+        &target,
+        host.as_deref(),
+        req.resource_type,
+        req.is_third_party,
+    )
 }

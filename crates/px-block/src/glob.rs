@@ -253,8 +253,7 @@ impl Pattern {
     /// is not a valid key. Lower-cased, in pattern order, deduplicated.
     pub fn index_tokens(&self) -> Vec<String> {
         let n = self.elems.len();
-        let tok =
-            |i: usize| matches!(self.elems.get(i), Some(Elem::Lit(b)) if is_token_byte(*b));
+        let tok = |i: usize| matches!(self.elems.get(i), Some(Elem::Lit(b)) if is_token_byte(*b));
         let mut out: Vec<String> = Vec::new();
         let mut i = 0;
         while i < n {
@@ -385,7 +384,7 @@ mod tests {
             let hs = i + 3;
             let rest = &lower[hs..];
             let he = rest
-                .find(|c| matches!(c, '/' | '?' | '#' | ':'))
+                .find(['/', '?', '#', ':'])
                 .map_or(lower.len(), |k| hs + k);
             (hs, he)
         });
@@ -400,7 +399,7 @@ mod tests {
             let expect = b < 0x80 && !word;
             assert_eq!(is_separator(b), expect, "byte {b:#04x}");
         }
-        for sep in [b'/', b':', b'?', b'=', b'&', b'#', b'@', b'~', b'+'] {
+        for sep in *b"/:?=&#@~+" {
             assert!(is_separator(sep));
         }
         for non in [b'a', b'Z', b'7', b'_', b'-', b'.', b'%', 0x80, 0xC3] {

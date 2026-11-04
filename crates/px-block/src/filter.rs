@@ -113,10 +113,7 @@ pub struct DomainConstraint {
 }
 
 fn host_under(host: &str, domain: &str) -> bool {
-    host == domain
-        || host
-            .strip_suffix(domain)
-            .is_some_and(|p| p.ends_with('.'))
+    host == domain || host.strip_suffix(domain).is_some_and(|p| p.ends_with('.'))
 }
 
 impl DomainConstraint {
@@ -361,9 +358,7 @@ fn cosmetic(line: &str) -> Option<Class> {
         let prefix = line.get(..i)?;
         let rest = line.get(i..)?;
         if prefix.chars().all(is_domain_list_char) {
-            for marker in [
-                "#@$#", "#@?#", "#@%#", "##", "#@#", "#?#", "#$#", "#%#",
-            ] {
+            for marker in ["#@$#", "#@?#", "#@%#", "##", "#@#", "#?#", "#$#", "#%#"] {
                 if let Some(body) = rest.strip_prefix(marker) {
                     let scriptlet = body.starts_with("+js(") || marker.ends_with("%#");
                     return Some(Class::Cosmetic { scriptlet });
@@ -505,10 +500,8 @@ pub fn parse_network_filter(line: &str, lineno: u32) -> Result<Rule, RejectReaso
     if types.0 == 0 {
         return Err(RejectReason::ConflictingOptions);
     }
-    let constrained = pos_types != 0
-        || neg_types != 0
-        || third_party.is_some()
-        || !domains.is_empty();
+    let constrained =
+        pos_types != 0 || neg_types != 0 || third_party.is_some() || !domains.is_empty();
 
     let pattern = Pattern::from_text(pattern_text, match_case).map_err(|e| match e {
         PatternError::TooLong => RejectReason::PatternTooLong,
@@ -560,12 +553,7 @@ mod tests {
         assert_eq!(s.rejected_total(), 2);
         assert_eq!(
             s.lines,
-            s.blank
-                + s.comments
-                + s.headers
-                + s.cosmetic_skipped
-                + s.accepted
-                + s.rejected_total()
+            s.blank + s.comments + s.headers + s.cosmetic_skipped + s.accepted + s.rejected_total()
         );
         assert_eq!(l.rules.len(), 2);
         assert_eq!(l.rules.first().map(|r| r.line), Some(5));
@@ -623,11 +611,20 @@ mod tests {
     #[test]
     fn party_options() {
         assert_eq!(one("||a.com^$third-party").unwrap().third_party, Some(true));
-        assert_eq!(one("||a.com^$~third-party").unwrap().third_party, Some(false));
+        assert_eq!(
+            one("||a.com^$~third-party").unwrap().third_party,
+            Some(false)
+        );
         assert_eq!(one("||a.com^$3p").unwrap().third_party, Some(true));
         assert_eq!(one("||a.com^$1p").unwrap().third_party, Some(false));
-        assert_eq!(one("||a.com^$first-party").unwrap().third_party, Some(false));
-        assert_eq!(one("||a.com^$~first-party").unwrap().third_party, Some(true));
+        assert_eq!(
+            one("||a.com^$first-party").unwrap().third_party,
+            Some(false)
+        );
+        assert_eq!(
+            one("||a.com^$~first-party").unwrap().third_party,
+            Some(true)
+        );
         assert_eq!(
             one("||a.com^$3p,~3p"),
             Err(RejectReason::ConflictingOptions)
@@ -652,8 +649,13 @@ mod tests {
             one("||a.com^$domain=a.com,domain=b.com"),
             Err(RejectReason::ConflictingOptions)
         );
-        assert_eq!(one("||a.com^$~domain=a.com"), Err(RejectReason::UnsupportedOption));
-        let many: Vec<String> = (0..=MAX_DOMAINS_PER_RULE).map(|i| format!("d{i}.com")).collect();
+        assert_eq!(
+            one("||a.com^$~domain=a.com"),
+            Err(RejectReason::UnsupportedOption)
+        );
+        let many: Vec<String> = (0..=MAX_DOMAINS_PER_RULE)
+            .map(|i| format!("d{i}.com"))
+            .collect();
         assert_eq!(
             one(&format!("||a.com^$domain={}", many.join("|"))),
             Err(RejectReason::TooManyDomains)
@@ -690,7 +692,10 @@ mod tests {
             one("@@||a.com^$important"),
             Err(RejectReason::ImportantException)
         );
-        assert_eq!(one("||a.com^$~important"), Err(RejectReason::UnsupportedOption));
+        assert_eq!(
+            one("||a.com^$~important"),
+            Err(RejectReason::UnsupportedOption)
+        );
     }
 
     #[test]
@@ -756,7 +761,10 @@ mod tests {
     fn invalid_characters() {
         assert_eq!(one("||a.com/a b^"), Err(RejectReason::InvalidCharacters));
         assert_eq!(one("||a.com/\0^"), Err(RejectReason::InvalidCharacters));
-        assert_eq!(one("0.0.0.0 ads.example.com"), Err(RejectReason::InvalidCharacters));
+        assert_eq!(
+            one("0.0.0.0 ads.example.com"),
+            Err(RejectReason::InvalidCharacters)
+        );
     }
 
     #[test]
@@ -769,7 +777,9 @@ mod tests {
         // Exactly at the line cap is accepted as a line (pattern cap applies).
         let at = "a".repeat(MAX_LINE_BYTES);
         assert_eq!(
-            parse_list(&at).stats.rejected_for(RejectReason::LineTooLong),
+            parse_list(&at)
+                .stats
+                .rejected_for(RejectReason::LineTooLong),
             0
         );
     }
