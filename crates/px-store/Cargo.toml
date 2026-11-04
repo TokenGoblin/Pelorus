@@ -6,5 +6,14 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# Phase 13. Workspace path dependencies, not new external crates: the store
+# keys everything by px-net's `PartitionKey` and persists px-net's `Cookie`,
+# so the partition type is defined once and cannot drift; names of the config
+# directories come from px-brand. Nothing else.
+px-net = { path = "../px-net", version = "0.0.0" }
+px-brand = { path = "../px-brand", version = "0.0.0" }
+
+# build-spec section 4.3: this crate parses bytes that were written by an
+# earlier process and may have been truncated, corrupted or planted.
+[lints]
+workspace = true

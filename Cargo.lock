@@ -949,6 +949,10 @@ version = "0.0.0"
 [[package]]
 name = "px-store"
 version = "0.0.0"
+dependencies = [
+ "px-brand",
+ "px-net",
+]
 
 [[package]]
 name = "px-text"
