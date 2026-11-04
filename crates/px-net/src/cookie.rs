@@ -76,6 +76,11 @@ pub enum Rejected {
     PrefixViolation(&'static str),
     /// The jar for this partition is full.
     JarFull,
+    /// A `Secure` cookie arrived over a connection that is not secure.
+    ///
+    /// RFC 6265bis 5.7: otherwise a network attacker can plant or overwrite a
+    /// cookie the site believes only TLS can write.
+    InsecureOrigin,
 }
 
 impl std::fmt::Display for Rejected {
@@ -91,6 +96,7 @@ impl std::fmt::Display for Rejected {
             Self::InsecureSameSiteNone => write!(f, "SameSite=None requires Secure"),
             Self::PrefixViolation(which) => write!(f, "{which}"),
             Self::JarFull => write!(f, "this partition already holds the maximum cookies"),
+            Self::InsecureOrigin => write!(f, "a Secure cookie cannot be set over plaintext"),
         }
     }
 }
@@ -212,7 +218,8 @@ impl Jar {
             return Vec::new();
         };
 
-        jar.iter()
+        let mut matching: Vec<&Cookie> = jar
+            .iter()
             .filter(|cookie| !cookie.is_expired(now))
             .filter(|cookie| cookie.matches_host(origin.host()))
             .filter(|cookie| cookie.matches_path(path))
@@ -224,7 +231,11 @@ impl Jar {
                 SameSite::None => true,
                 SameSite::Lax | SameSite::Strict => !cross_site,
             })
-            .collect()
+            .collect();
+        // RFC 6265bis 5.8.3: longer paths first. The sort is stable, so ties
+        // keep insertion (creation) order.
+        matching.sort_by_key(|cookie| std::cmp::Reverse(cookie.path.len()));
+        matching
     }
 
     /// Drop everything stored for one partition.
@@ -324,6 +335,10 @@ pub fn parse(psl: &PublicSuffixList, origin: &Origin, header: &str) -> Result<Co
     // a cookie readable by a network attacker on every third-party request.
     if same_site == SameSite::None && !secure {
         return Err(Rejected::InsecureSameSiteNone);
+    }
+
+    if secure && !origin.is_secure() {
+        return Err(Rejected::InsecureOrigin);
     }
 
     // Cookie name prefixes, which are the only integrity mechanism cookies

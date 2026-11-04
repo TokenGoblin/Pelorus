@@ -891,18 +891,221 @@ Format: one entry per defect.
   `em`, `rem`, percentages and absolute units, which
   `crates/px-css/tests/properties.rs` documents at its fixture table.
 
-## The network job still carries continue-on-error, and Phase 3 has merged
+## ~~The network job still carries continue-on-error~~ — done in Phase 6
 
-- **Found in:** phase 5, removing the same line from the style job
-- **Belongs to:** phase 3's job; a one-line change
-- **What:** `.github/workflows/gate.yml`'s `network` job still sets
-  `continue-on-error: true`, with a comment explaining it is red until Phase 3
-  closes. Phase 3 closed and merged, and the job passes.
-- **Why it matters:** the line's own comment, on the `dom` job that removed it,
-  says why — *"a job that is allowed to fail and does not is telling you nothing
-  at all."* A green `network` that is permitted to go red silently is a regression
-  nobody would see.
-- **What to do:** delete the line and the stale comment above it.
-- **Not done in Phase 5 because** phase discipline puts out-of-phase defects here
-  rather than in this phase's diff, and this is Phase 3's job. It is a one-line
-  change whenever somebody is in that file for another reason.
+Deleted on the third encounter. Filed in Phase 5 while removing the same line from
+the `style` job, rediscovered from scratch in Phase 6 while removing it from the
+`layout` job, and fixed there rather than filed a third time.
+
+Kept as a record of the failure mode, which is about process rather than CI: a
+defect that belongs to a closed phase has nobody whose phase it is, and
+"one line, whenever somebody is in that file anyway" did not happen twice running.
+`ci/gate-network.sh` passes and the job is required now.
+
+## sandbox_policy_repeated_spawns_do_not_leak_handles fails while reporting no leak
+
+- **Found in:** phase 6 CI, on a branch that does not touch px-sandbox
+- **Belongs to:** phase 2's test
+- **What:** `sanitizers (windows-latest)` failed with
+
+  ```
+  handles grew from 115 to 135 across 40 spawns;
+  the spawn path leaks roughly 0 per launch
+  ```
+
+  The message contradicts itself: it fails, and says the per-launch leak is zero.
+  20 handles across 40 spawns is 0.5 each, and the integer division in the
+  message renders that as 0.
+- **Why it matters:** two separate problems. The **threshold** treats any growth
+  as a failure while the message it prints computes a per-launch figure that
+  rounds to nothing, so the test cannot state its own verdict — a reader cannot
+  tell whether 20 handles is a leak or noise. And the **flakiness**: the same job
+  passed on ubuntu, passed on `main`, and passes locally, so under ASAN on Windows
+  the handle count moves for reasons the test does not model. A test that fails
+  intermittently in a job nobody expects to be red is how a real leak gets
+  dismissed.
+- **What to do:** decide what the test actually asserts. If the claim is "no
+  growth", say so and drop the per-launch arithmetic. If it is "growth below a
+  rate", state the rate in the threshold rather than only in the message, and
+  give it enough headroom for ASAN's own allocations. Either way the message and
+  the condition have to agree.
+- **Not done in Phase 6 because** it is Phase 2's test and phase discipline puts
+  out-of-phase defects here. Worth doing before anybody trusts that job again.
+
+## Sending no User-Agent is a privacy position that real sites refuse
+
+- **Found in:** phase 6, the first time anything here was pointed at a live site
+- **Belongs to:** phase 19 (privacy) to decide, phase 23 (daily driver) to pay for
+- **What:** `px-net`'s `build_request` sends no `User-Agent`, no `Accept-Language`
+  and no `Accept-Encoding`, deliberately and with the reason written down: *"Every
+  header sent is a bit of entropy, and invariant 4's 'no identifiers' is easier to
+  keep by not adding them in the first place."*
+- **What that costs, measured twice.** First against three sites, then against
+  sixteen major ones in Phase 6:
+
+  | | |
+  |---|---|
+  | Sites fetched | 16 (NASA, NOAA, NIH, weather.gov, usa.gov, Apple, Microsoft, IBM, Intel, Mozilla, GitHub, Stack Overflow, Reuters, AP, BBC, Ars Technica) |
+  | Returned 200 | 7 |
+  | Returned 403 | 8 |
+  | **Of those 403s, served 200 to the same request with a `User-Agent`** | **7 of 8** |
+
+  The eighth is Reuters, which returns 401 either way and is gated on something
+  else. `curl -H "User-Agent:"` against noaa.gov, weather.gov, nih.gov,
+  microsoft.com, stackoverflow.com, apnews.com and arstechnica.com returns 403;
+  the identical request carrying a Chrome UA string returns 200 from every one.
+
+  So it is not Wikipedia and it is not a slice. **Roughly half of the major web
+  refuses this client outright, and one header is the entire difference.**
+
+- **Why it matters:** Phase 23's gate is "compat suite green on all forty sites;
+  thirty consecutive days of self-hosted use with no fallback". A browser that
+  403s on Wikipedia cannot pass that, so the privacy position and the daily-driver
+  gate are in direct tension and one of them has to move.
+- **What to do:** this is a decision, not a defect, and it wants an ADR. The
+  options are a fixed generic User-Agent shared by every install (entropy of zero
+  across the user base, which is the anti-fingerprinting answer rather than a
+  concession), sending nothing and accepting the failures, or a per-site
+  exception list, which is the worst of the three because it is a fingerprint that
+  varies by browsing history.
+- **Not decided here because** it is a product-level privacy decision, Phase 19
+  owns it, and Phase 6 has no standing to settle it — but it should be settled
+  well before Phase 23 discovers it.
+
+## ~~Self-collapsing boxes~~ — done, later in Phase 6
+
+Implemented in "Phase 6: self-collapsing boxes, and what min-height really does
+to a margin". Kept here as a record of what the deferral cost: nothing, because
+it was picked up three commits later once the reftest report pointed at the
+five pairs it was blocking.
+
+## `position: relative`'s offsets (CSS 2.1 §9.4.3), deferred in Phase 6
+
+- **What works:** `position: relative` establishes a containing block for
+  absolutely positioned descendants, which is §10.1 and is most of why anyone
+  writes it. That half is in.
+- **What does not:** the `left`/`top`/`right`/`bottom` *offsets*. A relatively
+  positioned box should be laid out in normal flow and then shifted, leaving the
+  space it occupied where it was.
+- **Why it is not in the absolute-positioning commit:** for a **block** box it is
+  two lines and it was written and then taken out. For an **inline** box it is not
+  implementable at all yet — `partition_content` flattens an inline element into
+  the run around it, so there is no box to shift, and the lines it contributes are
+  not distinguishable from its siblings'. Shipping the block half alone is worse
+  than shipping neither: `visuren/float-inside-inline-between-blocks-1.html` is a
+  reftest whose test uses `<span style="position: relative; left: 100px">` and
+  whose reference uses `<div>` with the same rule, and it went from matching to
+  failing because one side moved and the other could not.
+- **What to do:** land it with inline boxes, in the same phase that gives an
+  inline element a fragment of its own. Until then it is one asymmetry rather than
+  two.
+- **Where:** `crates/px-layout/src/block.rs`, `is_positioned` — the doc comment
+  there says the same thing in four lines.
+
+## Absolute positioning's remaining gaps, found in Phase 6
+
+- **`height: auto` with both `top` and `bottom` stated** should resolve the height
+  from the equation the way the inline axis resolves the width from `left` and
+  `right`. It does not: the height comes from content or from `height`, and
+  `bottom` only positions. The containing block's block size is not known until
+  after the absolutely positioned box has been laid out, so this needs the box's
+  own size to be settled in `place_absolute` rather than during the traversal.
+- **Auto margins** on an absolutely positioned box should absorb the slack in
+  §10.3.7's equation and centre it. They are treated as zero.
+- **The static position's inline axis** is the containing block's content start
+  plus this box's start margin, which is right for a box that would have been at
+  the start of its line and wrong for one that would not. The block axis is exact.
+
+## px-net trusts only the roots Windows happens to have cached — **confirmed**
+
+- **Found in:** Phase 6, pointing `px-fetch` at real sites. Two independent
+  instances: `lite.cnn.com` and `www.intel.com`.
+- **Belongs to:** Phase 3 / ADR 012 (trust anchors).
+- **Status: reproduced deliberately.** Filed first as a hypothesis, then proven by
+  the experiment the first version of this entry asked for.
+
+  ```
+  roots in Cert:\LocalMachine\Root        46
+  px-fetch https://www.intel.com          UnknownIssuer
+  curl     https://www.intel.com          301, ssl_verify_result=0
+  roots in Cert:\LocalMachine\Root        47
+  newly installed                         CN=Sectigo Public Server Authentication
+                                          Root E46, O=Sectigo Limited, C=GB
+  px-fetch https://www.intel.com          TLS handshake completes
+  ```
+
+  intel.com's chain is `*.intel.com` <- `Sectigo Public Server Authentication CA
+  OV E36`. The root that arrived is that intermediate's. Nothing was rebuilt
+  between the failing and succeeding runs.
+
+- **The mechanism:** Windows populates `LocalMachine\Root` **lazily**. The
+  Microsoft Trusted Root Program is not all on disk; the OS fetches a root the
+  first time a chain needs one, and schannel triggers that. `px-sandbox`'s
+  `platform_roots()` *enumerates* the store, so it sees a snapshot of whatever has
+  been needed before and nothing else. `root_store()` reports `Platform` with 46
+  anchors, all 46 accepted by rustls, none rejected — the store is not broken, it
+  is incomplete, and nothing distinguishes those two from inside.
+- **Why it matters:** a trust decision that depends on the machine's browsing
+  history rather than on policy. A fresh install rejects sites a browser accepts,
+  non-deterministically, and the failure presents as a site problem. It will also
+  make Phase 23's forty-site compat run flaky in a way that looks like the sites.
+- **Proposed fix: `docs/adr/030-windows-chain-verification.md`**, written in Phase 6
+  and awaiting a decision. It weighs three options and recommends asking Windows to
+  build the chain, with two non-negotiables: a negative test in CI proving a bad
+  certificate is still rejected, and no unioning of the platform and bundled stores.
+- **What to do — two options and a trade, not a patch:**
+  1. Ask Windows to build and verify the chain (`CertGetCertificateChain`) instead
+     of handing rustls a snapshot. Keeps ADR 012's property that an
+     administrator's distrust decisions are honoured, and gets auto-update for
+     free. Costs a `rustls::client::danger::ServerCertVerifier` implementation and
+     therefore a careful review, because that trait is how verification gets
+     switched off by accident.
+  2. Use the bundled Mozilla floor as the source on Windows. Deterministic, and
+     loses ADR 012's administrator override.
+
+  Either way ADR 012 gets reopened rather than amended in passing.
+- **Do not** union the platform store with the bundled one. `tls.rs` explains at
+  length why those are never merged, and that reasoning is untouched by this.
+
+## Table layout is in no phase at all, found in Phase 6
+
+- **What:** `docs/build-spec.md` §9 has Phase 6 as "block and inline layout" and
+  Phase 7 as "flex and grid". **Table formatting — CSS 2.1 §17 — is not named in
+  any phase.** It is not deferred, disallowed or listed in §13's open decisions; it
+  is missing.
+- **What it costs, measured.** Pointing `px-fetch` at real sites in Phase 6:
+
+  | site | elements | fragments | why |
+  |---|---|---|---|
+  | news.ycombinator.com | 814 | **122** | `<table>` layout; `<tr>`/`<td>` are not block-level, so their content flattens into one inline run |
+  | fabiensanglard.net | 425 | **105** | the same |
+  | danluu.com | 629 | **835** | semantic HTML, no tables — boxes *multiply* into line boxes |
+
+  The last row is the control: the engine is not losing boxes in general, it is
+  losing them to tables specifically.
+- **Also:** four of the CSS2 reftest subset's remaining failures are table tests
+  (`floats-in-table-caption-001`, `float-table-align-left-quirk`,
+  `table-sizing-with-adjacent-floats`, `table-pseudo-in-part3-1`), so the
+  conformance number is capped by a feature with no phase to build it in.
+- **Why it is not started here:** table layout is its own formatting context and
+  is larger than floats. Phase 6 built what §9 named. Starting an unnamed feature
+  because it happens to be next in CSS 2.1's table of contents is how a phase plan
+  stops meaning anything.
+- **What to do:** decide where it goes. Candidates are a Phase 6 extension, a slot
+  beside Phase 7's flex and grid, or an explicit "not before Phase N" with the
+  compat cost written down. It wants a line in the build spec either way, because
+  right now a reader cannot tell whether it was considered.
+- **Note on scope:** `<table>` itself is in this tool's user-agent stylesheet as
+  `display: block`, which is why HN produces 122 boxes rather than none. The
+  missing part is the internal table model — rows, cells, column widths, the
+  anonymous table boxes §17.2.1 generates.
+
+## Reconsider css-grid/grid-lanes after Phase 7
+
+- **Found in:** phase 7, ADR 031
+- **Belongs to:** unassigned (after phase 7)
+- **What:** `css/css-grid/grid-lanes/` is a separate, newer module and a large share
+  of the css-grid directory. ADR 031 excludes it from the Phase 7 subset so the
+  threshold is not set by an unrelated feature. It is excluded, not rejected.
+- **Why deferred:** nothing implements it, and counting it would shrink the graded
+  fraction for no signal.
