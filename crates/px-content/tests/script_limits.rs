@@ -31,6 +31,7 @@ use common::{Ended, GENEROUS, Peer, SHORT_WATCHDOG_MS, value, was_aborted};
 use px_ipc::script::TerminateReason;
 
 /// A process whose watchdog is short (under `testing`).
+#[cfg(test)]
 fn peer() -> Peer {
     let mut peer = Peer::spawn(1);
     peer.set_watchdog_ms(SHORT_WATCHDOG_MS);
@@ -38,12 +39,14 @@ fn peer() -> Peer {
 }
 
 /// What every ending must leave behind: a fresh process that works.
+#[cfg(test)]
 fn the_next_process_runs_one_plus_one() {
     let mut next = Peer::spawn(2);
     assert_eq!(next.run("1+1"), value("2"));
 }
 
 /// The process must be dead by its own `abort()`.
+#[cfg(test)]
 fn assert_aborted(ended: Ended, peer: &mut Peer) {
     match ended {
         Ended::Dead(status) => {
@@ -55,6 +58,7 @@ fn assert_aborted(ended: Ended, peer: &mut Peer) {
 }
 
 /// The process must have said script is stopped, and still be up.
+#[cfg(test)]
 fn assert_terminated(ended: Ended, peer: &mut Peer, reason: TerminateReason) {
     match ended {
         Ended::Terminated(got) => assert_eq!(got, reason),

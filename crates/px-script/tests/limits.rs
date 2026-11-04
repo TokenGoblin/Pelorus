@@ -20,6 +20,7 @@ use std::rc::Rc;
 use px_script::clock::ManualClock;
 use px_script::{Host, HostOptions, Limits, LoopEnd, Outcome, TerminateReason};
 
+#[cfg(test)]
 fn host_with(limits: Limits) -> Host {
     Host::with_options(HostOptions {
         clock: Rc::new(ManualClock::at(0)),
@@ -30,6 +31,7 @@ fn host_with(limits: Limits) -> Host {
 }
 
 /// Small limits so a test finishes quickly even in an unoptimised build.
+#[cfg(test)]
 fn small() -> Limits {
     Limits {
         loop_iterations: 50_000,
@@ -38,6 +40,7 @@ fn small() -> Limits {
     }
 }
 
+#[cfg(test)]
 fn stopped() -> Outcome {
     Outcome::Terminated(TerminateReason::RuntimeLimit)
 }
