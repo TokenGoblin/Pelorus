@@ -545,6 +545,9 @@ pub fn layout_document(
                             Au(0),
                         ),
                     ));
+                    if let Some(f) = tree.get_mut(fragment) {
+                        f.node = Some(node);
+                    }
 
                     tables.grow_to(fragment.index());
                     tables.inline_sizes[fragment.index()] = content_inline;
