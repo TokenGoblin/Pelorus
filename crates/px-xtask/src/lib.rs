@@ -23,6 +23,7 @@ pub mod scan;
 pub mod sha256;
 pub mod tar;
 pub mod test262;
+pub mod test262_core;
 
 #[cfg(test)]
 pub mod testutil;
