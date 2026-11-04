@@ -338,7 +338,7 @@ fn random_garbage_fonts_never_panic() {
 // parity test reads them from a directory named by an environment variable and
 // says plainly when it skips.
 
-const FONT_DIR_VAR: &str = "PELORUS_PARITY_FONTS";
+const FONT_DIR_VAR: &str = "PX_PARITY_FONTS";
 
 fn parity_font(name: &str) -> Option<HarfrustShaper> {
     let dir = match std::env::var_os(FONT_DIR_VAR) {
@@ -504,13 +504,13 @@ fn shapes_the_bundled_ahem() {
     assert_eq!(au, 9600);
 }
 
-/// Regenerates the fuzz seed: `PELORUS_WRITE_FUZZ_SEED=<dir> cargo test -p
+/// Regenerates the fuzz seed: `PX_WRITE_FUZZ_SEED=<dir> cargo test -p
 /// px-text write_fuzz_seed`. Does nothing otherwise. The seed is the synthetic
 /// font framed the way `fuzz/fuzz_targets/shaper.rs` expects, so the fuzzer
 /// starts from a font that loads.
 #[test]
 fn write_fuzz_seed() {
-    let Some(dir) = std::env::var_os("PELORUS_WRITE_FUZZ_SEED") else {
+    let Some(dir) = std::env::var_os("PX_WRITE_FUZZ_SEED") else {
         return;
     };
     let font = synthetic::font();
