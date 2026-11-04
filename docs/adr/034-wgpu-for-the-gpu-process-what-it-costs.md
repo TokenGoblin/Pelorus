@@ -1,7 +1,10 @@
 # 034 — wgpu for the GPU process: what it costs
 
-- **Status:** proposed, for the user's decision. Nothing in `Cargo.toml` or
-  `Cargo.lock` has been changed.
+- **Status:** accepted, option B (user decision, 2026-11-04): the GPU process is
+  built now with the software rasterizer inside it, and wgpu is added by its own ADR
+  at the first phase where a measured software frame time or the browser UI needs
+  it. Appendix A is unchanged: wgpu remains the GPU path, only its date moves.
+  Nothing in `Cargo.toml` or `Cargo.lock` has been changed.
 - **Date:** 2026-11-04
 - **Phase:** 8
 - **Invariants touched:** none directly. It bears on §4 (the unsafe claim), the

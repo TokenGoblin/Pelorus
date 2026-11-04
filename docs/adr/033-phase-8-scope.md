@@ -160,7 +160,9 @@ maintainer has. CI on a runner without a GPU runs everything in items 1-4 agains
 child whose backend is the software rasterizer, which proves the *boundary* and
 says nothing about wgpu. The gate report states this split.
 
-**Question for the user (Appendix A is settled, so this is raised, not acted on).**
+**Decided by the user, 2026-11-04: the gate is read as "no ambient filesystem access"**
+(below), and `crates/px-gpu/CLAUDE.md` is reworded to match. The question as raised:
+
 A real Vulkan or DX12 process cannot have "no filesystem capability" in the
 literal sense. The Vulkan loader `dlopen`s `libvulkan.so.1`, reads ICD manifests
 under `/usr/share/vulkan/icd.d`, and Mesa opens `/dev/dri/renderD*`, `/sys`
