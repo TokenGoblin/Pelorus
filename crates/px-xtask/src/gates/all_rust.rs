@@ -18,7 +18,12 @@ pub const ALLOWLIST_PATH: &str = "crates/px-xtask/all-rust-allowlist.txt";
 
 /// Directory prefixes whose contents are vendored third-party data or corpora
 /// we do not author (ADR 032).
-const EXCLUDED_PREFIXES: &[&str] = &["tests/wpt/", "tests/html5lib/", "fuzz/corpus/"];
+const EXCLUDED_PREFIXES: &[&str] = &[
+    "tests/wpt/",
+    "tests/html5lib/",
+    "tests/test262/",
+    "fuzz/corpus/",
+];
 
 /// Single files excluded by rule. `build-python/requirements.txt` is data that
 /// pins the one named exception (stylo's Python+Mako build, ADR 023/032); it is
@@ -391,6 +396,8 @@ mod tests {
             "tests/wpt/css/a.js",
             "tests/wpt/tools/run.py",
             "tests/html5lib/x/y.py",
+            "tests/test262/test/built-ins/Promise/a.js",
+            "tests/test262/harness/assert.js",
             "fuzz/corpus/frame/seed.sh",
             "fuzz/corpus/frame/noext",
         ] {
@@ -399,6 +406,7 @@ mod tests {
         }
         // Prefix means directory, not substring.
         assert!(!is_excluded("tests/wptx/a.js"));
+        assert!(!is_excluded("tests/test262x/a.js"));
         assert!(!is_excluded("ci/tests/wpt/a.js"));
         assert!(classify("tests/wptx/a.js", &no_shebang).is_some());
         // Only yml/yaml in workflows are exempt: a script hidden there is not.
