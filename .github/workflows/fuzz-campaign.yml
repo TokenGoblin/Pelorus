@@ -82,6 +82,10 @@ jobs:
           - { target: shaper, shard: 1 }
           # Phase 12: attacker-controlled CSP headers and <meta> content.
           - { target: csp_parse, shard: 1 }
+          # Phase 15: untrusted image bytes through every decoder (PNG, GIF,
+          # JPEG, BMP, ICO). The Phase 15 gate is 24h clean.
+          - { target: image_decode, shard: 1 }
+          - { target: image_decode, shard: 2 }
           # Phase 11: arbitrary IDL text through parse, resolve, lower and emit.
           - { target: webidl_parse, shard: 1 }
           - { target: http_response, shard: 1 }
