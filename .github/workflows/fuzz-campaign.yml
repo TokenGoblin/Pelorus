@@ -87,6 +87,10 @@ jobs:
           # Phase 20: attacker-controlled update manifest, signature file,
           # request audit and Ed25519 inputs.
           - { target: update_manifest, shard: 1 }
+          # Phase 15: untrusted image bytes through every decoder (PNG, GIF,
+          # JPEG, BMP, ICO). The Phase 15 gate is 24h clean.
+          - { target: image_decode, shard: 1 }
+          - { target: image_decode, shard: 2 }
           # Phase 19: untrusted filter-list text through px-block.
           - { target: filter_parse, shard: 1 }
           # Phase 11: arbitrary IDL text through parse, resolve, lower and emit.

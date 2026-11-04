@@ -1,0 +1,27 @@
+GIF fixtures: how they were made
+================================
+
+Generated once, locally, on 2026-11-04 with Python 3 and Pillow 12.3.0. The
+generator is a throwaway script and is NOT committed (the repository is 100%
+Rust, ADR 032).
+
+* still4_interlace0/1 (40x21, 4-colour palette), noise256_interlace0/1 (64x48
+  seeded random indices on a 256-colour palette: forces 12-bit codes, a full
+  LZW table and clear codes), gradient_interlaced (100x40), still2_bw (5x3,
+  min code size 2), still_transparent_index1 (9x9 with the transparency
+  index set; the palette entry for the transparent index is (0,0,0): our
+  decoder leaves transparent pixels as (0,0,0,0), Pillow keeps the palette
+  colour under alpha 0, so the fixture avoids comparing that unspecified RGB).
+  Pillow only interlaces images at least 16 pixels in both directions, hence
+  the sizes; tests assert the interlace flag really is set in the files.
+* anim_disposal0..3: five 24x18 RGBA frames (transparent background, a few
+  random opaque rectangles), saved with `disposal=n`, durations 40..200 ms,
+  `loop=0`; Pillow crops frames to their changed rectangle.
+* anim_loop3 (NETSCAPE loop value 3, so 4 plays), anim_noloop_ext (no NETSCAPE
+  extension, 1 play), anim_opaque_local_palettes (three opaque 16x16 frames
+  with different colours, so Pillow writes local colour tables).
+
+Expected RGBA for every frame is Pillow's `seek(i).convert("RGBA")`, frames
+concatenated, hashed with SHA-256. MANIFEST columns: name, width, height, frame
+count, hash, plays (0 = forever; no loop extension = 1; extension value N
+means N+1 plays), delays in ms.

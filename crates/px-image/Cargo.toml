@@ -1,0 +1,13 @@
+[package]
+name = "px-image"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No dependencies, by design (ADR 042): std only. Adding one needs an ADR.
+[dependencies]
+
+# build-spec section 4.3: this crate decodes image bytes written by anyone.
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+BMP and ICO fixtures: how they were made
+========================================
+
+Generated once, locally, on 2026-11-04 with Python 3 and Pillow 12.3.0. The
+generator is a throwaway script and is NOT committed (the repository is 100%
+Rust, ADR 032).
+
+Written by a small BMP/ICO writer in the script (13x7 seeded pseudo-random
+pixels): pal1/pal4/pal8 (palette, bottom-up), pal8_topdown (negative height),
+pal8_core (12-byte OS/2 header, 3-byte palette entries), rgb24, rgb24_topdown,
+rgb24_v4, rgb24_v5 (108 and 124 byte headers), rgba32_v4_masks (BI_BITFIELDS
+with an alpha mask), rgbx32_opaque (32-bit BI_RGB, alpha byte 0), rgb16_555
+(default masks), rgb16_565 (BI_BITFIELDS with three masks after a 40-byte
+header), rle8 and rle4 (run and absolute modes, every pixel covered),
+ico_bmp_best_of_two (a 8x8 32-bit and a 12x12 24-bit DIB frame with AND mask:
+the larger one must be chosen), ico_bmp32_alpha, ico_bmp8_mask (8-bit palette
+frame with a diagonal AND mask).
+
+Written by Pillow: pil_rgb, pil_gray8, pil_mono (BMP), ico_pil_png_frames (an
+ICO with PNG-encoded 16, 32 and 48 pixel frames from one 48x48 RGBA image).
+
+Expected RGBA is Pillow's `Image.open(...).convert("RGBA")`, hashed with
+SHA-256 (MANIFEST column 5).
+
+Deliberately NOT compared with Pillow: 32-bit BI_RGB with real alpha. Pillow
+reads it as opaque RGB; this decoder uses the alpha byte when any pixel has a
+non-zero one (the browser heuristic). tests/bmp.rs has a hand-derived test for
+that rule. RLE holes (pixels skipped by a delta) are transparent here, index 0
+in Pillow, so no fixture has holes; tests/bmp.rs covers them by hand.
