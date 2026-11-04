@@ -1430,6 +1430,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "px-image"
+version = "0.0.0"
+
+[[package]]
 name = "px-ipc"
 version = "0.0.0"
 dependencies = [

@@ -12,6 +12,7 @@ members = [
     "crates/px-css",
     "crates/px-dom",
     "crates/px-gpu",
+    "crates/px-image",
     "crates/px-ipc",
     "crates/px-layout",
     "crates/px-mcp",

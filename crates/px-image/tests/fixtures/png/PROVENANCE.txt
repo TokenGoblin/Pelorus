@@ -1,0 +1,32 @@
+PNG fixtures: how they were made
+================================
+
+Generated once, locally, on 2026-11-04 with Python 3 and Pillow 12.3.0 (an
+independent decoder). The generator is a throwaway script and is NOT committed
+(the repository is 100% Rust, ADR 032); this note records what it did.
+
+* Still images (rgb8, rgba8, gray1/2/4/8/16, graya8/16, rgb16, rgba16, pal1/2/4/8
+  with and without tRNS, gray8/rgb8/rgb16/gray16 colour-key tRNS, 13x9 pixels
+  of seeded pseudo-random samples; the `_i` variants are the same pixels
+  Adam7-interlaced; `rgb8_WxH_i` are 1x1, 3x1, 1x7, 17x5 interlaced): written
+  by a small PNG encoder in the script (zlib level 9; filter type cycles
+  None, Sub, Up, Average, Paeth by row; 16-bit and interlace, which Pillow
+  cannot write). Expected RGBA comes from the script's own model of the PNG
+  specification (sub-8-bit samples scaled by v*255/max, 16-bit reduced to the
+  high byte, colour keys compared on raw samples). For every file except
+  gray16, graya16, rgb16_trns, gray16_trns and the interlaced `_i` files the
+  script asserted that Pillow's `Image.open(...).convert("RGBA")` produced
+  byte-identical RGBA (Pillow does not do the 16-bit gray/alpha reduction the
+  same way, and does not apply 16-bit colour keys; the interlaced files share
+  pixels with their non-interlaced twins, which were checked).
+* `rgba8_chunks_splitidat`: gAMA, cHRM, sRGB, pHYs, tEXt, tIME and a private
+  ancillary chunk, and the IDAT split into three chunks.
+* `apng_*`: written by Pillow 12.3.0 (`save_all=True`, durations 50/100/150/200
+  ms, `disposal` and `blend` set to each APNG op, Pillow crops frames to their
+  changed rectangle). Expected RGBA is Pillow's own decode of each frame
+  (`seek(i).convert("RGBA")`), frames concatenated. Frames use alpha 0 or 255
+  only: Pillow's partial-alpha blend rounds differently from ours (see
+  tests/apng.rs for the hand-derived partial-alpha expectation instead).
+
+MANIFEST columns: name, width, height, frame count, SHA-256 of all frames'
+RGBA bytes concatenated, plays (0 = forever), frame delays in ms.

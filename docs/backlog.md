@@ -1194,3 +1194,18 @@ follows.
   refusal, fail-at-every-step).
 - **Why deferred:** it needs a symbol-listing step over built artifacts and an allowlist
   per crate; that is gate work, not store work.
+
+## Duplicated inflate and PNG decoder: px-paint and px-image
+
+- **Found in:** phase 15 (px-image, ADR 042)
+- **Belongs to:** unassigned (after px-image lands; before px-paint grows more PNG code)
+- **What:** `crates/px-image/src/inflate.rs` and `crates/px-image/src/png.rs` began as a
+  copy of the decoder half of `crates/px-paint/src/png.rs`, rewritten to satisfy the panic
+  lints and extended (all bit depths, Adam7, APNG). px-paint now has an older, narrower
+  decoder (8-bit, non-interlaced) beside the better one. px-paint also keeps the PNG
+  *encoder*, which px-image does not have.
+- **Why deferred:** px-paint depends on the style engine; making it depend on px-image is a
+  one-line manifest change but changes the golden-baseline tooling's decode path, which
+  deserves its own reviewed commit. px-image must never depend on px-paint.
+- **Do:** make px-paint call `px_image::png::decode` (keep its encoder), delete its inflate,
+  and re-run the baseline tests.
