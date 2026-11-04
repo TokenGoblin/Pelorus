@@ -200,19 +200,27 @@ impl Cache {
     /// Record a resolution in this partition.
     pub fn put(&mut self, key: &PartitionKey, name: &str, addresses: Vec<IpAddr>) {
         let partition = key.clone();
+        let name = name.to_ascii_lowercase();
+        let now = Instant::now();
+        // Stale entries must not hold the partition's budget: without this a
+        // full partition would refuse every new answer forever once its
+        // entries aged out.
+        self.entries
+            .retain(|(stored, _), (_, expiry)| stored != &partition || *expiry > now);
         let count = self
             .entries
             .keys()
             .filter(|(stored, _)| stored == &partition)
             .count();
-        if count >= MAX_PER_KEY {
+        // Refreshing a name that is already cached is not an addition.
+        let exists = self
+            .entries
+            .contains_key(&(partition.clone(), name.clone()));
+        if count >= MAX_PER_KEY && !exists {
             return;
         }
-        let expiry = Instant::now()
-            .checked_add(CACHE_TTL)
-            .unwrap_or_else(Instant::now);
-        self.entries
-            .insert((partition, name.to_ascii_lowercase()), (addresses, expiry));
+        let expiry = now.checked_add(CACHE_TTL).unwrap_or(now);
+        self.entries.insert((partition, name), (addresses, expiry));
     }
 
     /// Drop everything cached for one partition.
