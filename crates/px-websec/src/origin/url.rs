@@ -403,10 +403,7 @@ fn percent_decode_ascii(s: &str) -> Option<String> {
     while let Some(&c) = b.get(i) {
         if c == b'%'
             && let (Some(&h), Some(&l)) = (b.get(i + 1), b.get(i + 2))
-            && let (Some(h), Some(l)) = (
-                (h as char).to_digit(16),
-                (l as char).to_digit(16),
-            )
+            && let (Some(h), Some(l)) = ((h as char).to_digit(16), (l as char).to_digit(16))
         {
             out.push((h * 16 + l) as u8);
             i += 3;
@@ -462,8 +459,11 @@ fn ends_in_number(s: &str) -> bool {
         return true;
     }
     // Hex forms such as `0x7f`; an overflow still counts as "a number".
-    last.len() >= 2 && (last.starts_with("0x") || last.starts_with("0X"))
-        && last.get(2..).is_some_and(|r| r.bytes().all(|b| b.is_ascii_hexdigit()))
+    last.len() >= 2
+        && (last.starts_with("0x") || last.starts_with("0X"))
+        && last
+            .get(2..)
+            .is_some_and(|r| r.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 fn parse_ipv4(s: &str) -> Option<[u8; 4]> {
@@ -582,10 +582,7 @@ mod tests {
         assert_eq!(u.password(), "pw");
         assert_eq!(u.query(), Some("q=1"));
         assert_eq!(u.fragment(), Some("frag"));
-        assert_eq!(
-            u.serialize(true),
-            "https://User:pw@example.com/a/b?q=1"
-        );
+        assert_eq!(u.serialize(true), "https://User:pw@example.com/a/b?q=1");
     }
 
     #[test]
@@ -625,7 +622,10 @@ mod tests {
     #[test]
     fn ipv6_forms() {
         let h = |s: &str| Url::parse(s).and_then(|u| u.host().cloned());
-        assert_eq!(h("http://[::1]/"), Some(Host::Ipv6([0, 0, 0, 0, 0, 0, 0, 1])));
+        assert_eq!(
+            h("http://[::1]/"),
+            Some(Host::Ipv6([0, 0, 0, 0, 0, 0, 0, 1]))
+        );
         assert_eq!(
             h("http://[::ffff:127.0.0.1]/"),
             Some(Host::Ipv6([0, 0, 0, 0, 0, 0xffff, 0x7f00, 1]))

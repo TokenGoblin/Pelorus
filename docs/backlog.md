@@ -1156,3 +1156,28 @@ follows.
   `tab-size` (a tab is eight spaces) and font features are not applied.
 - **Why deferred:** each needs inline boxes (the box tree has none) or a style-engine change;
   neither fits a unit that replaces the text metric.
+
+## A script memory bomb is not contained until Phase 17
+
+- **Found in:** phase 10 unit 4 (resource limits), ADR 040 layer 3
+- **Belongs to:** Phase 17 (cgroup `memory.max` on Linux, a job object on Windows)
+- **What:** nothing caps a content process's heap. Measured on Boa 0.22.0, unoptimised:
+  `var s = 'x'; for (;;) s += s;` reached about 1.1 GiB resident in 1.5 s and keeps
+  doubling until the 10 s watchdog (or the allocator, or the kernel's OOM killer) ends it.
+  `'x'.repeat(2**30)` asks the allocator for 24 GiB in one call and aborts the process only
+  if that allocation fails; on a host with the memory it is a bomb. What IS refused:
+  `ArrayBuffer` / typed-array sizes over 256 MiB (the host's `max_buffer_size`, an ordinary
+  `RangeError`). The watchdog bounds time, not memory, so a faster machine reaches further
+  in the same ten seconds. The tests `script_limits_memory_*` record this and do not claim
+  containment.
+- **An address-space limit now is not possible:** `setrlimit(RLIMIT_AS)` is a libc call and
+  `std` has no safe wrapper; every crate but `px-sandbox` is `forbid(unsafe_code)`, and no
+  dependency may be added without an ADR. ADR 040 decision 5 left pulling it forward to the
+  user. If wanted, it belongs in `px-sandbox` (the one crate allowed to write the `unsafe`
+  block, with a `// SAFETY:` comment) applied before exec, not in `px-content`.
+- **Also found:** `docs/research/phase-10-boa.md` and ADR 040 say Boa's loop-limit error is
+  catchable by script. In 0.22.0 it is an `EngineError::RuntimeLimit`, which the VM treats as
+  uncatchable (`JsError::is_catchable`); `script_limits_engine_*` pins this. The host
+  terminates on it anyway and does not depend on that. The per-frame loop count remains the
+  real hole (a loop of calls to looping functions is not bounded by it): only the watchdog
+  ends that shape.

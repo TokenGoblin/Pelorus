@@ -16,8 +16,8 @@
 //! are in [`REMAINING`], and are reported by unit rather than omitted: a gate
 //! that silently drops what is not built yet passes for the wrong reason.
 //!
-//! This gate does not run the test262 runner, the watchdog tests or the stress
-//! fixtures of units 4 to 6; it names them so the phase's open work is visible
+//! This gate does not run the test262 runner or the stress
+//! fixtures of units 5 and 6; it names them so the phase's open work is visible
 //! in its own output.
 
 use super::suites::{self, Suite};
@@ -69,8 +69,9 @@ pub const SUITES: &[Suite] = &[
         "script_stress_",
         "crates/px-script/tests/stress.rs",
     ),
-    // Unit 4: resource limits, layer 1 (the engine) and the heartbeat the
-    // watchdog reads. The runaway and isolation items are below.
+    // Unit 4: resource limits: layer 1 (the engine), the heartbeat and the
+    // watchdog decision, then the runaway shapes and isolation through the real
+    // content binary, and the honest memory tests.
     (
         "engine-limits-are-terminal",
         "script_limits_engine_",
@@ -80,6 +81,26 @@ pub const SUITES: &[Suite] = &[
         "watchdog-heartbeat-signal",
         "script_limits_heartbeat_",
         "crates/px-script/src/watch.rs",
+    ),
+    (
+        "watchdog-decision-is-pure-and-tested",
+        "script_limits_watchdog_",
+        "crates/px-content/src/watchdog.rs",
+    ),
+    (
+        "runaway-scripts-end-terminated-or-dead-broker-alive",
+        "script_limits_runaway_",
+        "crates/px-content/tests/script_limits.rs",
+    ),
+    (
+        "two-tabs-one-runaway-the-other-answers",
+        "script_limits_isolation_",
+        "crates/px-content/tests/script_limits.rs",
+    ),
+    (
+        "memory-bomb-gap-documented-not-hidden",
+        "script_limits_memory_",
+        "crates/px-content/tests/script_limits.rs",
     ),
     // Unit 3: the coarse clock.
     (
@@ -97,18 +118,6 @@ pub const SUITES: &[Suite] = &[
 /// What is still to be built, and the unit that owns it: `(item, unit, filter,
 /// home file)`. The same three conditions apply the day the file appears.
 pub const REMAINING: &[(&str, &str, &str, &str)] = &[
-    (
-        "runaway-scripts-end-terminated-or-dead-broker-alive",
-        "unit 4",
-        "script_limits_runaway_",
-        "crates/px-content/tests/script_limits.rs",
-    ),
-    (
-        "two-tabs-one-runaway-the-other-answers",
-        "unit 4",
-        "script_limits_isolation_",
-        "crates/px-content/tests/script_limits.rs",
-    ),
     (
         "test262-subset-threshold-and-expected-failures",
         "unit 5",
@@ -280,9 +289,9 @@ mod tests {
     }
 
     #[test]
-    fn units_four_to_seven_are_named_not_omitted() {
+    fn units_five_to_seven_are_named_not_omitted() {
         let units: Vec<&str> = REMAINING.iter().map(|r| r.1).collect();
-        for u in ["unit 4", "unit 5", "unit 6"] {
+        for u in ["unit 5", "unit 6"] {
             assert!(units.contains(&u), "no remaining item owned by {u}");
         }
         assert!(REQUIRED_FILES.iter().any(|f| f.1 == "unit 7"));
