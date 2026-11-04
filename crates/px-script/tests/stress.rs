@@ -22,6 +22,7 @@ fn host_with(caps: Caps) -> Host {
     Host::with_options(HostOptions {
         caps,
         clock: Rc::new(ManualClock::at(0)),
+        ..HostOptions::new(1)
     })
     .expect("host")
 }

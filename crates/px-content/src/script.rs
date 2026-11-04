@@ -30,7 +30,7 @@ use px_ipc::script::{
     ErrorText, ResultText, ScriptRequest, ScriptResponse, ScriptResult, TerminateReason as Wire,
 };
 use px_ipc::{Channel, IpcError};
-use px_script::{Host, Outcome, Step, TerminateReason};
+use px_script::{Host, HostOptions, Outcome, Step, TerminateReason};
 
 /// Requests the reader thread may hold ahead of the engine. A full queue blocks
 /// the reader, which stops reading the pipe: backpressure, not growth.
@@ -126,8 +126,16 @@ impl<W: Write> Session<W> {
                 if self.host.is_some() {
                     return Err(IpcError::Malformed);
                 }
-                let _ = seed; // wired to the clock in unit 3
-                let host = Host::new().map_err(|e| IpcError::Io(std::io::Error::other(e)))?;
+                // The seed came down the channel from the broker; this process
+                // has no entropy source of its own and wants none. The wall
+                // epoch is read once, here: `Date.now()` is that plus coarse
+                // elapsed time, never a second look at the wall clock.
+                let options = HostOptions {
+                    wall_epoch_ms: wall_clock_ms(),
+                    ..HostOptions::new(seed)
+                };
+                let host = Host::with_options(options)
+                    .map_err(|e| IpcError::Io(std::io::Error::other(e)))?;
                 self.host = Some(host);
                 Ok(Flow::Go)
             }
@@ -150,9 +158,15 @@ impl<W: Write> Session<W> {
                 self.out.send(&ScriptResponse::Counters(counters(host)))?;
                 Ok(Flow::Go)
             }
-            // Served in unit 3; until then it is a protocol error.
             #[cfg(feature = "testing")]
-            Ok(ScriptRequest::ClockLog) => Err(IpcError::Malformed),
+            Ok(ScriptRequest::ClockLog) => {
+                let Some(host) = self.host.as_ref() else {
+                    return Err(IpcError::Malformed);
+                };
+                let nanos = px_ipc::gpu::Bounded::truncated(host.clock_log());
+                self.out.send(&ScriptResponse::ClockLog { nanos })?;
+                Ok(Flow::Go)
+            }
             Err(IpcError::PeerClosed) => Ok(Flow::Stop),
             Err(other) => Err(other),
         }
@@ -175,6 +189,14 @@ impl<W: Write> Session<W> {
 enum Flow {
     Go,
     Stop,
+}
+
+/// Unix milliseconds now, once, for `Date.now()`'s epoch. A clock set before
+/// 1970 reads as zero rather than failing.
+fn wall_clock_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// An outcome as wire data. Over-long text is cut, never refused: a script that

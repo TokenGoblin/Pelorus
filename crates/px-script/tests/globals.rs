@@ -9,7 +9,7 @@ use px_script::{Host, Outcome};
 
 #[cfg(test)]
 fn eval(source: &str) -> Outcome {
-    Host::new().expect("host").eval(source)
+    Host::new(1).expect("host").eval(source)
 }
 
 #[cfg(test)]
@@ -69,7 +69,7 @@ fn a_completion_value_and_a_thrown_value_are_data() {
 
 #[test]
 fn state_persists_across_runs_in_one_host() {
-    let mut host = Host::new().expect("host");
+    let mut host = Host::new(1).expect("host");
     assert_eq!(host.eval("var x = 20"), value("undefined"));
     assert_eq!(host.eval("x + 22"), value("42"));
 }

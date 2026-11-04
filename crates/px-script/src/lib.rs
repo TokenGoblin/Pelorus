@@ -21,6 +21,9 @@ pub mod clock;
 pub mod queue;
 mod runtime;
 
+#[cfg(feature = "testing")]
+pub use runtime::MAX_CLOCK_LOG;
+
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -62,18 +65,30 @@ pub enum Step {
 }
 
 /// How a host is built.
+///
+/// There is no `Default`: the seed comes from the broker, and a host built with
+/// a seed nobody chose would have jitter anyone could predict.
 pub struct HostOptions {
     /// The bounds.
     pub caps: Caps,
     /// Where time comes from.
     pub clock: Rc<dyn RawClock>,
+    /// Entropy for the clock's jitter and `Math.random`, from the broker.
+    pub seed: u64,
+    /// Unix milliseconds at the moment this host began, from the embedder (this
+    /// crate reads no wall clock). `Date.now()` is this plus coarse elapsed time.
+    pub wall_epoch_ms: i64,
 }
 
-impl Default for HostOptions {
-    fn default() -> Self {
+impl HostOptions {
+    /// The default bounds, the real monotonic clock, and this seed. The wall
+    /// epoch is zero until the embedder sets it.
+    pub fn new(seed: u64) -> Self {
         Self {
             caps: Caps::default(),
             clock: Rc::new(StdClock::new()),
+            seed,
+            wall_epoch_ms: 0,
         }
     }
 }
@@ -111,19 +126,24 @@ impl Drop for Host {
 }
 
 impl Host {
-    /// A host with the default bounds and the real clock.
-    pub fn new() -> Result<Self, HostError> {
-        Self::with_options(HostOptions::default())
+    /// A host with the default bounds, the real clock and this seed.
+    pub fn new(seed: u64) -> Result<Self, HostError> {
+        Self::with_options(HostOptions::new(seed))
     }
 
-    /// A host with these bounds and this clock.
+    /// A host with these bounds, this clock and this seed.
     pub fn with_options(options: HostOptions) -> Result<Self, HostError> {
-        let shared = Rc::new(Shared::new(options.caps, options.clock));
+        let shared = Rc::new(Shared::new(options.caps, options.clock, options.seed));
         let id = runtime::register(Rc::clone(&shared));
         let built = Context::builder()
             // `Atomics.wait` would block the thread; no script may.
             .can_block(false)
             .job_executor(Rc::clone(&shared))
+            // Every time the engine reads is the coarse clock.
+            .clock(Rc::new(runtime::BoaClock {
+                coarse: Rc::clone(&shared.coarse),
+                wall_epoch_ms: options.wall_epoch_ms,
+            }))
             // The default loader reads modules from the working directory.
             .module_loader(Rc::new(IdleModuleLoader))
             .build();
@@ -139,16 +159,16 @@ impl Host {
             id,
             context,
         };
-        host.install_globals();
+        // Fail closed: a host whose `Math.random` is still the unseeded engine
+        // one, or whose `SharedArrayBuffer` is still defined, does not exist.
+        // (`host` is dropped on the way out, which unregisters it.)
+        host.install_globals()?;
         Ok(host)
     }
 
-    fn install_globals(&mut self) {
-        self.remove_deliberately_absent_globals();
-        // A definition can only fail on a frozen global, which this is not; if
-        // it did, the ordering suites fail loudly because the functions are
-        // missing, which is the right place to find out.
-        let _ = runtime::install(&mut self.context, self.id);
+    fn install_globals(&mut self) -> Result<(), HostError> {
+        self.remove_deliberately_absent_globals()?;
+        runtime::install(&mut self.context, self.id).map_err(|e| HostError(e.to_string()))
     }
 
     /// Boa 0.22 defines `SharedArrayBuffer` and has no feature to turn it off,
@@ -157,11 +177,13 @@ impl Host {
     /// page can be said to be cross-origin isolated). `Intl`, `Temporal` and
     /// `WebAssembly` are absent because their features are off, not by this
     /// function; `tests/globals.rs` asserts all four.
-    fn remove_deliberately_absent_globals(&mut self) {
+    fn remove_deliberately_absent_globals(&mut self) -> Result<(), HostError> {
         let global = self.context.global_object();
-        // The binding is configurable, so this cannot fail; if it somehow did,
-        // the globals test is what notices, and it must not be hidden here.
-        let _ = global.delete_property_or_throw(js_string!("SharedArrayBuffer"), &mut self.context);
+        match global.delete_property_or_throw(js_string!("SharedArrayBuffer"), &mut self.context) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(HostError("SharedArrayBuffer could not be removed".into())),
+            Err(error) => Err(HostError(error.to_string())),
+        }
     }
 
     /// Why script was stopped, if it was.
@@ -230,7 +252,7 @@ impl Host {
                         .shared
                         .now_ns()
                         .saturating_add(u64::try_from(wait.as_nanos()).unwrap_or(u64::MAX));
-                    self.shared.clock.wait_until_ns(target);
+                    self.shared.wait_until_ns(target);
                 }
                 Step::Idle => return LoopEnd::Idle { ran },
                 Step::Terminated(reason) => return LoopEnd::Terminated { ran, reason },
@@ -259,6 +281,14 @@ impl Host {
     #[cfg(feature = "testing")]
     pub fn high_water(&self) -> HighWater {
         self.shared.core.borrow().high_water()
+    }
+
+    /// Testing only: the nanosecond values `performance.now` returned to script,
+    /// taken at the native boundary before conversion to a float, oldest first,
+    /// at most [`MAX_CLOCK_LOG`] of them.
+    #[cfg(feature = "testing")]
+    pub fn clock_log(&self) -> Vec<u64> {
+        self.shared.clock_log()
     }
 
     /// The bounds this host enforces.

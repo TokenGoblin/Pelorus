@@ -21,8 +21,23 @@ use boa_engine::job::{GenericJob, Job, JobExecutor, PromiseJob};
 use boa_engine::native_function::NativeFunction;
 use boa_engine::{Context, JsArgs, JsNativeError, JsObject, JsResult, JsValue, js_string};
 
-use crate::clock::RawClock;
+use boa_engine::context::time::{Clock, JsInstant};
+use boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
+use boa_engine::property::Attribute;
+
+use crate::clock::{CoarseClock, RawClock, mix};
 use crate::queue::{Caps, LoopCore, MAX_DELAY_MS, Task, TimerId};
+
+/// The coarse clock as the host holds it: over a raw clock chosen at build.
+pub(crate) type HostCoarse = CoarseClock<Rc<dyn RawClock>>;
+
+/// Domain separation: `Math.random`'s stream is not the clock's jitter stream
+/// even though both come from the broker's seed.
+const RANDOM_DOMAIN: u64 = 0x5250_4E44_4F4D_5F31;
+
+/// Most clock values the testing log keeps (the first ones).
+#[cfg(feature = "testing")]
+pub const MAX_CLOCK_LOG: usize = 4096;
 
 /// Most uncaught-error messages kept for inspection. The count is exact; the
 /// text of later ones is dropped.
@@ -46,26 +61,54 @@ pub(crate) struct TimerCall {
 /// State shared by the host, the job executor and the host functions.
 pub(crate) struct Shared {
     pub core: RefCell<LoopCore<Microtask, TimerCall>>,
-    pub clock: Rc<dyn RawClock>,
+    /// Every time a script can read, and every timer due time, comes from here.
+    pub coarse: Rc<HostCoarse>,
+    /// `Math.random`'s state, seeded from the broker's seed.
+    rng: Cell<u64>,
     uncaught: RefCell<Vec<String>>,
     uncaught_count: Cell<u64>,
     /// Jobs Boa queued that this host does not run (async and timeout jobs).
     dropped_jobs: Cell<u64>,
+    /// Testing only: what `performance.now` returned to script, in nanoseconds.
+    #[cfg(feature = "testing")]
+    clock_log: RefCell<Vec<u64>>,
 }
 
 impl Shared {
-    pub fn new(caps: Caps, clock: Rc<dyn RawClock>) -> Self {
+    pub fn new(caps: Caps, raw: Rc<dyn RawClock>, seed: u64) -> Self {
         Self {
             core: RefCell::new(LoopCore::new(caps)),
-            clock,
+            coarse: Rc::new(CoarseClock::new(raw, seed)),
+            rng: Cell::new(mix(seed ^ RANDOM_DOMAIN)),
             uncaught: RefCell::new(Vec::new()),
             uncaught_count: Cell::new(0),
             dropped_jobs: Cell::new(0),
+            #[cfg(feature = "testing")]
+            clock_log: RefCell::new(Vec::new()),
         }
     }
 
+    /// The coarse time, in nanoseconds.
     pub fn now_ns(&self) -> u64 {
-        self.clock.now_ns()
+        self.coarse.now_ns()
+    }
+
+    /// Wait until the coarse time reaches `target_ns`.
+    pub fn wait_until_ns(&self, target_ns: u64) {
+        self.coarse.wait_until_ns(target_ns);
+    }
+
+    /// The next `Math.random` value in `[0, 1)`: 53 bits of a splitmix64 stream.
+    fn next_random(&self) -> f64 {
+        let state = self.rng.get().wrapping_add(0x9E37_79B9_7F4A_7C15);
+        self.rng.set(state);
+        (mix(state) >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Testing only: the values `performance.now` returned, oldest first.
+    #[cfg(feature = "testing")]
+    pub fn clock_log(&self) -> Vec<u64> {
+        self.clock_log.borrow().clone()
     }
 
     fn record_uncaught(&self, message: String) {
@@ -209,7 +252,85 @@ pub(crate) fn install(context: &mut Context, host: u64) -> JsResult<()> {
         1,
         NativeFunction::from_copy_closure(move |_this, args, _ctx| queue_microtask(host, args)),
     )?;
+    install_performance(context, host)?;
+    install_random(context, host)
+}
+
+/// `performance.now()`: milliseconds on the coarse clock since the host began.
+fn install_performance(context: &mut Context, host: u64) -> JsResult<()> {
+    let now = NativeFunction::from_copy_closure(move |_this, _args, _ctx| performance_now(host));
+    let performance = ObjectInitializer::new(context)
+        .function(now, js_string!("now"), 0)
+        .build();
+    context.register_global_property(
+        js_string!("performance"),
+        performance,
+        Attribute::WRITABLE | Attribute::CONFIGURABLE,
+    )
+}
+
+fn performance_now(host: u64) -> JsResult<JsValue> {
+    let Some(shared) = lookup(host) else {
+        return Ok(JsValue::from(0.0));
+    };
+    let nanos = shared.now_ns();
+    #[cfg(feature = "testing")]
+    {
+        let mut log = shared.clock_log.borrow_mut();
+        if log.len() < MAX_CLOCK_LOG {
+            log.push(nanos);
+        }
+    }
+    // Converted to a float only here, after the native value has been logged:
+    // 0.1 ms is not exact in binary, so a test asserts on the nanoseconds.
+    Ok(JsValue::from(nanos as f64 / 1_000_000.0))
+}
+
+/// Replace `Math.random`. Boa's calls `rand` directly and cannot be seeded; ours
+/// draws from the broker's seed, which also makes runs reproducible.
+fn install_random(context: &mut Context, host: u64) -> JsResult<()> {
+    let random = FunctionObjectBuilder::new(
+        context.realm(),
+        NativeFunction::from_copy_closure(move |_this, _args, _ctx| {
+            Ok(JsValue::from(
+                lookup(host).map_or(0.0, |shared| shared.next_random()),
+            ))
+        }),
+    )
+    .name(js_string!("random"))
+    .length(0)
+    .build();
+    let math = context.global_object().get(js_string!("Math"), context)?;
+    let Some(math) = math.as_object() else {
+        return Err(JsNativeError::typ()
+            .with_message("Math is not an object")
+            .into());
+    };
+    math.set(js_string!("random"), random, true, context)?;
     Ok(())
+}
+
+/// Boa's `Clock`, over the coarse clock, so that the engine's own time reads
+/// (`Date.now`, `Atomics` timeouts) are coarse too.
+///
+/// `Date.now()` is millisecond resolution already; it is the host's wall-clock
+/// epoch at start plus the coarse time elapsed, floored to milliseconds, so it
+/// is never finer than the coarse clock and never goes backward.
+pub(crate) struct BoaClock {
+    pub coarse: Rc<HostCoarse>,
+    pub wall_epoch_ms: i64,
+}
+
+impl Clock for BoaClock {
+    fn now(&self) -> JsInstant {
+        let nanos = self.coarse.now_ns();
+        JsInstant::new(nanos / 1_000_000_000, (nanos % 1_000_000_000) as u32)
+    }
+
+    fn system_time_millis(&self) -> i64 {
+        let elapsed_ms = i64::try_from(self.coarse.now_ns() / 1_000_000).unwrap_or(i64::MAX);
+        self.wall_epoch_ms.saturating_add(elapsed_ms)
+    }
 }
 
 fn not_callable(name: &str) -> boa_engine::JsError {

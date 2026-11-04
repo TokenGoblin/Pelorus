@@ -23,6 +23,7 @@ fn host() -> (Host, Rc<ManualClock>) {
     let host = Host::with_options(HostOptions {
         caps: Caps::default(),
         clock: clock.clone(),
+        ..HostOptions::new(1)
     })
     .expect("host");
     (host, clock)
@@ -180,9 +181,11 @@ fn script_order_a_timer_waits_exactly_its_delay_on_the_clock() {
     host.eval("setTimeout(() => {}, 10); setInterval(() => {}, 25);");
     // Nothing is due at t = 0.
     assert_eq!(host.step(), Step::Waiting(Duration::from_millis(10)));
-    clock.advance(9_999_999);
-    assert_eq!(host.step(), Step::Waiting(Duration::from_nanos(1)));
-    clock.advance(1);
+    // The host sees time through the coarse clock, which is exact on its 100 us
+    // grid: a test that moves the fake in whole quanta gets exact waits.
+    clock.advance(9_900_000);
+    assert_eq!(host.step(), Step::Waiting(Duration::from_micros(100)));
+    clock.advance(100_000);
     assert_eq!(host.step(), Step::Ran);
     assert_eq!(host.step(), Step::Waiting(Duration::from_millis(15)));
 }
