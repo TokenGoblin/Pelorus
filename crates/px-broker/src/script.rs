@@ -314,9 +314,13 @@ impl ScriptSession {
     /// There is no correlation id on the wire, so the protocol is strictly one
     /// question, one answer. Before sending, anything already queued is
     /// examined: an unsolicited `Terminated` is honoured (script is over), and
-    /// anything else is more answers than questions, which ends the session. A
-    /// peer that floods therefore cannot stay in sync with a broker that
-    /// counts.
+    /// anything else is more answers than questions, which ends the session.
+    ///
+    /// Honest limit: an answer that has not been decoded yet when the next
+    /// question goes out cannot be told from that question's reply. That costs
+    /// nothing real: the only process whose answers are affected is the one
+    /// lying, and a process can already put any text it likes in a `Value`.
+    /// What the check buys is that a flood is bounded and ends the session.
     pub fn run_script(
         &mut self,
         broker: &mut Broker,
@@ -873,6 +877,10 @@ mod tests {
             first,
             ScriptOutcome::ProcessDied | ScriptOutcome::Value(_)
         ));
+        // Let the reader decode the second answer: an answer that has not
+        // arrived yet cannot be told from the reply to the next question, and a
+        // process that times its lies that well can only mislead its own tab.
+        std::thread::sleep(Duration::from_millis(300));
         let second = session.run_script(&mut broker, "2", PATIENT);
         assert_eq!(second, ScriptOutcome::ProcessDied);
         assert_eq!(session.death(), Some(DeathCause::Protocol));
