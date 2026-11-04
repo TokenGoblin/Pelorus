@@ -12,6 +12,9 @@
 //! on, so a design where the broker asks and the content process answers has
 //! no place to apply it.
 //!
+//! After that exchange it is the script host (Phase 10, ADR 040): the only
+//! process in the product that links the engine.
+//!
 //! It holds no handle it was not passed. Its stdin and stdout were handed to
 //! it by the broker at spawn and are the entirety of its authority; it opens
 //! no file, makes no connection, and never states who it is (invariant 9).
@@ -20,6 +23,8 @@ use std::io::{BufReader, BufWriter, stdin, stdout};
 use std::process::ExitCode;
 
 use px_ipc::{Channel, FrameId, IpcError, Request, Response};
+
+mod script;
 
 fn main() -> ExitCode {
     let channel = Channel::new(BufReader::new(stdin()), BufWriter::new(stdout()));
@@ -36,7 +41,7 @@ fn main() -> ExitCode {
 /// Exercise the boundary, then wait for the broker to go away.
 fn run<R, W>(mut channel: Channel<R, W>) -> Result<(), IpcError>
 where
-    R: std::io::Read,
+    R: std::io::Read + Send + 'static,
     W: std::io::Write,
 {
     channel.send(&Request::Ping)?;
@@ -55,16 +60,12 @@ where
     })?;
     expect(&channel.recv::<Response>()?, &Response::Denied)?;
 
-    // Then go quiet and stay alive until the broker drops the pipe. A content
-    // process that exits immediately cannot be killed by a test, and a process
-    // that goes quiet is exactly the shape the broker's deadline exists for.
-    loop {
-        match channel.recv::<Response>() {
-            Ok(_) => {}
-            Err(IpcError::PeerClosed) => return Ok(()),
-            Err(other) => return Err(other),
-        }
-    }
+    // Then serve script until the broker drops the pipe. A content process that
+    // exits immediately cannot be killed by a test, and a process that goes
+    // quiet is exactly the shape the broker's deadline exists for: before the
+    // broker sends its seed, this waits silently.
+    let (reader, writer) = channel.into_parts();
+    script::serve(reader, writer)
 }
 
 fn expect(actual: &Response, wanted: &Response) -> Result<(), IpcError> {

@@ -95,6 +95,10 @@ pub struct Fragment {
     /// This fragment's children, as a range into the tree's flat storage.
     first_child: u32,
     child_count: u32,
+    /// This fragment's text runs, as a range into the tree's text-run arena
+    /// (see [`FragmentTree::text_runs`]). Only line fragments have any.
+    first_text_run: u32,
+    text_run_count: u32,
 }
 
 impl Fragment {
@@ -109,6 +113,8 @@ impl Fragment {
             node: None,
             first_child: 0,
             child_count: 0,
+            first_text_run: 0,
+            text_run_count: 0,
         }
     }
 
@@ -116,6 +122,76 @@ impl Fragment {
     #[must_use]
     pub fn child_count(self) -> usize {
         self.child_count as usize
+    }
+}
+
+/// One shaped glyph, placed. Plain integers, no font reference: the run that
+/// owns it names the font.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GlyphPos {
+    /// The glyph index in the run's font.
+    pub glyph_id: u32,
+    /// The pen position of the glyph origin from the **start of its run**, to
+    /// the right, including the shaper's x offset (mark attachment).
+    pub x: Au,
+    /// The vertical offset of the glyph origin from the baseline, **downward**
+    /// positive (the shaper's y offset negated).
+    pub y: Au,
+    /// The horizontal advance.
+    pub advance: Au,
+}
+
+/// A run of glyphs drawn in one font, one direction, one size, on one line.
+///
+/// Everything unit 4's display-list builder needs except the text colour, which
+/// is `node`'s computed `color` (the element whose style the run was measured
+/// with). Glyphs live in the tree's glyph arena and are reached with
+/// [`FragmentTree::glyphs`]; the run keeps only an index range, so it stays
+/// `Copy` like [`Fragment`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextRun {
+    /// The font in the process-wide registry `crate::text` resolves from.
+    pub font: px_text::FontId,
+    /// The font size the glyph positions were computed for.
+    pub font_size: Au,
+    /// Drawn right to left (an odd bidi level). Glyphs are already in visual
+    /// order, left to right, whichever way this is set.
+    pub rtl: bool,
+    /// The element whose computed style gives the text colour.
+    pub node: Option<px_dom::NodeId>,
+    /// The run's start, from the line fragment's inline start edge.
+    pub inline_offset: Au,
+    /// The baseline, from the line fragment's block start edge.
+    pub baseline: Au,
+    /// The run's total advance.
+    pub width: Au,
+    glyph_start: u32,
+    glyph_len: u32,
+}
+
+impl TextRun {
+    /// A run with no glyphs yet; [`FragmentTree::add_text_run`] attaches them.
+    #[must_use]
+    pub fn new(
+        font: px_text::FontId,
+        font_size: Au,
+        rtl: bool,
+        node: Option<px_dom::NodeId>,
+        inline_offset: Au,
+        baseline: Au,
+        width: Au,
+    ) -> Self {
+        Self {
+            font,
+            font_size,
+            rtl,
+            node,
+            inline_offset,
+            baseline,
+            width,
+            glyph_start: 0,
+            glyph_len: 0,
+        }
     }
 }
 
@@ -131,6 +207,14 @@ pub struct FragmentTree {
     /// because a fragment is `Copy` and fixed-size — which is what lets the whole
     /// tree be a `Vec` with no indirection and no recursive drop.
     children: Vec<FragmentId>,
+    /// The side arena of text runs, indexed by each line fragment's
+    /// `first_text_run..+text_run_count`.
+    text_runs: Vec<TextRun>,
+    /// The side arena of glyphs, indexed by each run's `glyph_start..+glyph_len`.
+    ///
+    /// Shaped text lives here and not in [`Fragment`] for the same reason the
+    /// children do: a fragment that owned a `Vec` could not be `Copy`.
+    glyphs: Vec<GlyphPos>,
     root: Option<FragmentId>,
 }
 
@@ -217,6 +301,49 @@ impl FragmentTree {
             fragment.child_count =
                 u32::try_from(kids.len()).expect("a fragment cannot have 4G children");
         }
+    }
+
+    /// Append a text run to `line`, with its glyphs.
+    ///
+    /// A line's runs must be added together, in visual order, before any other
+    /// line's: the fragment keeps one contiguous range. `layout_lines` is the
+    /// only caller and does exactly that.
+    pub fn add_text_run(&mut self, line: FragmentId, mut run: TextRun, glyphs: &[GlyphPos]) {
+        run.glyph_start = u32::try_from(self.glyphs.len()).unwrap_or(u32::MAX);
+        run.glyph_len = u32::try_from(glyphs.len()).unwrap_or(u32::MAX);
+        self.glyphs.extend_from_slice(glyphs);
+        let at = u32::try_from(self.text_runs.len()).unwrap_or(u32::MAX);
+        self.text_runs.push(run);
+        if let Some(f) = self.fragments.get_mut(line.index()) {
+            if f.text_run_count == 0 {
+                f.first_text_run = at;
+            }
+            f.text_run_count += 1;
+        }
+    }
+
+    /// A fragment's text runs, left to right. Empty for fragments that are not
+    /// lines of text.
+    ///
+    /// **Unit 4 reads this.** For each line fragment the display-list builder
+    /// takes the line's absolute origin, adds each run's `inline_offset` and
+    /// `baseline`, and draws [`FragmentTree::glyphs`]`(run)` with the run's font,
+    /// size and the `color` of `run.node`'s computed style. Glyph `x` is from the
+    /// run's start; `y` is from the baseline, downward.
+    #[must_use]
+    pub fn text_runs(&self, id: FragmentId) -> &[TextRun] {
+        let Some(f) = self.get(id) else { return &[] };
+        let start = f.first_text_run as usize;
+        let end = start + f.text_run_count as usize;
+        self.text_runs.get(start..end).unwrap_or(&[])
+    }
+
+    /// The glyphs of a run, left to right.
+    #[must_use]
+    pub fn glyphs(&self, run: &TextRun) -> &[GlyphPos] {
+        let start = run.glyph_start as usize;
+        let end = start + run.glyph_len as usize;
+        self.glyphs.get(start..end).unwrap_or(&[])
     }
 
     /// Every fragment in layout order, as `(depth, id)`.

@@ -38,7 +38,7 @@ const STYLO_CRATE: &str = "px-css";
 /// Crates carrying `[lints] workspace = true`. px-ipc was added to that set
 /// and omitted here once, which left a waiver in the crate that decodes
 /// hostile bytes passing CI silently -- the exact bypass this scan exists for.
-const PANIC_LINT_CRATES: [&str; 4] = ["px-content", "px-net", "px-mcp", "px-ipc"];
+const PANIC_LINT_CRATES: [&str; 5] = ["px-content", "px-net", "px-mcp", "px-ipc", "px-websec"];
 
 const PANIC_LINTS: [&str; 4] = ["unwrap_used", "expect_used", "indexing_slicing", "panic"];
 

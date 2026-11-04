@@ -17,6 +17,6 @@ publish.workspace = true
 # public suffix list, the cookie jar's SameSite handling) this crate takes
 # the answer through a small trait or a plain bool instead of re-deriving it.
 
-# build-spec §4.3: this crate decides what hostile input may do.
+# build-spec §4.3 / §10: this crate parses attacker-controlled headers.
 [lints]
 workspace = true

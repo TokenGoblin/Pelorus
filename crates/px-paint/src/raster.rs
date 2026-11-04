@@ -41,8 +41,24 @@
 //! **Clips.** `PushClip` intersects the snapped clip rectangle with the current
 //! clip; `PopClip` restores the previous one. The initial clip is the canvas.
 //!
+//! **Glyph runs.** An [`Item::GlyphRun`] draws each glyph of its arena window.
+//! The glyph origin snaps with the same `snap` as box edges, independently per
+//! axis, so every instance of a glyph at one size has the same mask and a mask
+//! is cached by `(font, size64, glyph)` for the duration of one call. `size64`
+//! is the em size in 1/64 px, `round_half_up(au * 64 / 60)`; a size of zero or
+//! less draws nothing. Outlines come from the caller's [`GlyphSource`]
+//! (`px-paint` knows no font format); a font the source does not know, a glyph
+//! it has no outline for, or an outline the glyph rasterizer refuses (too
+//! large) draws nothing and is not an error. Coverage composites in the item's
+//! colour through the current clip. The cache is cleared when its masks exceed
+//! [`MASK_CACHE_BYTES`], so memory is bounded however many distinct glyphs a
+//! list names.
+//!
 //! # Bounds (fail closed)
 //!
+//! A glyph arena over [`crate::display_list::MAX_GLYPHS`], a run over
+//! [`crate::display_list::MAX_GLYPHS_PER_RUN`], or a run whose window is
+//! outside the arena is [`RasterError::BadList`], before anything is drawn.
 //! Viewport width and height are each in `1..=`[`MAX_DIMENSION`] and the pixel count
 //! is at most [`MAX_PIXELS`] (2^25, the PNG codec's limit, so every canvas is
 //! encodable); beyond that [`rasterize`] returns [`RasterError::TooLarge`] *before*
@@ -50,9 +66,40 @@
 //! clips are unbalanced is rejected with [`RasterError::UnbalancedClips`]
 //! before anything is drawn.
 
-use crate::display_list::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect};
+use crate::display_list::{
+    BorderSide, BorderStyle, Color, DisplayList, FontId, Item, ListError, Rect,
+};
+use crate::glyph::{self, Mask, PathCmd, Scale};
 use crate::png;
+use std::collections::BTreeMap;
 use std::fmt;
+
+/// Most bytes of cached glyph masks held during one rasterize call.
+pub const MASK_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Where glyph outlines come from. Implemented by whoever owns the fonts
+/// (`px-paint` does not depend on any font crate).
+pub trait GlyphSource {
+    /// The font's design grid, or `None` for a font this source does not have.
+    fn units_per_em(&self, font: FontId) -> Option<u32>;
+    /// The outline of `glyph` in font units, y up, or `None` if the font or the
+    /// glyph is unknown or the glyph cannot be outlined. An empty outline (a
+    /// space) is `Some(vec![])`.
+    fn outline(&self, font: FontId, glyph: u32) -> Option<Vec<PathCmd>>;
+}
+
+/// A source with no fonts: every glyph run draws nothing.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoFonts;
+
+impl GlyphSource for NoFonts {
+    fn units_per_em(&self, _font: FontId) -> Option<u32> {
+        None
+    }
+    fn outline(&self, _font: FontId, _glyph: u32) -> Option<Vec<PathCmd>> {
+        None
+    }
+}
 
 /// Largest canvas width or height.
 pub const MAX_DIMENSION: u32 = 16384;
@@ -72,16 +119,19 @@ pub enum RasterError {
     UnbalancedClips,
     /// Clip nesting beyond [`MAX_CLIP_DEPTH`].
     ClipTooDeep,
+    /// The glyph arena or a glyph run is out of bounds.
+    BadList(ListError),
 }
 
 impl fmt::Display for RasterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            RasterError::EmptyViewport => "empty viewport",
-            RasterError::TooLarge => "viewport exceeds raster limits",
-            RasterError::UnbalancedClips => "unbalanced clip stack",
-            RasterError::ClipTooDeep => "clip nesting too deep",
-        })
+        match self {
+            RasterError::EmptyViewport => f.write_str("empty viewport"),
+            RasterError::TooLarge => f.write_str("viewport exceeds raster limits"),
+            RasterError::UnbalancedClips => f.write_str("unbalanced clip stack"),
+            RasterError::ClipTooDeep => f.write_str("clip nesting too deep"),
+            RasterError::BadList(e) => write!(f, "malformed display list: {e}"),
+        }
     }
 }
 
@@ -369,10 +419,66 @@ pub fn rasterize(
     viewport_width_px: u32,
     viewport_height_px: u32,
 ) -> Result<Canvas, RasterError> {
+    rasterize_with(list, viewport_width_px, viewport_height_px, &NoFonts)
+}
+
+/// Em size in 1/64 px from an em size in Au (1/60 px), half up.
+fn size64_of(size: i32) -> Option<u32> {
+    let v = (i64::from(size) * 64 + 30).div_euclid(60);
+    u32::try_from(v).ok().filter(|&v| v > 0)
+}
+
+#[derive(Default)]
+struct MaskCache {
+    masks: BTreeMap<(u32, u32, u32), Option<Mask>>,
+    bytes: usize,
+}
+
+impl MaskCache {
+    fn get(
+        &mut self,
+        source: &dyn GlyphSource,
+        font: FontId,
+        size64: u32,
+        glyph_id: u32,
+    ) -> Option<&Mask> {
+        let key = (font.0, size64, glyph_id);
+        if !self.masks.contains_key(&key) {
+            let mask = source
+                .units_per_em(font)
+                .zip(source.outline(font, glyph_id))
+                .and_then(|(units_per_em, outline)| {
+                    let scale = Scale {
+                        size64,
+                        units_per_em,
+                    };
+                    glyph::rasterize_glyph(&outline, scale, (0, 0)).ok()
+                });
+            let cost = mask.as_ref().map_or(0, |m| m.data.len()) + 64;
+            if self.bytes.saturating_add(cost) > MASK_CACHE_BYTES {
+                self.masks.clear();
+                self.bytes = 0;
+            }
+            self.bytes = self.bytes.saturating_add(cost);
+            self.masks.insert(key, mask);
+        }
+        self.masks.get(&key).and_then(Option::as_ref)
+    }
+}
+
+/// [`rasterize`] with glyph outlines from `source`.
+pub fn rasterize_with(
+    list: &DisplayList,
+    viewport_width_px: u32,
+    viewport_height_px: u32,
+    source: &dyn GlyphSource,
+) -> Result<Canvas, RasterError> {
     let mut cv = Canvas::new(viewport_width_px, viewport_height_px)?;
     if !list.clips_balanced() {
         return Err(RasterError::UnbalancedClips);
     }
+    list.validate().map_err(RasterError::BadList)?;
+    let mut cache = MaskCache::default();
     let full = PxRect {
         x0: 0,
         y0: 0,
@@ -388,6 +494,34 @@ pub fn rasterize(
                 cv.fill(r, *color);
             }
             Item::Border { rect, sides } => draw_border(&mut cv, clip, rect, sides),
+            Item::GlyphRun {
+                font,
+                size,
+                color,
+                start,
+                len,
+            } => {
+                let (Some(size64), Some(glyphs)) =
+                    (size64_of(size.0), list.run_glyphs(*start, *len))
+                else {
+                    continue;
+                };
+                if clip.is_empty() {
+                    continue;
+                }
+                let clip_t = (clip.x0, clip.y0, clip.x1, clip.y1);
+                for g in glyphs {
+                    let (Ok(ox), Ok(oy)) = (
+                        i32::try_from(snap(g.x.0 as i64)),
+                        i32::try_from(snap(g.y.0 as i64)),
+                    ) else {
+                        continue;
+                    };
+                    if let Some(mask) = cache.get(source, *font, size64, g.glyph_id) {
+                        glyph::composite_mask_clipped(&mut cv, mask, ox, oy, *color, clip_t);
+                    }
+                }
+            }
             Item::PushClip { rect } => {
                 if stack.len() >= MAX_CLIP_DEPTH {
                     return Err(RasterError::ClipTooDeep);
@@ -441,6 +575,7 @@ mod tests {
     fn list(items: &[Item]) -> DisplayList {
         DisplayList {
             items: items.to_vec(),
+            ..DisplayList::default()
         }
     }
 
