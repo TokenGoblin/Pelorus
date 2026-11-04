@@ -28,6 +28,22 @@ mod script;
 mod watchdog;
 
 fn main() -> ExitCode {
+    // Stage two of the sandbox profile (ADR 043, reusing ADR 035): before the
+    // channel is read, before any thread exists, the process takes away its own
+    // ability to open, create, connect, execute or enumerate. Threads made
+    // later inherit it. The broker does not trust this call having happened: it
+    // asks the kernel (`SandboxedChild::verify_stage_two`). If it cannot be
+    // applied the process exits rather than serve, and does so before it has
+    // read a byte a page could have influenced.
+    //
+    // Linux only: the Windows content process keeps its creation-time profile
+    // and has no stage two yet (`enter_content_profile` refuses there).
+    #[cfg(target_os = "linux")]
+    if let Err(error) = px_sandbox::enter_content_profile() {
+        eprintln!("px-content: {error}");
+        return ExitCode::FAILURE;
+    }
+
     let channel = Channel::new(BufReader::new(stdin()), BufWriter::new(stdout()));
     match run(channel) {
         // The broker closed the pipe. Orderly shutdown, not a failure.

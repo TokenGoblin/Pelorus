@@ -610,6 +610,15 @@ impl SandboxedChild {
     /// process is never used until its profile exists: the session renders in
     /// software instead.
     pub fn verify_gpu_profile(&self) -> Result<Vec<Rung>, PolicyError> {
+        self.verify_stage_two()
+    }
+
+    /// Ask the kernel whether this child has entered stage two (ADR 035, ADR
+    /// 043): the creation-time filter plus the one the process installed on
+    /// itself. The content profile and the GPU profile share it, so this is
+    /// the same check as [`verify_gpu_profile`](Self::verify_gpu_profile) under
+    /// the name that does not say which process.
+    pub fn verify_stage_two(&self) -> Result<Vec<Rung>, PolicyError> {
         #[cfg(target_os = "linux")]
         {
             gpu_linux::verify_pid(self.id())
@@ -680,6 +689,23 @@ pub fn enter_gpu_profile(read_only: &[std::path::PathBuf]) -> Result<GpuProfile,
             detail: "the GPU profile has no implementation on this platform yet",
         })
     }
+}
+
+/// Stage two of the content profile, applied by the content process to itself.
+///
+/// The same second stage as [`enter_gpu_profile`] (ADR 043 reuses ADR 035's
+/// mechanism rather than inventing a second one), with nothing granted: a
+/// content process reads no file after it starts. Call it first thing in
+/// `main`, single-threaded, before the channel is touched. Threads created
+/// afterwards inherit the filter and the Landlock domain, so the process may
+/// use threads, clocks, memory and its pipes freely; it may not open, create,
+/// connect, execute or enumerate anything.
+///
+/// Fails closed; the caller must exit rather than serve. Windows refuses (no
+/// stage two exists there yet), so callers apply it on Linux only and the
+/// Windows content process keeps the creation-time profile alone.
+pub fn enter_content_profile() -> Result<GpuProfile, PolicyError> {
+    enter_gpu_profile(&[])
 }
 
 /// Spawn a content process under a sandbox policy.

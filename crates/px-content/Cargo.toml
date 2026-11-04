@@ -15,6 +15,11 @@ px-ipc = { path = "../px-ipc", version = "0.0.0" }
 # is the only process that links this crate. The broker does not.
 px-script = { path = "../px-script", version = "0.0.0" }
 
+# Phase 17 (ADR 043): the content process confines itself on startup, with the
+# second stage of the profile `px-sandbox` owns. A workspace path, not a new
+# third-party crate; the unsafe stays in that crate.
+px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+
 [dev-dependencies]
 # The crash-and-restart gate needs both a real broker and a real content
 # process binary. CARGO_BIN_EXE_px-content is only set for this package's own
@@ -22,9 +27,6 @@ px-script = { path = "../px-script", version = "0.0.0" }
 # living in px-broker and hunting for the binary on disk.
 px-broker = { path = "../px-broker", version = "0.0.0" }
 
-# The refusal test drives the capability ladder directly, so it needs the
-# crate that owns it and the test-only override behind its feature.
-px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
 
 [features]
 # §14.4: forwards to px-sandbox, whose PX_TEST_FORCE_SANDBOX_UNAVAILABLE

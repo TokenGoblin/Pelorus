@@ -244,6 +244,9 @@ fn sandbox_memory_cap_kills_only_that_tab() {
             .response,
         Response::Pong
     );
+    // The broker-held content process confined itself on startup and the kernel
+    // says so (ADR 043).
+    assert!(tab_b.verify_stage_two().is_ok());
 
     // Tab C kept its realm and its state, and is still being served.
     assert_eq!(tab_c.run("k + 1"), value("42"));

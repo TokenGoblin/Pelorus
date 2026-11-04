@@ -699,6 +699,17 @@ impl ContentProcess {
         matches!(self.child.try_wait(), Ok(None))
     }
 
+    /// Ask the kernel whether this child has put on the second stage of its
+    /// profile (ADR 043). The child confines itself first thing in `main`, so
+    /// after its opening `Ping` has been received this must hold; `Err` means
+    /// it is not in place or cannot be verified, and the child must not be
+    /// given anything derived from a page. Wiring this into the spawn path
+    /// waits for the broker to drive `RunScript` (docs/backlog.md); until
+    /// then it is the check the broker will call and the tests do.
+    pub fn verify_stage_two(&self) -> Result<Vec<px_sandbox::Rung>, px_sandbox::PolicyError> {
+        self.child.verify_stage_two()
+    }
+
     /// Kill the child and stop talking to it.
     pub fn kill(&mut self) -> std::io::Result<()> {
         self.child.kill()?;

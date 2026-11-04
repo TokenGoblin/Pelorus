@@ -185,6 +185,11 @@ impl<W: Write> Session<W> {
                     .store(u64::from(millis), std::sync::atomic::Ordering::SeqCst);
                 Ok(Flow::Go)
             }
+            #[cfg(feature = "testing")]
+            Ok(ScriptRequest::EscapeProbe) => {
+                self.out.send(&escape_report())?;
+                Ok(Flow::Go)
+            }
             // A request this build does not serve: the testing-only variants reach
             // a content process built WITHOUT its own `testing` feature whenever
             // another crate in the same workspace build enables `px-ipc/testing`.
@@ -248,6 +253,25 @@ fn wire_reason(reason: TerminateReason) -> Wire {
         TerminateReason::MicrotaskBudget => Wire::MicrotaskBudget,
         TerminateReason::RuntimeLimit => Wire::RuntimeLimit,
         TerminateReason::EnginePanic => Wire::EnginePanic,
+    }
+}
+
+/// Testing only: run the escape attempts and shape the report for the wire.
+#[cfg(feature = "testing")]
+fn escape_report() -> ScriptResponse {
+    let report = px_sandbox::probe::escape_attempts();
+    let attempts = report
+        .attempts
+        .into_iter()
+        .map(|attempt| px_ipc::script::EscapeResult {
+            name: px_ipc::script::BoundedStr::truncated(attempt.name.to_string()),
+            succeeded: attempt.succeeded,
+            errno: attempt.errno,
+        })
+        .collect();
+    ScriptResponse::EscapeProbe {
+        landlock_abi: report.landlock_abi,
+        attempts: px_ipc::gpu::Bounded::truncated(attempts),
     }
 }
 

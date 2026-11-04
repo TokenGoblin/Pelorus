@@ -1217,3 +1217,46 @@ follows.
   refusal, fail-at-every-step).
 - **Why deferred:** it needs a symbol-listing step over built artifacts and an allowlist
   per crate; that is gate work, not store work.
+
+## Phase 17 sandbox hardening: what the content profile still lets through
+
+- **Found in:** phase 17 (escape-attempt suite, ADR 043)
+- **Belongs to:** Phase 17 (open: the gate is not met on Windows, and the Linux profile is
+  still a deny list)
+- **What the suite proves on Linux:** the real content binary, created through
+  `px_sandbox::spawn` and confined by stage two on startup (kernel-verified by
+  `verify_stage_two`), is refused with `EPERM` for: opening a file, `/dev/null`,
+  `/dev` enumeration and a render node, creating a file or directory, unlink, rename,
+  `socket(AF_INET/AF_UNIX)`, `connect` (inet, and the X11 display socket path), `bind`,
+  `execve`, fork+exec through `std::process`, `/proc/<peer>/mem`, `process_vm_readv`,
+  `ptrace`, `mount`, `unshare`, `setns`, `chroot`, `io_uring_setup`, `perf_event_open`,
+  `bpf`, `pidfd_open` on the broker. `sandbox_escape_*` in
+  `crates/px-content/tests/sandbox_escape.rs`. Before stage two was applied to the content
+  process, open, socket, exec, fork+exec, `/proc/<peer>/mem` and `pidfd_open` all SUCCEEDED
+  (stage one is a deny list of escalation primitives only); that is the failing run the
+  suite was written against.
+- **Permitted today, on purpose and listed in the test (`PERMITTED`):**
+  - `stat` and friends: they share a syscall with `fstat`, which the allocator and `std`
+    use, and a number-only deny list cannot split them. Leaks existence and mode of a path,
+    not content. Needs the allow list.
+  - Signalling the broker (`kill(peer, 0)`): refused with `EPERM` only where Landlock has a
+    signal scope (ABI 6, Linux 6.12; the test machine is ABI 7). On an older kernel a content
+    process can signal same-user processes, including the broker, because `tgkill` is how it
+    aborts itself and cannot be denied by number. The user-namespace rung (separate PID
+    namespace) would close it and is not applied. The suite prints `KNOWN GAP` there.
+- **Not done:**
+  - **Windows.** There is no stage two, no memory cap and no escape suite on Windows; the
+    Phase 17 gate ("fails every attempt on both OSes") is NOT met. `enter_content_profile`
+    refuses there, so the content binary does not call it on Windows.
+  - **An allow list.** The gate wants one; the profile is still two deny lists
+    (`docs/research/phase-17-syscall-audit.md` says how far it is and what the measured set
+    suggests).
+  - **The broker does not yet call `verify_stage_two` on spawn** (`ContentProcess` now
+    exposes it); wiring waits for the broker to drive `RunScript`. Until it does, nothing
+    refuses a content process whose stage two failed except that the process exits.
+  - **Landlock is best effort for the content process** (no Landlock on the kernel: stage two
+    is seccomp alone, still verified by the filter count). The ladder floor is unchanged.
+  - The user-namespace rung (mount/PID/network isolation) and cgroup membership are still
+    not applied by `spawn`; the grandchild-orphan case in `SandboxedChild::kill` stays open.
+  - Clipboard: Linux has none without a display; a display-server connection is the
+    `socket_unix` / `connect_unix_display` attempts. Windows clipboard attempts do not exist.
