@@ -1,0 +1,115 @@
+# The render corpus (ADR 033 (a)). One [[page]] per fixture. `reference` marks a
+# page derived from the vendored WPT corpus: its test and reference must render
+# to identical bytes. Selection rule and the chosen list: PROVENANCE.
+
+[[page]]
+id = "backgrounds"
+source = "tests/render/pages/backgrounds.html"
+
+[[page]]
+id = "borders-sides"
+source = "tests/render/pages/borders-sides.html"
+
+[[page]]
+id = "nested-boxes"
+source = "tests/render/pages/nested-boxes.html"
+
+[[page]]
+id = "margin-padding"
+source = "tests/render/pages/margin-padding.html"
+
+[[page]]
+id = "overflow-clip"
+source = "tests/render/pages/overflow-clip.html"
+
+[[page]]
+id = "float-left"
+source = "tests/render/pages/float-left.html"
+
+[[page]]
+id = "positioned"
+source = "tests/render/pages/positioned.html"
+
+[[page]]
+id = "flex-row"
+source = "tests/render/pages/flex-row.html"
+
+[[page]]
+id = "flex-wrap"
+source = "tests/render/pages/flex-wrap.html"
+
+[[page]]
+id = "grid-fr"
+source = "tests/render/pages/grid-fr.html"
+
+[[page]]
+id = "alpha-backgrounds"
+source = "tests/render/pages/alpha-backgrounds.html"
+
+[[page]]
+id = "canvas-background"
+source = "tests/render/pages/canvas-background.html"
+
+[[page]]
+id = "text-placeholder"
+source = "tests/render/pages/text-placeholder.html"
+
+[[page]]
+id = "wpt-css2-block-in-inline-at-start-with-margin-top-collapses-with-parent"
+source = "tests/wpt/css2/box-display/block-in-inline-at-start-with-margin-top-collapses-with-parent.html"
+reference = "tests/wpt/css2/box-display/block-in-inline-at-start-with-margin-top-collapses-with-parent-ref.html"
+
+[[page]]
+id = "wpt-css2-block-in-inline-margin-with-leading-text"
+source = "tests/wpt/css2/box-display/block-in-inline-margin-with-leading-text.html"
+reference = "tests/wpt/css2/box-display/block-in-inline-margin-with-leading-text-ref.html"
+
+[[page]]
+id = "wpt-css2-block-in-inline-self-collapsing-only-child"
+source = "tests/wpt/css2/box-display/block-in-inline-self-collapsing-only-child.html"
+reference = "tests/wpt/css2/box-display/block-in-inline-self-collapsing-only-child-ref.html"
+
+[[page]]
+id = "wpt-css2-nested-spans-with-block-in-inline-margin"
+source = "tests/wpt/css2/box-display/nested-spans-with-block-in-inline-margin.html"
+reference = "tests/wpt/css2/box-display/nested-spans-with-block-in-inline-margin-ref.html"
+
+[[page]]
+id = "wpt-css2-vertical-align-top-bottom-padding"
+source = "tests/wpt/css2/linebox/vertical-align-top-bottom-padding.html"
+reference = "tests/wpt/css2/linebox/vertical-align-top-bottom-padding-ref.html"
+
+[[page]]
+id = "wpt-css2-block-in-inline-margins-004"
+source = "tests/wpt/css2/normal-flow/block-in-inline-margins-004.html"
+reference = "tests/wpt/css2/normal-flow/block-in-inline-margins-004-ref.html"
+
+[[page]]
+id = "wpt-flexbox-flex-abspos-align-self-safe-outer-cb-003"
+source = "tests/wpt/css-flexbox/abspos/flex-abspos-align-self-safe-outer-cb-003.tentative.html"
+reference = "tests/wpt/css-flexbox/abspos/flex-abspos-align-self-safe-outer-cb-003-ref.html"
+
+[[page]]
+id = "wpt-flexbox-flexbox-break-request-horiz-001b"
+source = "tests/wpt/css-flexbox/flexbox-break-request-horiz-001b.html"
+reference = "tests/wpt/css-flexbox/flexbox-break-request-horiz-001-ref.html"
+
+[[page]]
+id = "wpt-flexbox-flexbox-display"
+source = "tests/wpt/css-flexbox/flexbox_display.html"
+reference = "tests/wpt/css-flexbox/flexbox_display-ref.html"
+
+[[page]]
+id = "wpt-grid-grid-abspos-staticpos-align-self-img-001"
+source = "tests/wpt/css-grid/abspos/grid-abspos-staticpos-align-self-img-001.html"
+reference = "tests/wpt/css-grid/abspos/grid-abspos-staticpos-align-self-img-001-ref.html"
+
+[[page]]
+id = "wpt-grid-grid-justify-content-space-between-001"
+source = "tests/wpt/css-grid/alignment/grid-justify-content-space-between-001.html"
+reference = "tests/wpt/css-grid/alignment/grid-justify-content-space-between-001-ref.html"
+
+[[page]]
+id = "wpt-grid-grid-container-scrollbars-sizing-001"
+source = "tests/wpt/css-grid/grid-model/grid-container-scrollbars-sizing-001.html"
+reference = "tests/wpt/css-grid/reference/grid-container-scrollbars-sizing-001-ref.html"
