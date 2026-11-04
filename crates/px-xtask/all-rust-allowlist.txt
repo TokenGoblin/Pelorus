@@ -30,7 +30,6 @@ ci/update-hsts.sh          # -> cargo xtask update-hsts: HTTPS fetch + transform
 ci/make-fetch-corpus.py    # -> cargo xtask make-fetch-corpus: HAR -> corpus generator (sha256, JSON by hand)
 
 # --- Hard: large, platform-sensitive, or tied to the named exception ---------
-ci/gate-sandbox.sh         # -> cargo xtask sandbox: OS-specific, runs under seccomp/job objects
 ci/gate-network.sh         # -> cargo xtask network: symbol audit of release artifacts
 ci/gate-sanitizers.sh      # -> cargo xtask sanitizers: nightly + sanitizer runtimes
 ci/lib.sh                  # -> retire LAST: replaced by px-xtask's Gate/proc. The PYTHON3 pin logic is now px_xtask::pybuild (proc::cargo applies it); lib.sh only shells out to `cargo xtask setup-build-python` for it

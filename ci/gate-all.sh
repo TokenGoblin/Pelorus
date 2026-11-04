@@ -29,7 +29,7 @@ brand-leak:cargo xtask brand-leak
 structure:cargo xtask structure
 compat-list:cargo xtask compat-list
 ipc:cargo xtask ipc
-sandbox:bash ci/gate-sandbox.sh
+sandbox:cargo xtask sandbox
 network:bash ci/gate-network.sh
 dom:cargo xtask dom
 "

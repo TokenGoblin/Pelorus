@@ -13,6 +13,7 @@ pub mod flex_grid;
 pub mod ipc;
 pub mod layout;
 pub mod not_serializable;
+pub mod sandbox;
 pub mod setup_build_python;
 pub mod structure;
 pub mod style;
@@ -100,6 +101,11 @@ pub static GATES: &[GateSpec] = &[
         name: "not-serializable",
         about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
         run: not_serializable::run,
+    },
+    GateSpec {
+        name: "sandbox",
+        about: "Phase 2: policy/refusal/ladder suites, px-browser refuses below the floor, no test-only override in release binaries, ladder documented",
+        run: sandbox::run,
     },
     GateSpec {
         name: "setup-build-python",

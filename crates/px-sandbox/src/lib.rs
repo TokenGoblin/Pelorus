@@ -257,7 +257,7 @@ pub fn detect() -> Capabilities {
     if std::env::var_os("PX_TEST_FORCE_SANDBOX_UNAVAILABLE").is_some() {
         // Test-only, and gated so it cannot exist in a release artifact.
         // §14.4: a flag being off is not evidence; absence of the symbol from
-        // the shipped binary is, and ci/gate-sandbox.sh scans for it.
+        // the shipped binary is, and cargo xtask sandbox scans for it.
         for rung in FLOOR {
             caps.deny(*rung, Restriction::Inconclusive);
         }

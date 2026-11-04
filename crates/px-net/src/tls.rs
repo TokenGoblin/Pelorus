@@ -133,7 +133,7 @@ pub fn connect_with<S: Read + Write>(
 ///
 /// §14.4: test-only capabilities live behind this feature and are scanned for
 /// in release artifacts. `ci/gate-network.sh` runs that scan, for the same
-/// reason `ci/gate-sandbox.sh` scans for the sandbox override — a trust anchor
+/// reason `cargo xtask sandbox` scans for the sandbox override — a trust anchor
 /// that reached a shipping binary would be a universal man-in-the-middle.
 #[cfg(feature = "testing")]
 pub fn client_config_trusting(extra_root_der: &[u8]) -> Result<Arc<ClientConfig>, FetchError> {

@@ -190,7 +190,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Phase 2 gate
         shell: bash
-        run: ci/gate-sandbox.sh
+        run: cargo xtask sandbox
 
   # Phase 3. Written failing before px-net exists, and expected to stay red for
   # the length of the phase — a gate added only once it passes has never been
