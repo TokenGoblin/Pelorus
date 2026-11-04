@@ -452,3 +452,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: 100% Rust ratchet
         run: cargo xtask all-rust
+
+  # Phase 10. Written before the engine is bound, so it is inert on purpose:
+  # `continue-on-error: true` is set from the unit's first commit and comes off
+  # in the phase's last, once `--engine` names a real engine and
+  # tests/test262/RESULTS records a baseline. Until then the job proves the
+  # vendored corpus is intact and the ratchet runs. Both platforms, because the
+  # corpus is byte-exact and must survive a Windows checkout unchanged.
+  test262:
+    name: test262 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: test262 subset ratchet
+        shell: bash
+        run: cargo xtask test262

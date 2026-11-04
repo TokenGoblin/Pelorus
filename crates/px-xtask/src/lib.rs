@@ -22,6 +22,7 @@ pub mod pybuild;
 pub mod scan;
 pub mod sha256;
 pub mod tar;
+pub mod test262;
 
 #[cfg(test)]
 pub mod testutil;
