@@ -11,6 +11,7 @@
 //! separate types written concurrently. They should be unified; they are not
 //! yet.
 
+pub mod coop;
 pub mod cors;
 pub mod csp;
 pub mod frame;
