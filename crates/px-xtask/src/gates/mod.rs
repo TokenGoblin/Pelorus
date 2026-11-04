@@ -1,5 +1,6 @@
 //! The gate registry. One line per gate; the module holds the logic.
 
+pub mod all;
 pub mod all_rust;
 pub mod brand_leak;
 pub mod build;
@@ -45,6 +46,11 @@ pub struct GateSpec {
 /// Registered gates. Keep alphabetical. A gate ported from a script keeps the
 /// script's gate name (the word it passed to `verdict`).
 pub static GATES: &[GateSpec] = &[
+    GateSpec {
+        name: "all",
+        about: "run the pre-push gates in CI order (not the reproducible-build, layout, flex-grid, style or nightly ones)",
+        run: all::run,
+    },
     GateSpec {
         name: "all-rust",
         about: "fail on first-party non-Rust source outside the shrinking allowlist (ADR 032)",

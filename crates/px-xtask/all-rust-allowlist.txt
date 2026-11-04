@@ -19,10 +19,8 @@
 # intended destination, using the name the script passed to `verdict`.
 
 # --- Easy: short, no compilation, mostly git/grep/file checks ----------------
-ci/gate-all.sh             # -> cargo xtask all: run every registered gate in order
 
 # --- Medium: more logic, text scanning, or external tools --------------------
 
 # --- Hard: large, platform-sensitive, or tied to the named exception ---------
-ci/lib.sh                  # -> retire LAST: replaced by px-xtask's Gate/proc. The PYTHON3 pin logic is now px_xtask::pybuild (proc::cargo applies it); lib.sh only shells out to `cargo xtask setup-build-python` for it
 
