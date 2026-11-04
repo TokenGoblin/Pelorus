@@ -7,4 +7,7 @@
 //! crate's CLAUDE.md.
 
 pub mod ed25519;
+pub mod hex;
+pub mod manifest;
 pub mod sha2;
+pub mod version;
