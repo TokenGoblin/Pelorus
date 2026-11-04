@@ -24,6 +24,7 @@ members = [
     "crates/px-ui",
     "crates/px-update",
     "crates/px-websec",
+    "crates/px-xtask",
 ]
 
 [workspace.package]

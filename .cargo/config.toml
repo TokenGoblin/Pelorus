@@ -1,0 +1,3 @@
+# `cargo xtask <gate>` runs a repository gate (ADR 032; crates/px-xtask).
+[alias]
+xtask = "run --quiet --package px-xtask --"
