@@ -3,7 +3,7 @@
 //! The only crate that carries the product name.
 //!
 //! Every user-visible string that names the product is a constant here, and
-//! `tests/brand/gate-brand-leak.sh` fails the build if the literal appears
+//! `cargo xtask brand-leak` fails the build if the literal appears
 //! anywhere it is not allowed (build-spec §2.2). The gate reads
 //! [`PRODUCT_NAME`] out of this file at runtime rather than hardcoding it, so
 //! a rename does not touch the gate.
@@ -13,7 +13,7 @@
 //! crate would mean a rename changed the update endpoint, and every already
 //! installed copy would keep polling the old one — silently ending security
 //! updates for exactly the users who can no longer be reached. They live in
-//! `px-update`, and `ci/gate-structure.sh` asserts they have not migrated here.
+//! `px-update`, and `cargo xtask structure` asserts they have not migrated here.
 
 /// The product name as shown to a user.
 ///

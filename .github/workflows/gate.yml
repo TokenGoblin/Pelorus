@@ -149,7 +149,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Gate check 5
-        run: tests/brand/gate-brand-leak.sh
+        run: cargo xtask brand-leak
 
   # Phase 1 gate: identity rejection, crash recovery, size limits, and the
   # second build profile from ADR 004. Runs on both platforms — process spawn,
@@ -349,7 +349,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Repository structure invariants
-        run: ci/gate-structure.sh
+        run: cargo xtask structure
 
   # ADR 032: the project is 100% Rust. Fails on any first-party non-Rust source
   # that is not on crates/px-xtask/all-rust-allowlist.txt, and on any stale

@@ -2,7 +2,7 @@ Evidence for the Phase 0 gate: the brand-leak gate rejects a deliberate
 violation (build-spec §2.2, §9 Phase 0).
 
 Reproduce: add a constant containing the product name to any crate outside
-px-brand, stage it, and run tests/brand/gate-brand-leak.sh.
+px-brand, stage it, and run `cargo xtask brand-leak`.
 
 The product name itself is redacted below as <PRODUCT_NAME>. This file sits
 under tests/brand/, which is NOT on the allowlist, so an unredacted
@@ -18,3 +18,8 @@ FAIL product name appears in crates/px-layout/src/lib.rs
   note: 1 untracked file(s) were NOT scanned; stage them first
 
 brand-leak: FAIL (1)
+
+The same proof is also kept as a unit test that runs on every change to the
+gate: `deliberate_violation_is_detected` in
+crates/px-xtask/src/gates/brand_leak.rs builds a throwaway repository with a
+synthetic name, stages a violation, and asserts the gate rejects it.
