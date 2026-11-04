@@ -49,6 +49,19 @@ expect_used = "deny"
 indexing_slicing = "deny"
 panic = "deny"
 
+# Dev and test builds. Debug info for the whole dependency closure (stylo, Boa,
+# rustls) made every integration-test binary over 100 MB and the shared target
+# directory over 25 GB, which filled the build machine's quota three times in one
+# session and killed three parallel builds partway. Line tables for our own
+# crates keep backtraces readable; dependencies get none. This touches only the
+# dev/test profiles: release, content-release and every reproducibility claim
+# (invariant 7) are unaffected, and nothing shipped is built from them.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # build-spec §4.2.
 [profile.release]
 overflow-checks = true   # geometry and length arithmetic must trap, not wrap
