@@ -323,6 +323,25 @@ jobs:
         shell: bash
         run: cargo xtask flex-grid
 
+  # Phase 8 gate, render half (`cargo xtask render`). `continue-on-error` is set in
+  # the phase's first commit and must be deleted in its last, so the gate's CI
+  # behaviour is exercised all along rather than discovered on the closing day.
+  # Running on both operating systems is the cross-platform determinism test: one
+  # baseline set, tolerance zero (ADR 033 (b)).
+  render:
+    name: render (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Phase 8 render gate
+        shell: bash
+        run: cargo xtask render
+
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
   # explicitly rather than by directory override, so the fence assertion in
