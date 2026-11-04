@@ -24,10 +24,10 @@ cd "$(git rev-parse --show-toplevel)"
 CHECKS="
 build:cargo xtask build
 supply-chain:bash ci/gate-supply-chain.sh
-unsafe-headers:bash ci/gate-unsafe-headers.sh
+unsafe-headers:cargo xtask unsafe-headers
 brand-leak:cargo xtask brand-leak
 structure:cargo xtask structure
-compat-list:bash ci/gate-compat-list.sh
+compat-list:cargo xtask compat-list
 ipc:bash ci/gate-ipc.sh
 sandbox:bash ci/gate-sandbox.sh
 network:bash ci/gate-network.sh

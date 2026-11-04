@@ -19,18 +19,12 @@
 # intended destination, using the name the script passed to `verdict`.
 
 # --- Easy: short, no compilation, mostly git/grep/file checks ----------------
-ci/gate-compat-list.sh     # -> cargo xtask compat-list: wraps check_compat_sites.py
-ci/check_compat_sites.py   # -> folded into compat-list: parse tests/compat/sites.toml by hand
-ci/unsafe-audit.sh         # -> cargo xtask unsafe-audit: reads ci/unsafe-baseline.json
 ci/gate-miri.sh            # -> cargo xtask miri: runs cargo +nightly miri as a child
 ci/gate-all.sh             # -> cargo xtask all: run every registered gate in order
 
 # --- Medium: more logic, text scanning, or external tools --------------------
-ci/gate-unsafe-headers.sh  # -> cargo xtask unsafe-headers: per-crate header scan, waiver scans
 ci/gate-supply-chain.sh    # -> cargo xtask supply-chain: cargo-deny/vet/audit as children
-ci/count-lines.sh          # -> cargo xtask count-lines: line/unsafe counting
 ci/gate-fuzz-smoke.sh      # -> cargo xtask fuzz-smoke: runs cargo fuzz as a child
-ci/check_not_serializable.py # -> cargo xtask check-not-serializable, or a compile-fail test in px-ipc
 ci/update-psl.sh           # -> cargo xtask update-psl: HTTPS fetch + transform of the public suffix list
 ci/update-hsts.sh          # -> cargo xtask update-hsts: HTTPS fetch + transform of the HSTS preload list
 ci/make-fetch-corpus.py    # -> cargo xtask make-fetch-corpus: HAR -> corpus generator (sha256, JSON by hand)
@@ -42,5 +36,5 @@ ci/gate-ipc.sh             # -> cargo xtask ipc: process spawn, two build profil
 ci/gate-sandbox.sh         # -> cargo xtask sandbox: OS-specific, runs under seccomp/job objects
 ci/gate-network.sh         # -> cargo xtask network: symbol audit of release artifacts
 ci/gate-sanitizers.sh      # -> cargo xtask sanitizers: nightly + sanitizer runtimes
-ci/lib.sh                  # -> retire LAST: replaced by px-xtask's Gate/proc; the PYTHON3 pin export must move into xtask first
+ci/lib.sh                  # -> retire LAST: replaced by px-xtask's Gate/proc. The PYTHON3 pin logic is now px_xtask::pybuild (proc::cargo applies it); lib.sh only shells out to `cargo xtask setup-build-python` for it
 

@@ -150,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Gate check 4
-        run: ci/gate-unsafe-headers.sh
+        run: cargo xtask unsafe-headers
 
   brand-leak:
     name: brand-leak
@@ -388,7 +388,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Forty-site compat list
-        run: ci/gate-compat-list.sh
+        run: cargo xtask compat-list
 
   structure:
     name: structure

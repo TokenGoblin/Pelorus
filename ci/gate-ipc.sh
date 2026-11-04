@@ -168,9 +168,7 @@ channel_id_home="$(git ls-files 'crates/px-broker/src/*.rs' \
 if [ -z "$channel_id_home" ]; then
     fail "no 'struct ChannelId' found under crates/px-broker/src/; this check"
     fail "  cannot pass by not finding what it is looking for"
-elif [ -z "$PY_BIN" ]; then
-    fail "no python >= 3.11 on PATH; cannot inspect ChannelId's derives"
-elif "$PY_BIN" ci/check_not_serializable.py ChannelId $channel_id_home; then
+elif cargo xtask not-serializable ChannelId $channel_id_home; then
     ok "ChannelId cannot be serialised onto the wire"
 else
     fail "ChannelId is serialisable; it must never be able to reach the wire"

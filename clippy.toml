@@ -7,7 +7,7 @@
 # CLAUDE.md's hard rule is "do not add allow attributes to get around it", and
 # this is deliberately not that. It is one workspace-level, reviewable statement
 # of where the boundary is, rather than waivers scattered at call sites where
-# nobody can count them. ci/gate-unsafe-headers.sh still fails any per-site
+# nobody can count them. `cargo xtask unsafe-headers` still fails any per-site
 # allow() of these lints, so the only way to widen this is to edit this file, in
 # a diff, on purpose.
 allow-unwrap-in-tests = true

@@ -6,10 +6,15 @@ pub mod build;
 pub mod build_and_hash;
 pub mod check_build_python_pin;
 pub mod compare_hashes;
+pub mod compat_list;
+pub mod count_lines;
 pub mod flex_grid;
 pub mod layout;
+pub mod not_serializable;
 pub mod setup_build_python;
 pub mod structure;
+pub mod unsafe_audit;
+pub mod unsafe_headers;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -58,6 +63,16 @@ pub static GATES: &[GateSpec] = &[
         run: compare_hashes::run,
     },
     GateSpec {
+        name: "compat-list",
+        about: "the forty-site compat list: forty entries, each with assertions, no urls (build-spec §8)",
+        run: compat_list::run,
+    },
+    GateSpec {
+        name: "count-lines",
+        about: "TOOL: regenerate the README size section (--check: fail if stale)",
+        run: count_lines::run,
+    },
+    GateSpec {
         name: "flex-grid",
         about: "Phase 7: flexbox/grid reftest and crashtest suites, corpus floors, grid-lanes excluded",
         run: flex_grid::run,
@@ -68,6 +83,11 @@ pub static GATES: &[GateSpec] = &[
         run: layout::run,
     },
     GateSpec {
+        name: "not-serializable",
+        about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
+        run: not_serializable::run,
+    },
+    GateSpec {
         name: "setup-build-python",
         about: "TOOL: build the pinned Python venv stylo's build.rs needs; prints the interpreter path (ADR 023)",
         run: setup_build_python::run,
@@ -76,6 +96,16 @@ pub static GATES: &[GateSpec] = &[
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
+    },
+    GateSpec {
+        name: "unsafe-audit",
+        about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
+        run: unsafe_audit::run,
+    },
+    GateSpec {
+        name: "unsafe-headers",
+        about: "gate check 4: per-crate unsafe header rules, local waiver scans, px-css zero-unsafe counts",
+        run: unsafe_headers::run,
     },
     GateSpec {
         name: "vendor-wpt",
