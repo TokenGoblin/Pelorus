@@ -6,6 +6,7 @@ pub mod flex_grid;
 pub mod layout;
 pub mod make_fetch_corpus;
 pub mod structure;
+pub mod update_psl;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -52,6 +53,11 @@ pub static GATES: &[GateSpec] = &[
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
+    },
+    GateSpec {
+        name: "update-psl",
+        about: "TOOL: refresh data/public_suffix_list.dat and its version file (--check, --from-file)",
+        run: update_psl::run,
     },
     GateSpec {
         name: "vendor-wpt",
