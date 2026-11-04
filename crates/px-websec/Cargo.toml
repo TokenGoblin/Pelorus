@@ -8,3 +8,15 @@ publish.workspace = true
 [dependencies]
 # Phase 0 adds no dependency to any crate. build-spec §3 names what may
 # eventually go here; anything else needs an ADR before it is added.
+#
+# Phase 12 policies (origin, cors, referrer, mixed, sri, frame, coop) are
+# written against std only. In particular this crate does NOT depend on
+# px-net: px-net pulls rustls/ring/webpki-roots into every px-websec build,
+# and px-net is the crate that will *call* these policies, so the reverse
+# edge would be a cycle waiting to happen. Where px-net owns a fact (the
+# public suffix list, the cookie jar's SameSite handling) this crate takes
+# the answer through a small trait or a plain bool instead of re-deriving it.
+
+# build-spec §4.3: this crate decides what hostile input may do.
+[lints]
+workspace = true
