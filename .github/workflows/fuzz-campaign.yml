@@ -82,6 +82,8 @@ jobs:
           - { target: shaper, shard: 1 }
           # Phase 12: attacker-controlled CSP headers and <meta> content.
           - { target: csp_parse, shard: 1 }
+          # Phase 16: untrusted markup through the accessibility tree builder.
+          - { target: a11y_build, shard: 1 }
           # Phase 11: arbitrary IDL text through parse, resolve, lower and emit.
           - { target: webidl_parse, shard: 1 }
           - { target: http_response, shard: 1 }
