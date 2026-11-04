@@ -1,426 +1,50 @@
 //! `cargo xtask test262` -- the test262 runner (Phase 10, unit 5).
 //!
-//! Reads the vendored subset (`tests/test262/INDEX`), assembles each test with
-//! its harness, hands the source to an [`Engine`], grades the answer against the
-//! test's own metadata, and compares the result with the committed
-//! `tests/test262/RESULTS` under a ratchet.
+//! Reads the vendored subset (`tests/test262/INDEX`), runs each test, grades
+//! the answer against the test's own metadata, and compares the result with
+//! the committed `tests/test262/RESULTS` and `EXPECTED_FAILURES` under a
+//! ratchet.
 //!
-//! This unit ships the runner and its ratchet but no real engine: the only
-//! engine reachable from the command line is `none`, which marks every test
-//! ungraded. The binding to the JavaScript engine is a later unit. The fake
-//! pass-all and fail-all engines exist so the grading and the ratchet are
-//! tested without one; they are not selectable, so they cannot write a bogus
-//! baseline.
+//! Two halves, because this crate links no JavaScript engine:
 //!
-//! The gate is not part of `all`.
+//! * the pure rules (assembly, grading, results, ratchet) are in
+//!   `test262_core.rs`, which `crates/px-script/tests/test262.rs` includes with
+//!   `#[path]`, so there is one copy;
+//! * the engine-bound runner is that test file. `--engine boa` (the default)
+//!   runs it as a child of `cargo test` and reads the per-test results file it
+//!   writes, then applies the ratchet here. `--engine none` marks every test
+//!   ungraded and runs no child. The fake pass-all and fail-all engines exist
+//!   so the grading and the ratchet are tested without an engine; they are not
+//!   selectable, so they cannot write a bogus baseline.
+//!
+//! The gate is not part of `all` (a full run takes minutes).
 //!
 //! Ratchet (all must hold):
 //!   * the INDEX lists at least [`CORPUS_FLOOR`] tests and every one is on disk;
 //!   * at least [`MATCH_FLOOR`] tests pass;
 //!   * no test that passes in `RESULTS` stops passing or disappears;
-//!   * a test that newly passes is recorded (`--update`), so the floor only rises.
+//!   * a test that newly passes is recorded (`--update`), so the floor only rises;
+//!   * `EXPECTED_FAILURES` is true both ways: a failing test missing from it, and
+//!     a listed test that no longer fails, are both reported (ADR 019: the list
+//!     is never shortened by dropping tests from the corpus).
 
 use crate::Gate;
-use crate::test262::{IndexEntry, Phase, parse_index};
+use crate::proc;
+use crate::test262::{IndexEntry, parse_index};
+pub use crate::test262_core::*;
 use std::collections::BTreeMap;
 use std::path::Path;
 
 pub const DIR: &str = "tests/test262";
 pub const RESULTS_PATH: &str = "tests/test262/RESULTS";
+pub const EXPECTED_PATH: &str = "tests/test262/EXPECTED_FAILURES";
 
-/// The vendored corpus may not shrink below this many tests (10356 vendored).
-pub const CORPUS_FLOOR: usize = 10_000;
-
-/// Tests that must pass: the number of tests on which the engine matches the
-/// behaviour test262 specifies. Raised in the commit that raises the pass count;
-/// it never falls. Zero until an engine is bound.
-pub const MATCH_FLOOR: usize = 0;
-
-/// How a test is run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Sloppy,
-    Strict,
-    /// `flags: [raw]`: the source exactly as written, no harness, no prologue.
-    Raw,
-}
-
-impl Mode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Mode::Sloppy => "sloppy",
-            Mode::Strict => "strict",
-            Mode::Raw => "raw",
-        }
-    }
-}
-
-/// An index entry together with the test's source text.
-#[derive(Debug, Clone)]
-pub struct Case {
-    pub entry: IndexEntry,
-    pub body: String,
-}
-
-impl Case {
-    pub fn is_async(&self) -> bool {
-        self.entry.has_flag("async")
-    }
-
-    /// The modes this test runs in (INTERPRETING.md: `onlyStrict`, `noStrict`,
-    /// `raw`, otherwise both).
-    pub fn modes(&self) -> Vec<Mode> {
-        if self.entry.has_flag("raw") {
-            vec![Mode::Raw]
-        } else if self.entry.has_flag("onlyStrict") {
-            vec![Mode::Strict]
-        } else if self.entry.has_flag("noStrict") {
-            vec![Mode::Sloppy]
-        } else {
-            vec![Mode::Sloppy, Mode::Strict]
-        }
-    }
-
-    /// The harness files for this test, in load order, without duplicates:
-    /// `assert.js`, `sta.js`, `doneprintHandle.js` for async tests, then the
-    /// test's own `includes`. A raw test has none.
-    pub fn harness_files(&self, mode: Mode) -> Vec<String> {
-        if mode == Mode::Raw {
-            return Vec::new();
-        }
-        let mut v: Vec<String> = vec!["assert.js".into(), "sta.js".into()];
-        if self.is_async() {
-            v.push("doneprintHandle.js".into());
-        }
-        for i in &self.entry.includes {
-            if !v.contains(i) {
-                v.push(i.clone());
-            }
-        }
-        v
-    }
-
-    /// The complete program text for `mode`. `harness` returns a harness file's
-    /// text by name; a missing file is an error, never silently skipped.
-    pub fn source_for(
-        &self,
-        mode: Mode,
-        harness: &dyn Fn(&str) -> Option<String>,
-    ) -> Result<String, String> {
-        let mut out = String::new();
-        if mode == Mode::Strict {
-            out.push_str("\"use strict\";\n");
-        }
-        for f in self.harness_files(mode) {
-            let text = harness(&f)
-                .ok_or_else(|| format!("{}: harness file {f} is not vendored", self.entry.path))?;
-            out.push_str(&text);
-            if !text.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-        out.push_str(&self.body);
-        Ok(out)
-    }
-}
-
-/// What the engine reports for one run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Run {
-    /// The program ran to completion; `output` is what it printed (async tests
-    /// report through it).
-    Completed { output: Vec<String> },
-    /// An error escaped, and in which phase.
-    Threw { phase: Phase, kind: String },
-    /// The engine cannot run this test at all (not a failure of the engine).
-    Unsupported(String),
-}
-
-pub trait Engine {
-    fn name(&self) -> &str;
-    fn run(&self, source: &str, mode: Mode, is_async: bool) -> Run;
-}
-
-/// Marks everything ungraded. The only engine reachable from the command line
-/// until the real one is bound.
-pub struct NoEngine;
-
-impl Engine for NoEngine {
-    fn name(&self) -> &str {
-        "none"
-    }
-    fn run(&self, _: &str, _: Mode, _: bool) -> Run {
-        Run::Unsupported("no engine bound".into())
-    }
-}
-
-/// Test double: every program completes (and reports async success).
-pub struct PassAll;
-
-impl Engine for PassAll {
-    fn name(&self) -> &str {
-        "fake-pass-all"
-    }
-    fn run(&self, _: &str, _: Mode, is_async: bool) -> Run {
-        Run::Completed {
-            output: if is_async {
-                vec!["Test262:AsyncTestComplete".into()]
-            } else {
-                Vec::new()
-            },
-        }
-    }
-}
-
-/// Test double: every program throws a runtime `Test262Error`.
-pub struct FailAll;
-
-impl Engine for FailAll {
-    fn name(&self) -> &str {
-        "fake-fail-all"
-    }
-    fn run(&self, _: &str, _: Mode, _: bool) -> Run {
-        Run::Threw {
-            phase: Phase::Runtime,
-            kind: "Test262Error".into(),
-        }
-    }
-}
-
-/// The verdict on one run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    Pass,
-    Fail(String),
-    /// Not counted either way.
-    Ungraded(String),
-}
-
-/// Grade what an engine reported against what the test says should happen.
-pub fn grade(entry: &IndexEntry, is_async: bool, run: &Run) -> Outcome {
-    match (run, &entry.negative) {
-        (Run::Unsupported(why), _) => Outcome::Ungraded(why.clone()),
-        (Run::Threw { phase, kind }, Some(n)) => {
-            if *phase == n.phase && *kind == n.kind {
-                Outcome::Pass
-            } else {
-                Outcome::Fail(format!(
-                    "expected {}:{}, got {}:{kind}",
-                    n.phase.as_str(),
-                    n.kind,
-                    phase.as_str()
-                ))
-            }
-        }
-        (Run::Completed { .. }, Some(n)) => Outcome::Fail(format!(
-            "expected {}:{} but the program completed",
-            n.phase.as_str(),
-            n.kind
-        )),
-        (Run::Threw { phase, kind }, None) => {
-            Outcome::Fail(format!("threw {}:{kind}", phase.as_str()))
-        }
-        (Run::Completed { output }, None) => {
-            if !is_async {
-                return Outcome::Pass;
-            }
-            if let Some(l) = output
-                .iter()
-                .find(|l| l.starts_with("Test262:AsyncTestFailure"))
-            {
-                Outcome::Fail(l.clone())
-            } else if output.iter().any(|l| l == "Test262:AsyncTestComplete") {
-                Outcome::Pass
-            } else {
-                Outcome::Fail("async test never called $DONE".into())
-            }
-        }
-    }
-}
-
-/// A test's status across all its modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Status {
-    Pass,
-    Fail,
-    Ungraded,
-}
-
-impl Status {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Status::Pass => "pass",
-            Status::Fail => "fail",
-            Status::Ungraded => "ungraded",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Status> {
-        match s {
-            "pass" => Some(Status::Pass),
-            "fail" => Some(Status::Fail),
-            "ungraded" => Some(Status::Ungraded),
-            _ => None,
-        }
-    }
-
-    /// Pass only if every mode passed; any failing mode fails the test;
-    /// otherwise (some mode ungraded, none failed) the test is ungraded.
-    pub fn combine(outcomes: &[Outcome]) -> Status {
-        if outcomes.iter().any(|o| matches!(o, Outcome::Fail(_))) {
-            Status::Fail
-        } else if outcomes.is_empty() || outcomes.iter().any(|o| matches!(o, Outcome::Ungraded(_)))
-        {
-            Status::Ungraded
-        } else {
-            Status::Pass
-        }
-    }
-}
-
-/// Run one case in every mode.
-pub fn run_case(
-    engine: &dyn Engine,
-    case: &Case,
-    harness: &dyn Fn(&str) -> Option<String>,
-) -> Result<Status, String> {
-    let mut outcomes = Vec::new();
-    for mode in case.modes() {
-        let src = case.source_for(mode, harness)?;
-        let run = engine.run(&src, mode, case.is_async());
-        outcomes.push(grade(&case.entry, case.is_async(), &run));
-    }
-    Ok(Status::combine(&outcomes))
-}
-
-/// Pass, fail and ungraded counts. A test that is ungraded is neither: it is
-/// reported on its own line so a shrinking graded set is visible.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Counts {
-    pub pass: usize,
-    pub fail: usize,
-    pub ungraded: usize,
-}
-
-impl Counts {
-    pub fn of(results: &BTreeMap<String, Status>) -> Counts {
-        let mut c = Counts::default();
-        for s in results.values() {
-            match s {
-                Status::Pass => c.pass += 1,
-                Status::Fail => c.fail += 1,
-                Status::Ungraded => c.ungraded += 1,
-            }
-        }
-        c
-    }
-
-    pub fn graded(&self) -> usize {
-        self.pass + self.fail
-    }
-}
-
-/// What the committed `RESULTS` says a test should do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Expectation {
-    /// Passes today; must keep passing.
-    Pass,
-    /// Does not pass yet (failing, ungraded or unrecorded); passing is progress.
-    NotYet,
-}
-
-impl Expectation {
-    pub fn of(baseline: &BTreeMap<String, Status>, path: &str) -> Expectation {
-        match baseline.get(path) {
-            Some(Status::Pass) => Expectation::Pass,
-            _ => Expectation::NotYet,
-        }
-    }
-}
-
-pub fn format_results(results: &BTreeMap<String, Status>) -> String {
-    let c = Counts::of(results);
-    let mut s = format!(
-        "# test262 results (cargo xtask test262 --update). Do not edit by hand.\n# path<TAB>pass|fail|ungraded ; pass {} fail {} ungraded {}\n",
-        c.pass, c.fail, c.ungraded
-    );
-    for (p, st) in results {
-        s.push_str(p);
-        s.push('\t');
-        s.push_str(st.as_str());
-        s.push('\n');
-    }
-    s
-}
-
-pub fn parse_results(text: &str) -> Result<BTreeMap<String, Status>, String> {
-    let mut out = BTreeMap::new();
-    for (n, l) in text.lines().enumerate() {
-        if l.trim().is_empty() || l.starts_with('#') {
-            continue;
-        }
-        let (p, st) = l
-            .split_once('\t')
-            .ok_or_else(|| format!("RESULTS line {}: no tab", n + 1))?;
-        let st = Status::parse(st)
-            .ok_or_else(|| format!("RESULTS line {}: unknown status `{st}`", n + 1))?;
-        if out.insert(p.to_string(), st).is_some() {
-            return Err(format!("RESULTS line {}: duplicate path {p}", n + 1));
-        }
-    }
-    Ok(out)
-}
-
-/// The ratchet's verdict.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Verdict {
-    /// Reasons the gate fails.
-    pub problems: Vec<String>,
-    /// Tests that pass now and were not recorded as passing.
-    pub improved: Vec<String>,
-}
-
-/// Compare a run with the baseline. `corpus_len` is the number of INDEX
-/// entries; `now` has one entry per test that was run.
-pub fn ratchet(
-    baseline: &BTreeMap<String, Status>,
-    now: &BTreeMap<String, Status>,
-    corpus_len: usize,
-    corpus_floor: usize,
-    match_floor: usize,
-) -> Verdict {
-    let mut v = Verdict::default();
-    if corpus_len < corpus_floor {
-        v.problems.push(format!(
-            "the INDEX lists {corpus_len} tests, floor is {corpus_floor}"
-        ));
-    }
-    let c = Counts::of(now);
-    if c.pass < match_floor {
-        v.problems
-            .push(format!("{} tests pass, floor is {match_floor}", c.pass));
-    }
-    for (p, st) in baseline {
-        if *st != Status::Pass {
-            continue;
-        }
-        match now.get(p) {
-            None => v
-                .problems
-                .push(format!("{p}: passed in RESULTS, no longer run")),
-            Some(Status::Pass) => {}
-            Some(other) => v
-                .problems
-                .push(format!("{p}: passed in RESULTS, now {}", other.as_str())),
-        }
-    }
-    for (p, st) in now {
-        if *st == Status::Pass && Expectation::of(baseline, p) == Expectation::NotYet {
-            v.improved.push(p.clone());
-        }
-    }
-    v
-}
+/// The cargo profile the engine-bound runner is built in, and so the profile in
+/// which `MATCH_FLOOR` is reproducible. Debug: the whole corpus takes about
+/// three minutes on four cores, and the gate then needs no second build of the
+/// engine. (`cargo test -p px-script --test test262 --release` with the same
+/// environment variables also works and is faster to run, slower to build.)
+pub const ENGINE_PROFILE: &str = "debug";
 
 struct Opts {
     engine: String,
@@ -430,7 +54,7 @@ struct Opts {
 
 fn parse_args(args: &[String]) -> Result<Opts, String> {
     let mut o = Opts {
-        engine: "none".into(),
+        engine: "boa".into(),
         update: false,
         filter: String::new(),
     };
@@ -450,7 +74,7 @@ fn engine_named(name: &str) -> Result<Box<dyn Engine>, String> {
     match name {
         "none" => Ok(Box::new(NoEngine)),
         other => Err(format!(
-            "no engine named `{other}` (only `none` until the engine is bound)"
+            "no engine named `{other}` (`boa` runs the engine-bound runner; `none` grades nothing)"
         )),
     }
 }
@@ -488,54 +112,127 @@ pub fn run_all(
     Ok(out)
 }
 
+/// Run the engine-bound runner (`crates/px-script/tests/test262.rs`) as a child
+/// of `cargo test` and read the per-test results file it writes.
+fn run_boa(root: &Path, filter: &str) -> Result<BTreeMap<String, CaseResult>, String> {
+    let out = proc::target_dir(root).join("test262-run.tsv");
+    let _ = std::fs::remove_file(&out);
+    let mut c = proc::cargo_command(root);
+    c.args(["test", "--locked", "-p", "px-script", "--test", "test262"]);
+    if ENGINE_PROFILE == "release" {
+        c.arg("--release");
+    }
+    c.args(["--", "script_test262_corpus", "--exact", "--nocapture"]);
+    c.env("PX_TEST262_OUT", &out)
+        .env("PX_TEST262_FILTER", filter);
+    let status = c.status().map_err(|e| format!("cannot run cargo: {e}"))?;
+    if !status.success() {
+        return Err(format!("the engine-bound runner exited with {status}"));
+    }
+    let text = std::fs::read_to_string(&out)
+        .map_err(|e| format!("read {}: {e} (the runner wrote no results)", out.display()))?;
+    parse_run(&text)
+}
+
+fn read_or_empty(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_default()
+}
+
 fn execute(g: &mut Gate, root: &Path, args: &[String]) -> Result<(), String> {
     let o = parse_args(args)?;
-    let engine = engine_named(&o.engine)?;
     let index = std::fs::read_to_string(root.join(DIR).join("INDEX"))
         .map_err(|e| format!("read {DIR}/INDEX: {e}"))?;
     let entries = parse_index(&index)?;
-    let baseline = match std::fs::read_to_string(root.join(RESULTS_PATH)) {
-        Ok(t) => parse_results(&t)?,
-        Err(_) => BTreeMap::new(),
+    let baseline = parse_results(&read_or_empty(&root.join(RESULTS_PATH)))?;
+    let expected = parse_expected(&read_or_empty(&root.join(EXPECTED_PATH)))?;
+    let (engine_name, mut detailed) = if o.engine == "boa" {
+        ("boa".to_string(), run_boa(root, &o.filter)?)
+    } else {
+        let engine = engine_named(&o.engine)?;
+        let plain = run_all(engine.as_ref(), root, &entries, &o.filter)?;
+        let detailed = plain
+            .into_iter()
+            .map(|(p, status)| {
+                let class = if status == Status::Ungraded {
+                    "no-engine".to_string()
+                } else {
+                    String::new()
+                };
+                (
+                    p,
+                    CaseResult {
+                        status,
+                        class,
+                        detail: String::new(),
+                    },
+                )
+            })
+            .collect();
+        (engine.name().to_string(), detailed)
     };
-    let mut now = run_all(engine.as_ref(), root, &entries, &o.filter)?;
     if !o.filter.is_empty() {
         // A filtered run says nothing about the tests it skipped: carry them over
         // from the baseline so the ratchet compares like with like.
         for (p, st) in &baseline {
-            now.entry(p.clone()).or_insert(*st);
+            detailed.entry(p.clone()).or_insert_with(|| CaseResult {
+                status: *st,
+                class: expected.get(p).cloned().unwrap_or_default(),
+                detail: String::new(),
+            });
         }
     }
+    let now = statuses(&detailed);
     let c = Counts::of(&now);
     g.info(format!(
-        "engine {}: {} tests; pass {}, fail {}, ungraded {} (graded {})",
-        engine.name(),
+        "engine {engine_name}: {} tests; pass {}, fail {}, ungraded {} (graded {})",
         now.len(),
         c.pass,
         c.fail,
         c.ungraded,
         c.graded()
     ));
+    if c.graded() > 0 {
+        g.info(format!(
+            "pass rate {:.2}% of graded",
+            100.0 * c.pass as f64 / c.graded() as f64
+        ));
+    }
     let mut v = ratchet(&baseline, &now, entries.len(), CORPUS_FLOOR, MATCH_FLOOR);
     if !v.improved.is_empty() {
         g.info(format!("{} test(s) newly pass", v.improved.len()));
-        if o.update {
-            // handled below, after the regressions are known
-        } else {
+        if !o.update {
             v.problems.push(format!(
                 "{} test(s) newly pass and are not in RESULTS; run `cargo xtask test262 --update`",
                 v.improved.len()
             ));
         }
     }
+    if !o.update {
+        for p in check_expected(&expected, &now) {
+            v.problems.push(p);
+        }
+    }
     if o.update {
-        // Never record a state the ratchet rejects, other than the floor itself
-        // being unmet by a corpus change the person is making on purpose.
-        if v.problems.is_empty() {
-            let dest = root.join(RESULTS_PATH);
-            std::fs::write(&dest, format_results(&now))
-                .map_err(|e| format!("write {}: {e}", dest.display()))?;
-            g.info(format!("wrote {RESULTS_PATH}"));
+        // Never record a state the ratchet rejects.
+        if !v.problems.is_empty() {
+            g.info("not recording: the ratchet rejects this run");
+        } else if !o.filter.is_empty() || o.engine == "none" {
+            g.info("not recording: only a full run with the real engine is recorded");
+        } else {
+            for (rel, text) in [
+                (RESULTS_PATH, format_results(&now)),
+                (EXPECTED_PATH, format_expected(&detailed)),
+            ] {
+                let dest = root.join(rel);
+                std::fs::write(&dest, text)
+                    .map_err(|e| format!("write {}: {e}", dest.display()))?;
+                g.info(format!("wrote {rel}"));
+            }
+            let mut classes: BTreeMap<&str, usize> = BTreeMap::new();
+            for r in detailed.values().filter(|r| r.status == Status::Fail) {
+                *classes.entry(r.class.as_str()).or_default() += 1;
+            }
+            g.info(format!("failure classes: {classes:?}"));
         }
     }
     for p in v.problems {
@@ -558,160 +255,8 @@ mod tests {
     use super::*;
     use crate::testutil::Fixture;
 
-    fn entry(path: &str, flags: &[&str], neg: Option<(Phase, &str)>, inc: &[&str]) -> IndexEntry {
-        let f = |v: &[&str]| v.iter().map(|s| s.to_string()).collect();
-        IndexEntry {
-            path: path.into(),
-            flags: f(flags),
-            negative: neg.map(|(phase, k)| crate::test262::Negative {
-                phase,
-                kind: k.into(),
-            }),
-            includes: f(inc),
-            features: Vec::new(),
-        }
-    }
-
-    fn case(e: IndexEntry) -> Case {
-        Case {
-            entry: e,
-            body: "BODY;".into(),
-        }
-    }
-
-    fn harness(n: &str) -> Option<String> {
-        Some(format!("/*{n}*/"))
-    }
-
-    #[test]
-    fn modes_follow_the_flags() {
-        let m = |flags: &[&str]| case(entry("a.js", flags, None, &[])).modes();
-        assert_eq!(m(&[]), [Mode::Sloppy, Mode::Strict]);
-        assert_eq!(m(&["onlyStrict"]), [Mode::Strict]);
-        assert_eq!(m(&["noStrict"]), [Mode::Sloppy]);
-        assert_eq!(m(&["raw"]), [Mode::Raw]);
-    }
-
-    #[test]
-    fn source_assembly() {
-        let c = case(entry(
-            "a.js",
-            &["async"],
-            None,
-            &["x.js", "assert.js", "y.js"],
-        ));
-        assert_eq!(
-            c.harness_files(Mode::Sloppy),
-            ["assert.js", "sta.js", "doneprintHandle.js", "x.js", "y.js"]
-        );
-        let s = c.source_for(Mode::Strict, &harness).unwrap();
-        assert!(s.starts_with("\"use strict\";\n/*assert.js*/\n/*sta.js*/\n"));
-        assert!(s.ends_with("/*y.js*/\nBODY;"));
-        let sloppy = c.source_for(Mode::Sloppy, &harness).unwrap();
-        assert!(!sloppy.contains("use strict"));
-        // Raw: the body alone.
-        let raw = case(entry("r.js", &["raw"], None, &["x.js"]));
-        assert_eq!(raw.source_for(Mode::Raw, &harness).unwrap(), "BODY;");
-        // A missing harness file is an error.
-        assert!(c.source_for(Mode::Sloppy, &|_| None).is_err());
-    }
-
-    #[test]
-    fn grading() {
-        let pos = entry("p.js", &[], None, &[]);
-        let asy = entry("a.js", &["async"], None, &[]);
-        let neg = entry("n.js", &[], Some((Phase::Parse, "SyntaxError")), &[]);
-        let done = |l: &str| Run::Completed {
-            output: vec![l.into()],
-        };
-        let threw = |p, k: &str| Run::Threw {
-            phase: p,
-            kind: k.into(),
-        };
-        assert_eq!(grade(&pos, false, &done("x")), Outcome::Pass);
-        assert!(matches!(
-            grade(&pos, false, &threw(Phase::Runtime, "TypeError")),
-            Outcome::Fail(_)
-        ));
-        assert_eq!(
-            grade(&asy, true, &done("Test262:AsyncTestComplete")),
-            Outcome::Pass
-        );
-        assert!(matches!(
-            grade(&asy, true, &done("Test262:AsyncTestFailure:Error: x")),
-            Outcome::Fail(_)
-        ));
-        assert!(matches!(grade(&asy, true, &done("hi")), Outcome::Fail(_)));
-        assert_eq!(
-            grade(&neg, false, &threw(Phase::Parse, "SyntaxError")),
-            Outcome::Pass
-        );
-        // Right type, wrong phase; right phase, wrong type; no error at all.
-        assert!(matches!(
-            grade(&neg, false, &threw(Phase::Runtime, "SyntaxError")),
-            Outcome::Fail(_)
-        ));
-        assert!(matches!(
-            grade(&neg, false, &threw(Phase::Parse, "TypeError")),
-            Outcome::Fail(_)
-        ));
-        assert!(matches!(grade(&neg, false, &done("")), Outcome::Fail(_)));
-        assert!(matches!(
-            grade(&pos, false, &Run::Unsupported("x".into())),
-            Outcome::Ungraded(_)
-        ));
-    }
-
-    #[test]
-    fn status_combines_modes() {
-        let p = Outcome::Pass;
-        let f = Outcome::Fail("x".into());
-        let u = Outcome::Ungraded("x".into());
-        assert_eq!(Status::combine(&[p.clone(), p.clone()]), Status::Pass);
-        assert_eq!(Status::combine(&[p.clone(), f.clone()]), Status::Fail);
-        assert_eq!(Status::combine(&[u.clone(), f]), Status::Fail);
-        assert_eq!(Status::combine(&[p, u]), Status::Ungraded);
-        assert_eq!(Status::combine(&[]), Status::Ungraded);
-    }
-
-    #[test]
-    fn results_round_trip() {
-        let mut m = BTreeMap::new();
-        m.insert("a/b.js".to_string(), Status::Pass);
-        m.insert("a/c.js".to_string(), Status::Fail);
-        m.insert("d.js".to_string(), Status::Ungraded);
-        let t = format_results(&m);
-        assert!(t.contains("pass 1 fail 1 ungraded 1"));
-        assert_eq!(parse_results(&t).unwrap(), m);
-        assert!(parse_results("a.js\tmaybe\n").is_err());
-        assert!(parse_results("a.js\tpass\na.js\tfail\n").is_err());
-        assert!(parse_results("a.js pass\n").is_err());
-    }
-
     fn map(v: &[(&str, Status)]) -> BTreeMap<String, Status> {
         v.iter().map(|(p, s)| (p.to_string(), *s)).collect()
-    }
-
-    #[test]
-    fn ratchet_rules() {
-        use Status::*;
-        let base = map(&[("a", Pass), ("b", Fail), ("c", Pass)]);
-        // Holding steady with one improvement.
-        let now = map(&[("a", Pass), ("b", Pass), ("c", Pass)]);
-        let v = ratchet(&base, &now, 3, 3, 3);
-        assert!(v.problems.is_empty());
-        assert_eq!(v.improved, ["b"]);
-        // A regression, a disappearance, and a floor miss are each reported.
-        let now = map(&[("a", Fail), ("b", Fail)]);
-        let v = ratchet(&base, &now, 2, 3, 2);
-        assert_eq!(v.problems.len(), 4, "{:?}", v.problems);
-        // Ungraded after passing is a regression too.
-        let v = ratchet(&base, &map(&[("a", Ungraded), ("c", Pass)]), 3, 3, 0);
-        assert_eq!(v.problems.len(), 1);
-        // Expectation.
-        assert_eq!(Expectation::of(&base, "a"), Expectation::Pass);
-        assert_eq!(Expectation::of(&base, "b"), Expectation::NotYet);
-        assert_eq!(Expectation::of(&base, "zz"), Expectation::NotYet);
     }
 
     fn fixture() -> Fixture {
@@ -760,10 +305,17 @@ mod tests {
     fn gate_with_no_engine_records_nothing_and_enforces_the_corpus_floor() {
         let fx = fixture();
         let mut g = Gate::new("test262");
-        execute(&mut g, fx.path(), &[]).unwrap();
-        // 3 tests is under the corpus floor.
-        assert_eq!(g.fail_count(), 1, "{:?}", g.failures());
-        assert!(g.failures()[0].contains("floor"));
+        execute(
+            &mut g,
+            fx.path(),
+            &["--engine".to_string(), "none".to_string()],
+        )
+        .unwrap();
+        // 3 tests is under the corpus floor, and nothing passes (the match floor).
+        assert_eq!(g.fail_count(), 2, "{:?}", g.failures());
+        assert!(g.failures().iter().all(|f| f.contains("floor")));
+        // Nothing was recorded.
+        assert!(!fx.path().join(RESULTS_PATH).exists());
         assert!(engine_named("v8").is_err());
         assert!(parse_args(&["--nope".to_string()]).is_err());
     }

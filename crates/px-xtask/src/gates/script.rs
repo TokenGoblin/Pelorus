@@ -2,7 +2,7 @@
 //! `docs/phase-10-plan.md`).
 //!
 //! ```text
-//! test262 subset threshold                       -> unit 5 (remaining)
+//! test262 subset threshold                       -> unit 5 (landed: script_test262_)
 //! event ordering tests                           -> units 2 and 6
 //! no unbounded task-queue growth, stress page    -> units 2, 4 and 6
 //! timer resolution asserted                      -> unit 3
@@ -102,6 +102,13 @@ pub const SUITES: &[Suite] = &[
         "script_limits_memory_",
         "crates/px-content/tests/script_limits.rs",
     ),
+    // Unit 5: the test262 runner bound to the engine (the pure rules are shared
+    // with `cargo xtask test262`; the floor and the ratchet are enforced there).
+    (
+        "test262-subset-threshold-and-expected-failures",
+        "script_test262_",
+        "crates/px-script/tests/test262.rs",
+    ),
     // Unit 3: the coarse clock.
     (
         "timer-resolution-properties",
@@ -117,20 +124,12 @@ pub const SUITES: &[Suite] = &[
 
 /// What is still to be built, and the unit that owns it: `(item, unit, filter,
 /// home file)`. The same three conditions apply the day the file appears.
-pub const REMAINING: &[(&str, &str, &str, &str)] = &[
-    (
-        "test262-subset-threshold-and-expected-failures",
-        "unit 5",
-        "script_test262_",
-        "crates/px-xtask/src/gates/test262.rs",
-    ),
-    (
-        "ordering-and-stress-fixture-table",
-        "unit 6",
-        "script_fixture_",
-        "tests/script/fixtures.rs",
-    ),
-];
+pub const REMAINING: &[(&str, &str, &str, &str)] = &[(
+    "ordering-and-stress-fixture-table",
+    "unit 6",
+    "script_fixture_",
+    "tests/script/fixtures.rs",
+)];
 
 /// Files that must exist for the phase to be closed, and the unit that writes
 /// them.
@@ -289,11 +288,12 @@ mod tests {
     }
 
     #[test]
-    fn units_five_to_seven_are_named_not_omitted() {
+    fn units_six_and_seven_are_named_not_omitted() {
         let units: Vec<&str> = REMAINING.iter().map(|r| r.1).collect();
-        for u in ["unit 5", "unit 6"] {
-            assert!(units.contains(&u), "no remaining item owned by {u}");
-        }
+        assert!(
+            units.contains(&"unit 6"),
+            "no remaining item owned by unit 6"
+        );
         assert!(REQUIRED_FILES.iter().any(|f| f.1 == "unit 7"));
     }
 
