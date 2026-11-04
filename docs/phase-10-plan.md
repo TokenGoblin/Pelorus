@@ -140,7 +140,8 @@ Recommended: (a).
 ## Honest risk
 
 1. **Boa has no interrupt.** Limits plus a blunt watchdog abort; a memory bomb
-   is uncontained until Phase 17.
+   is uncontained until Phase 17 (update: Phase 17 caps it on Linux with an
+   address-space limit; Windows is still open, see docs/backlog.md).
 2. **Limits claims are from source, not run;** unit 4 runs them first.
 3. **The test262 threshold is unknown** until unit 5 measures it; the spec's 96%
    is unverified and not our feature set.
@@ -174,7 +175,7 @@ Recommended: (a).
 - **Memory bombs are not contained.** Only `ArrayBuffer` is capped (256 MiB). A
   doubling string reaches about 1.1 GiB in 1.5 seconds; the watchdog bounds time,
   not memory. An address-space limit needs `unsafe`, which only `px-sandbox` may
-  use, so it is a Phase 17 item.
+  use, so it is a Phase 17 item (done on Linux, docs/adr/043).
 - **Runaway shapes:** Boa itself ends deep recursion, try/catch loops, huge `repeat`
   and a self-requeuing microtask; **only the watchdog ends** regex backtracking,
   a huge array fill and calls-in-loops. All measured in an unoptimised build only.

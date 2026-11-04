@@ -35,6 +35,13 @@ pub const SUITES: &[Suite] = &[
         "crates/px-content/tests/sandbox.rs",
     ),
     ("ladder", "sandbox_ladder", "crates/px-sandbox/src/lib.rs"),
+    // Phase 17: the memory cap, proven against the real content binary
+    // created through the sandbox (docs/adr/043).
+    (
+        "memory-cap",
+        "sandbox_memory_cap",
+        "crates/px-content/tests/sandbox_memory.rs",
+    ),
     // Phase 8: the GPU process boundary, proven by spawning the real binary
     // under the profile (docs/phase-08-plan.md, gate items 3 and 4).
     (

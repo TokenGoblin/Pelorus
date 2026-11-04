@@ -1157,10 +1157,33 @@ follows.
 - **Why deferred:** each needs inline boxes (the box tree has none) or a style-engine change;
   neither fits a unit that replaces the text metric.
 
-## A script memory bomb is not contained until Phase 17
+## A script memory bomb: contained on Linux (Phase 17), NOT on Windows
 
-- **Found in:** phase 10 unit 4 (resource limits), ADR 040 layer 3
-- **Belongs to:** Phase 17 (cgroup `memory.max` on Linux, a job object on Windows)
+- **Status, Phase 17 unit 2 (Linux closed, Windows open):** `px_sandbox::spawn` now
+  applies `RLIMIT_AS` (1 GiB, the specification's figure) between fork and exec and the
+  parent confirms it from `/proc/<pid>/limits` (ADR 043). Proven against the real content
+  binary by `sandbox_memory_cap_*` (crates/px-content/tests/sandbox_memory.rs, in the
+  `sandbox` gate's suites): the doubling string and `repeat(2**30)` (a 24 GiB request that
+  was unrunnable on a shared runner) end by allocation failure, the process dies by
+  SIGABRT with its address space never past the cap, and the broker, a broker-held frame
+  and a second content process are untouched. **What is contained:** a content process
+  cannot map more than 1 GiB on Linux. **What is not:**
+  - **Windows has no memory cap.** The job-object limit (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`)
+    cannot be built or run in the container this was written in; `SandboxedChild::
+    memory_limit()` returns `None` there and the cap is not in `applied()`. Do not read the
+    Linux result as the Windows one. Phase 17's gate is still open on Windows.
+  - **The cap is address space, not resident memory.** A tab that maps 1 GiB and touches
+    little of it is within policy; a host short of RAM can still OOM before the cap. The
+    cgroup `memory.max` the spec also names is not done (unprivileged cgroup delegation is
+    not generally available; ADR 043).
+  - **Arrays grow slowly enough that the watchdog ends them first** on an unoptimised build
+    (about 6 MiB/s measured; `sandbox_memory_cap_array_growth_never_passes_the_cap` asserts
+    the ceiling, not that the cap was the killer). A faster build reaches the cap.
+  - A tab dying at the cap is a crash to the broker; no user-facing "this tab ran out of
+    memory" page exists yet.
+
+(Original entry, phase 10 unit 4, ADR 040 layer 3, kept for the history:)
+
 - **What:** nothing caps a content process's heap. Measured on Boa 0.22.0, unoptimised:
   `var s = 'x'; for (;;) s += s;` reached about 1.1 GiB resident in 1.5 s and keeps
   doubling until the 10 s watchdog (or the allocator, or the kernel's OOM killer) ends it.
