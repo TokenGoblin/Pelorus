@@ -3,7 +3,11 @@
 #![allow(dead_code)]
 
 pub mod build;
+#[allow(unused_imports)]
 pub use build::*;
+
+/// A decoder under test.
+pub type DecodeFn<'a> = &'a dyn Fn(&[u8], &Limits) -> Result<Decoded, DecodeError>;
 
 use px_image::{DecodeError, Decoded, Limits};
 use std::time::{Duration, Instant};
@@ -192,11 +196,7 @@ pub fn check_result(r: &Result<Decoded, DecodeError>, limits: &Limits) {
 
 /// The battery: truncation at every byte, byte corruption at every position
 /// (stride-capped for big inputs), and a time bound for the whole run.
-pub fn hostile_battery(
-    name: &str,
-    data: &[u8],
-    decode: &dyn Fn(&[u8], &Limits) -> Result<Decoded, DecodeError>,
-) {
+pub fn hostile_battery(name: &str, data: &[u8], decode: DecodeFn) {
     let limits = small_limits();
     let start = Instant::now();
     for n in 0..data.len() {
@@ -222,11 +222,7 @@ pub fn hostile_battery(
     );
 }
 
-pub fn random_bytes_battery(
-    prefix: &[u8],
-    seed: u64,
-    decode: &dyn Fn(&[u8], &Limits) -> Result<Decoded, DecodeError>,
-) {
+pub fn random_bytes_battery(prefix: &[u8], seed: u64, decode: DecodeFn) {
     let limits = small_limits();
     let mut rng = Rng(seed);
     let start = Instant::now();
