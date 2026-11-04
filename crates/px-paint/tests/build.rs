@@ -2,7 +2,9 @@
 //! lay it out, build. Expectations are derived by hand from the CSS in each test.
 
 use px_layout::geom::{Au, px};
-use px_paint::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect, build};
+use px_paint::{
+    BorderSide, BorderStyle, Color, DisplayList, FontId, Item, PositionedGlyph, Rect, build,
+};
 
 const VIEWPORT: i32 = 800;
 
@@ -247,23 +249,200 @@ fn list_canvas(list: &DisplayList) -> Rect {
     }
 }
 
+/// The glyph runs of a list: `(font, size, colour, glyphs)`.
+type Run = (FontId, Au, Color, Vec<PositionedGlyph>);
+
+fn runs(list: &DisplayList) -> Vec<Run> {
+    list.items
+        .iter()
+        .filter_map(|i| match *i {
+            Item::GlyphRun {
+                font,
+                size,
+                color,
+                start,
+                len,
+            } => Some((
+                font,
+                size,
+                color,
+                list.run_glyphs(start, len).expect("in bounds").to_vec(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+fn gid(c: char) -> u32 {
+    let font = px_layout::text::font_of(px_text::FontId(0)).expect("ahem");
+    u32::from(font.glyph_index(c).expect("glyph"))
+}
+
+/// Ahem: ascent 800/1000 em, descent 200/1000, no line gap. At 16 px the
+/// content area is 16 px tall and the baseline is 12.8 px = 768 Au below the
+/// line top.
+const BASELINE_16: Au = Au(768);
+
 #[test]
-fn px_paint_text_becomes_a_run_in_the_computed_color() {
-    let list = list_for("<style>div { color: #0000ff }</style><div>hi</div>");
-    let runs: Vec<_> = list
+fn px_paint_text_hi_at_16px_is_two_glyphs_on_the_baseline() {
+    let list = list_for(
+        "<style>div { margin-left: 8px; font-size: 16px; color: #0000ff }</style><div>Hi</div>",
+    );
+    assert!(
+        !list.items.iter().any(|i| matches!(i, Item::TextRun { .. })),
+        "the placeholder is gone"
+    );
+    let r = runs(&list);
+    assert_eq!(r.len(), 1, "{:?}", list.items);
+    let (font, size, color, glyphs) = &r[0];
+    assert_eq!(*font, FontId(0));
+    assert_eq!(*size, px(16));
+    assert_eq!(*color, rgb(0, 0, 255));
+    let expect = |c, x| PositionedGlyph {
+        glyph_id: gid(c),
+        x: px(x),
+        y: BASELINE_16,
+    };
+    assert_eq!(glyphs, &[expect('H', 8), expect('i', 24)]);
+}
+
+#[test]
+fn px_paint_text_colour_comes_from_the_run_element() {
+    let list = list_for(
+        "<style>div { color: #ff0000 } .g { color: #00ff00 }</style>\
+         <div>a<div class=g>b</div></div>",
+    );
+    // Layout records one element per run (inline boxes are not split yet), so
+    // the colour is tested per block.
+    let colors: Vec<Color> = runs(&list).iter().map(|r| r.2).collect();
+    assert_eq!(colors, [rgb(255, 0, 0), rgb(0, 255, 0)], "{:?}", list.items);
+}
+
+#[test]
+fn px_paint_text_rtl_line_is_start_aligned_at_the_right_edge() {
+    // 'ab' is 32 px wide in a 100 px box with direction rtl: it starts at 68.
+    let list = list_for(
+        "<style>div { width: 100px; font-size: 16px; direction: rtl }</style><div>ab</div>",
+    );
+    let r = runs(&list);
+    let xs: Vec<Au> = r.iter().flat_map(|r| r.3.iter().map(|g| g.x)).collect();
+    assert_eq!(xs, [px(68), px(84)], "{:?}", list.items);
+}
+
+#[test]
+fn px_paint_text_rtl_script_runs_are_left_to_right_in_visual_order() {
+    // Two Hebrew letters in a 100 px rtl box: the run is right-aligned and its
+    // glyphs ascend in x whatever the logical order.
+    let list = list_for(
+        "<style>div { width: 100px; font-size: 16px; direction: rtl }</style>\
+         <div>\u{5d0}\u{5d1}</div>",
+    );
+    let xs: Vec<Au> = runs(&list)
+        .iter()
+        .flat_map(|r| r.3.iter().map(|g| g.x))
+        .collect();
+    assert_eq!(xs, [px(68), px(84)], "{:?}", list.items);
+}
+
+#[test]
+fn px_paint_text_mixed_direction_keeps_every_glyph_inside_the_line() {
+    let list = list_for(
+        "<style>div { width: 200px; font-size: 16px; direction: ltr }</style>\
+         <div>ab \u{5d0}\u{5d1} cd</div>",
+    );
+    let mut xs: Vec<Au> = runs(&list)
+        .iter()
+        .flat_map(|r| r.3.iter().map(|g| g.x))
+        .collect();
+    xs.sort();
+    // "ab", space, two Hebrew letters, space, "cd": eight cells of 16 px from
+    // x = 0, each glyph origin on a distinct cell.
+    let cells: Vec<Au> = (0..8).map(|i| px(16 * i)).collect();
+    assert_eq!(xs, cells, "{:?}", list.items);
+}
+
+#[test]
+fn px_paint_text_hidden_is_skipped_and_visible_descendants_paint() {
+    let list = list_for(
+        "<style>div { visibility: hidden; font-size: 16px } .v { visibility: visible }</style>\
+         <div>aa<div class=v>b</div></div>",
+    );
+    let r = runs(&list);
+    assert_eq!(r.len(), 1, "{:?}", list.items);
+    assert_eq!(r[0].3.len(), 1);
+    assert_eq!(r[0].3[0].glyph_id, gid('b'));
+    assert_eq!(r[0].3[0].x, px(0));
+}
+
+#[test]
+fn px_paint_text_is_wrapped_in_the_overflow_clip() {
+    let list = list_for(
+        "<style>div { width: 20px; height: 16px; overflow: hidden; font-size: 16px }</style>\
+         <div>Hello</div>",
+    );
+    let push = list
         .items
         .iter()
-        .filter(|i| matches!(i, Item::TextRun { .. }))
+        .position(|i| matches!(i, Item::PushClip { .. }))
+        .expect("clip");
+    let glyph = list
+        .items
+        .iter()
+        .position(|i| matches!(i, Item::GlyphRun { .. }))
+        .expect("run");
+    let pop = list
+        .items
+        .iter()
+        .position(|i| matches!(i, Item::PopClip))
+        .expect("pop");
+    assert!(push < glyph && glyph < pop, "{:?}", list.items);
+    assert!(list.clips_balanced());
+}
+
+#[test]
+fn px_paint_text_paints_after_blocks_and_before_positioned() {
+    // Appendix E: inline content (5) is above in-flow backgrounds (3) and
+    // below positioned boxes (6).
+    let list = list_for(
+        "<style>.a { background: #010000; font-size: 16px } \
+         .p { position: absolute; z-index: 0; background: #020000; width: 5px; height: 5px }</style>\
+         <div class=a>x</div><div class=p></div>",
+    );
+    let seq: Vec<&str> = list
+        .items
+        .iter()
+        .skip(1)
+        .map(|i| match i {
+            Item::FillRect { color, .. } if color.r == 1 => "bg",
+            Item::FillRect { .. } => "pos",
+            Item::GlyphRun { .. } => "text",
+            _ => "?",
+        })
         .collect();
-    assert_eq!(runs.len(), 1, "{:?}", list.items);
-    match runs[0] {
-        Item::TextRun { rect, color } => {
-            assert_eq!(*color, rgb(0, 0, 255));
-            assert_eq!((rect.x, rect.y), (px(0), px(0)));
-            assert!(rect.width > Au(0) && rect.height > Au(0));
-        }
-        _ => unreachable!(),
-    }
+    assert_eq!(seq, ["bg", "text", "pos"]);
+}
+
+#[test]
+fn px_paint_text_glyph_list_is_deterministic() {
+    let html = "<style>div { width: 60px; font-size: 16px }</style><div>one two three four</div>";
+    assert_eq!(list_for(html), list_for(html));
+}
+
+#[test]
+fn px_paint_text_in_a_100000_deep_document_builds_on_a_small_stack() {
+    let worker = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut html = String::new();
+            for _ in 0..100_000 {
+                // The DOM caps nesting at 512, so only the first levels keep
+                // their text; the point is that the rest cannot overflow.
+                html.push_str("<div>t");
+            }
+            runs(&list_for(&html)).len()
+        })
+        .expect("spawn");
+    assert!(worker.join().expect("no overflow") > 0);
 }
 
 #[test]

@@ -1,11 +1,10 @@
-The render corpus: 25 pages (ADR 033 (a)), rendered by `cargo xtask render` and
+The render corpus: 28 pages (ADR 033 (a)), rendered by `cargo xtask render` and
 compared exactly with tests/render/baselines/<id>.png. Listed in pages.toml.
 
-Text paints as placeholder blocks until Phase 9. Every baseline containing text
-(text-placeholder and most of the WPT pages) is regenerated then, in one reviewed
-`cargo xtask render --bless` commit.
+Text paints as Ahem glyphs (Phase 9); the text baselines were re-blessed in one
+reviewed `cargo xtask render --bless` commit.
 
-13 hand-written feature fixtures: tests/render/pages/*.html, one idea each.
+16 hand-written feature fixtures: tests/render/pages/*.html, one idea each.
 
 12 pages derived from the vendored WPT corpus (pinned commit
 b875b21fd9e6b688e37c10d1b6366cab7418f91e, see tests/wpt/*/PROVENANCE). They are used

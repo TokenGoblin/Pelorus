@@ -1,8 +1,9 @@
 //! `cargo xtask render` -- the Phase 8 render gate (ADR 033 (a)-(c)).
 //!
-//! **Text paints as placeholder blocks until Phase 9**, so this gate says nothing
-//! about text rendering, and every baseline containing text is regenerated, in one
-//! reviewed `--bless` commit, when Phase 9 lands.
+//! Text paints as real Ahem glyphs (Phase 9). Ahem is the only font the corpus
+//! uses, so glyphs are solid em squares and a baseline is checkable by hand. The
+//! text baselines were regenerated in one reviewed `--bless` commit when the
+//! display-list builder started emitting glyph runs.
 //!
 //! The gate renders every page in `tests/render/pages.toml` through the product
 //! path (parse, style, layout, display list, software raster, PNG), and compares
@@ -37,7 +38,7 @@ use std::path::Path;
 pub mod px_png;
 
 /// The corpus may not shrink below this many pages (ADR 033 (a)).
-pub const PAGE_FLOOR: usize = 25;
+pub const PAGE_FLOOR: usize = 28;
 
 /// A rendered page with fewer ink pixels than this (pixels differing from its most
 /// common colour) is not a test. Used by the WPT selection rule: 20 x 20 pixels.
@@ -520,7 +521,7 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         ));
         return;
     }
-    g.info("Text paints as placeholder blocks until Phase 9; every baseline containing text is regenerated then (ADR 033 (c)).");
+    g.info("Text paints as Ahem glyph runs; the corpus floor is 28 pages.");
     if select {
         run_select(g, root);
         return;
@@ -776,17 +777,17 @@ mod tests {
     }
 
     #[test]
-    fn floor_is_pinned_at_25() {
-        let (p, s) = many(25);
+    fn floor_is_pinned_at_28() {
+        let (p, s) = many(28);
         assert!(check_manifest(&p, &s, false).is_empty());
-        let (p, s) = many(24);
+        let (p, s) = many(27);
         let f = check_manifest(&p, &s, false);
-        assert_eq!(f, ["the corpus has 24 pages, the pinned floor is 25"]);
+        assert_eq!(f, ["the corpus has 27 pages, the pinned floor is 28"]);
     }
 
     #[test]
     fn missing_baseline_and_orphan_baseline_fail_but_bless_waives_them() {
-        let (p, mut s) = many(25);
+        let (p, mut s) = many(28);
         s.remove(3);
         s.push("ghost".into());
         let f = check_manifest(&p, &s, false);
@@ -798,7 +799,7 @@ mod tests {
 
     #[test]
     fn duplicate_and_bad_ids_fail() {
-        let (mut p, s) = many(25);
+        let (mut p, s) = many(28);
         p[1].id = "p0".into();
         p[2].id = "Bad Id".into();
         let f = check_manifest(&p, &s, true);
