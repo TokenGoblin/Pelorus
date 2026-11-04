@@ -1,7 +1,12 @@
 # 040 — Phase 10 script host: boa_engine, what it costs and how it is confined
 
-- **Status:** proposed (awaiting the user; nothing in any `Cargo.toml` or
-  `Cargo.lock` has been changed)
+- **Status:** accepted by the user, 2026-11-04, as recommended: `boa_engine =0.22.0`
+  with default features off and `annex-b` on; `Intl`, `Temporal`, WebAssembly and
+  SharedArrayBuffer absent in v1; the layered runaway-script limits including the
+  10-second abort watchdog; the 100-microsecond jittered timer specification; a
+  rule-selected test262 subset. **Still blank and still the user's:** maintainer
+  count and cargo-vet audit status of the new crates. Nothing in any `Cargo.toml`
+  or `Cargo.lock` had been changed when this was written.
 - **Date:** 2026-11-04
 - **Phase:** 10
 - **Invariants touched:** 6 (No JIT: upheld). Bears on 1 (no ambient authority),

@@ -183,7 +183,7 @@ Write yourself: DOM, layout, compositor, networking *policy*, process model, san
 
 All first-party code, build logic, tests, and CI gates are Rust (ADR 032; `cargo xtask all-rust`). The one named exception is `stylo`'s own Python+Mako build step (ADR 023).
 
-Take from the ecosystem: `html5ever`, `stylo`, `rustls`, `swash`/`cosmic-text`, `wgpu`, `image`, `boa_engine`, `postcard`, `url`, `idna`.
+Take from the ecosystem: `html5ever`, `stylo`, `rustls`, `harfrust`/`skrifa` (shaping and font data; ADR 036 replaced `swash`), `unicode-bidi`, `wgpu`, `image`, `boa_engine`, `postcard`, `url`, `idna`.
 
 **No new dependency without an ADR** recording what it does, why not write it, maintainer count, audit status, and unsafe-line count.
 
@@ -195,7 +195,7 @@ The README says this, not "written in Rust, therefore safe":
 
 > Memory-safe application code, over a small audited unsafe core, with process isolation for the parts that cannot be made safe.
 
-Because the dependency closure contains real unsafe: **stylo** (Gecko-derived, thread-safety by convention), **boa_gc** (a tracing GC), **wgpu** and the **C GPU drivers beneath it**, **swash** (font parsing). Safety ends at those boundaries, which is why the sandbox is the primary control and Rust is what reduces how often it has to save you.
+Because the dependency closure contains real unsafe: **stylo** (Gecko-derived, thread-safety by convention), **boa_gc** (a tracing GC), **wgpu** and the **C GPU drivers beneath it**, **skrifa and harfrust** (font parsing and shaping, no unsafe of their own; ADR 036). Safety ends at those boundaries, which is why the sandbox is the primary control and Rust is what reduces how often it has to save you.
 
 ### 4.1 Generational handles — mandatory
 
@@ -543,7 +543,7 @@ These were argued and closed. They are recorded here so they are not re-proposed
 |---|---|---|
 | Ground-up engine in Rust | Fork Firefox (LibreWolf model) | A fork inherits Mozilla's UI churn, which invariant 3 exists to prevent, and re-patching every ESR is permanent work |
 | Ground-up engine in Rust | Embed Chromium via CEF | Google's engine, Manifest V3's blocking limits, and a mandatory ~4-week rebase treadmill or knowingly shipped CVEs |
-| Reuse `html5ever`, `stylo`, `rustls`, `swash` | Write parsers and TLS from scratch | Writing your own HTML tokenizer or TLS stack buys bugs, not sovereignty. "Ground up" means the DOM, layout, compositor, process model, and security model — not Unicode tables |
+| Reuse `html5ever`, `stylo`, `rustls`, `harfrust`/`skrifa` (was `swash`; amended by the user, ADR 036, 2026-11-04) | Write parsers and TLS from scratch | Writing your own HTML tokenizer or TLS stack buys bugs, not sovereignty. "Ground up" means the DOM, layout, compositor, process model, and security model — not Unicode tables |
 | Boa, interpreter only | SpiderMonkey or V8 bindings | Imports the largest CVE surface in any browser: a C++ JIT. No JIT also removes attacker-controlled gadget generation, the practical Spectre path |
 | Hand-rolled widgets on winit + wgpu | iced, egui, gtk-rs, Slint | A general toolkit imports its own redesigns and breaking changes into your chrome. The widget set here is tiny and you already own a compositor |
 | Partitioning as a type-level property | A "block third-party cookies" setting | A setting can be wrong; a keyed type has no unpartitioned code path to leave enabled |

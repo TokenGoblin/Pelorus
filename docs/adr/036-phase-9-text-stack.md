@@ -1,7 +1,12 @@
 # 036 — Phase 9 text stack: a library shaper behind a trait, our own integer rasterizer, the Unicode data we already carry
 
-- **Status:** proposed. Nothing in `Cargo.toml` or `Cargo.lock` has been changed.
-  Section "What the user must decide" lists the questions that block acceptance.
+- **Status:** accepted for the shaper, bidi and the library/rasterizer split
+  (user decisions, 2026-11-04): **harfrust 0.15 + skrifa 0.49 as the shaper** (the
+  ranked option 2, not swash), and **the `unicode-bidi` crate for UAX #9**
+  (option 3's bidi choice). Still open, and not needed to start: baselines at one
+  cross-platform tolerance-0 set, bundled OFL font subsets, IME technology, system
+  font strategy. Nothing in `Cargo.toml` or `Cargo.lock` had been changed when this
+  was written; the first implementation commit adds exactly these crates.
 - **Date:** 2026-11-04
 - **Phase:** 9
 - **Invariants touched:** 7 (reproducible builds) and §4 (the unsafe claim) are
