@@ -390,7 +390,9 @@ impl Migrator<'_> {
         }
         dst.sync_all().map_err(io_err("sync", to))?;
         drop(dst);
-        let perms = fs::metadata(from).map_err(io_err("stat", from))?.permissions();
+        let perms = fs::metadata(from)
+            .map_err(io_err("stat", from))?
+            .permissions();
         fs::set_permissions(to, perms).map_err(io_err("set permissions", to))
     }
 
@@ -406,7 +408,11 @@ impl Migrator<'_> {
             use std::os::unix::fs::PermissionsExt;
             // The owner must keep rwx or the migration cannot finish; and a
             // profile directory is never more open than its source.
-            let mode = if from.is_some() { perms.mode() | 0o700 } else { 0o700 };
+            let mode = if from.is_some() {
+                perms.mode() | 0o700
+            } else {
+                0o700
+            };
             perms.set_mode(mode);
         }
         fs::set_permissions(to, perms).map_err(io_err("set permissions", to))
@@ -642,7 +648,10 @@ mod tests {
     #[test]
     fn marker_by_hand_and_round_trip() {
         let entries = vec![
-            Entry { rel: "d".into(), kind: Kind::Dir },
+            Entry {
+                rel: "d".into(),
+                kind: Kind::Dir,
+            },
             file("d/f", 5),
         ];
         let text = encode_marker("old", &entries);
@@ -657,7 +666,11 @@ mod tests {
     fn marker_rejects_truncation_and_tampering() {
         let text = encode_marker("old", &[file("a", 1), file("b", 2)]);
         for n in 0..text.len() {
-            assert_eq!(parse_marker(text.get(..n).unwrap_or_default()), None, "n={n}");
+            assert_eq!(
+                parse_marker(text.get(..n).unwrap_or_default()),
+                None,
+                "n={n}"
+            );
         }
         assert!(parse_marker(&text).is_some());
         assert_eq!(parse_marker(&format!("{text}extra\n")), None);

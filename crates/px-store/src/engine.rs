@@ -224,8 +224,7 @@ impl Engine {
         let existing = part
             .and_then(|p| p.entries.get(&(ns.code(), key.to_vec())))
             .map(|old| cost(key, old));
-        if existing.is_none()
-            && part.is_some_and(|p| p.entries.len() >= MAX_ENTRIES_PER_PARTITION)
+        if existing.is_none() && part.is_some_and(|p| p.entries.len() >= MAX_ENTRIES_PER_PARTITION)
         {
             return Err(QuotaError::TooManyEntries);
         }
@@ -381,8 +380,12 @@ mod tests {
         assert_ne!(a.encode(), b.encode());
         // Same site and host, different port or scheme: different partitions.
         let other_port = PartId::from_key(
-            &PartitionKey::new(&psl(), "a.example", Origin::new("https", "cdn.example", 8443).unwrap())
-                .unwrap(),
+            &PartitionKey::new(
+                &psl(),
+                "a.example",
+                Origin::new("https", "cdn.example", 8443).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert_ne!(a, other_port);
@@ -435,17 +438,22 @@ mod tests {
         let p = id("a.example", "cdn.example");
         assert_eq!(
             e.check_put(&p, Namespace::Storage, &vec![0; MAX_KEY_BYTES + 1], b""),
-            Err(QuotaError::KeyTooLarge { len: MAX_KEY_BYTES + 1 })
+            Err(QuotaError::KeyTooLarge {
+                len: MAX_KEY_BYTES + 1
+            })
         );
         assert_eq!(
             e.check_put(&p, Namespace::Storage, b"k", &vec![0; MAX_VALUE_BYTES + 1]),
-            Err(QuotaError::ValueTooLarge { len: MAX_VALUE_BYTES + 1 })
+            Err(QuotaError::ValueTooLarge {
+                len: MAX_VALUE_BYTES + 1
+            })
         );
         // Four 1 MiB values: each costs 1 MiB + 1 + 48, so the fourth fits
         // only if 4*(1048576+1+48) <= 4 MiB. It does not: the 4th is refused.
         for i in 0..3u8 {
             let k = [i];
-            e.check_put(&p, Namespace::Storage, &k, &vec![0; MAX_VALUE_BYTES]).unwrap();
+            e.check_put(&p, Namespace::Storage, &k, &vec![0; MAX_VALUE_BYTES])
+                .unwrap();
             e.put(p.clone(), Namespace::Storage, &k, &vec![0; MAX_VALUE_BYTES]);
         }
         let would = 4 * (MAX_VALUE_BYTES as u64 + 1 + ENTRY_OVERHEAD_BYTES);
@@ -455,9 +463,15 @@ mod tests {
         );
         // A different partition is unaffected by this one being full.
         let q = id("b.example", "cdn.example");
-        assert!(e.check_put(&q, Namespace::Storage, &[9], &vec![0; MAX_VALUE_BYTES]).is_ok());
+        assert!(
+            e.check_put(&q, Namespace::Storage, &[9], &vec![0; MAX_VALUE_BYTES])
+                .is_ok()
+        );
         // Overwriting inside the full partition with a same-size value is fine.
-        assert!(e.check_put(&p, Namespace::Storage, &[0], &vec![1; MAX_VALUE_BYTES]).is_ok());
+        assert!(
+            e.check_put(&p, Namespace::Storage, &[0], &vec![1; MAX_VALUE_BYTES])
+                .is_ok()
+        );
     }
 
     #[test]
@@ -474,7 +488,10 @@ mod tests {
         // 10_000 * (4 + 48) = 520_000 < 4 MiB, so it was the count, not bytes.
         assert_eq!(e.usage(&p), 520_000);
         // Replacing an existing key is not a new entry.
-        assert!(e.check_put(&p, Namespace::Storage, &0u32.to_le_bytes(), b"x").is_ok());
+        assert!(
+            e.check_put(&p, Namespace::Storage, &0u32.to_le_bytes(), b"x")
+                .is_ok()
+        );
     }
 
     #[test]
@@ -499,8 +516,17 @@ mod tests {
         for (pid, ns, key, value) in ops {
             let pid = pid.encode().unwrap();
             let op = match value {
-                Some(value) => Op::Put { ns: ns.code(), pid: &pid, key, value },
-                None => Op::Delete { ns: ns.code(), pid: &pid, key },
+                Some(value) => Op::Put {
+                    ns: ns.code(),
+                    pid: &pid,
+                    key,
+                    value,
+                },
+                None => Op::Delete {
+                    ns: ns.code(),
+                    pid: &pid,
+                    key,
+                },
             };
             out.extend_from_slice(&format::encode_record(&op).unwrap());
         }
@@ -539,7 +565,13 @@ mod tests {
         // Record end offsets, derived independently of the decoder.
         let mut ends = vec![format::HEADER_LEN];
         for (pid, _ns, key, value) in &ops {
-            let n = 8 + 1 + 1 + 2 + pid.encode().unwrap().len() + 2 + key.len()
+            let n = 8
+                + 1
+                + 1
+                + 2
+                + pid.encode().unwrap().len()
+                + 2
+                + key.len()
                 + value.map_or(0, <[u8]>::len);
             ends.push(ends.last().unwrap() + n);
         }
@@ -605,7 +637,13 @@ mod tests {
         let pid = p.encode().unwrap();
         let mut log = format::header_bytes();
         log.extend_from_slice(
-            &format::encode_record(&Op::Put { ns: 9, pid: &pid, key: b"k", value: b"v" }).unwrap(),
+            &format::encode_record(&Op::Put {
+                ns: 9,
+                pid: &pid,
+                key: b"k",
+                value: b"v",
+            })
+            .unwrap(),
         );
         let r = Engine::recover(&log).unwrap();
         assert_eq!(r.valid_len, format::HEADER_LEN);
@@ -613,7 +651,13 @@ mod tests {
         // Undecodable partition id.
         let mut log = format::header_bytes();
         log.extend_from_slice(
-            &format::encode_record(&Op::Put { ns: 0, pid: b"junk", key: b"k", value: b"v" }).unwrap(),
+            &format::encode_record(&Op::Put {
+                ns: 0,
+                pid: b"junk",
+                key: b"k",
+                value: b"v",
+            })
+            .unwrap(),
         );
         assert_eq!(Engine::recover(&log).unwrap().valid_len, format::HEADER_LEN);
     }
@@ -640,7 +684,10 @@ mod tests {
         let r = Engine::recover(&snap).unwrap();
         assert_eq!(r.valid_len, snap.len());
         assert_eq!(r.engine.get(&p, Namespace::Storage, b"k"), None);
-        assert_eq!(r.engine.get(&q, Namespace::Storage, b"k"), Some(&b"value-b"[..]));
+        assert_eq!(
+            r.engine.get(&q, Namespace::Storage, b"k"),
+            Some(&b"value-b"[..])
+        );
     }
 
     #[test]

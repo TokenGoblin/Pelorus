@@ -50,11 +50,7 @@ mod leak {
         seen
     }
 
-    fn assert_never_contains(
-        seen: &[Seen],
-        needle: &[u8],
-        context: &str,
-    ) {
+    fn assert_never_contains(seen: &[Seen], needle: &[u8], context: &str) {
         for (_, _, v) in seen {
             let v = v.as_deref().unwrap_or_default();
             assert!(
@@ -82,7 +78,10 @@ mod leak {
                 drop(s);
                 s = Store::open(&dir).unwrap();
             }
-            assert!(observe(&s, &b()).is_empty(), "B saw A's data (reopen={reopen})");
+            assert!(
+                observe(&s, &b()).is_empty(),
+                "B saw A's data (reopen={reopen})"
+            );
             assert_eq!(s.partition_usage(&b()), 0);
             for ns in NAMESPACES {
                 assert!(s.keys(&b(), ns).is_empty());
@@ -107,23 +106,39 @@ mod leak {
             assert_eq!(observe(&s, &b()).len(), 8);
 
             // Usage is per partition and sums to the whole: no hidden shared pool.
-            assert_eq!(s.partition_usage(&a()) + s.partition_usage(&b()), s.total_usage());
+            assert_eq!(
+                s.partition_usage(&a()) + s.partition_usage(&b()),
+                s.total_usage()
+            );
             assert_eq!(s.partition_count(), 2);
 
             // Mutating B does not touch A.
             s.delete(&b(), Namespace::Storage, b"uid").unwrap();
-            s.put(&b(), Namespace::Storage, b"session", b"B-CHANGED").unwrap();
-            assert_eq!(s.get(&a(), Namespace::Storage, b"uid"), Some(&b"VALUE-FROM-A"[..]));
-            assert_eq!(s.get(&a(), Namespace::Storage, b"session"), Some(&b"VALUE-FROM-A"[..]));
+            s.put(&b(), Namespace::Storage, b"session", b"B-CHANGED")
+                .unwrap();
+            assert_eq!(
+                s.get(&a(), Namespace::Storage, b"uid"),
+                Some(&b"VALUE-FROM-A"[..])
+            );
+            assert_eq!(
+                s.get(&a(), Namespace::Storage, b"session"),
+                Some(&b"VALUE-FROM-A"[..])
+            );
 
             // Forgetting A leaves B whole, and the reverse.
             s.clear_partition(&a()).unwrap();
             assert!(observe(&s, &a()).is_empty());
-            assert_eq!(s.get(&b(), Namespace::Storage, b"session"), Some(&b"B-CHANGED"[..]));
+            assert_eq!(
+                s.get(&b(), Namespace::Storage, b"session"),
+                Some(&b"B-CHANGED"[..])
+            );
             drop(s);
             let s = Store::open(&dir).unwrap();
             assert!(observe(&s, &a()).is_empty());
-            assert_eq!(s.get(&b(), Namespace::Storage, b"session"), Some(&b"B-CHANGED"[..]));
+            assert_eq!(
+                s.get(&b(), Namespace::Storage, b"session"),
+                Some(&b"B-CHANGED"[..])
+            );
         }
     }
 
@@ -145,8 +160,13 @@ mod leak {
         let mut s = Store::open(d.path()).unwrap();
         s.put(&base, Namespace::Storage, b"k", b"BASE").unwrap();
         for (i, v) in variants.iter().enumerate() {
-            assert_eq!(s.get(v, Namespace::Storage, b"k"), None, "variant {i} read base");
-            s.put(v, Namespace::Storage, b"k", format!("V{i}").as_bytes()).unwrap();
+            assert_eq!(
+                s.get(v, Namespace::Storage, b"k"),
+                None,
+                "variant {i} read base"
+            );
+            s.put(v, Namespace::Storage, b"k", format!("V{i}").as_bytes())
+                .unwrap();
         }
         drop(s);
         let s = Store::open(d.path()).unwrap();
@@ -167,10 +187,15 @@ mod leak {
     fn persisted_cookies_do_not_cross_partitions() {
         let d = TempDir::new("leak-cookies");
         let psl = psl();
-        let (pa, pb) = (key("a.example", "https", "www.cdn.example", 443), key("b.example", "https", "www.cdn.example", 443));
+        let (pa, pb) = (
+            key("a.example", "https", "www.cdn.example", 443),
+            key("b.example", "https", "www.cdn.example", 443),
+        );
         let mut jar = Jar::new();
-        jar.store(&psl, &pa, "uid=UID-FROM-A; Path=/; Max-Age=1000").unwrap();
-        jar.store(&psl, &pb, "uid=UID-FROM-B; Path=/; Max-Age=1000").unwrap();
+        jar.store(&psl, &pa, "uid=UID-FROM-A; Path=/; Max-Age=1000")
+            .unwrap();
+        jar.store(&psl, &pb, "uid=UID-FROM-B; Path=/; Max-Age=1000")
+            .unwrap();
         {
             let mut s = Store::open(d.path()).unwrap();
             let now = Instant::now();

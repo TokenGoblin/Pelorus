@@ -145,9 +145,16 @@ mod disk {
         fs::write(&path, &newer).unwrap();
         assert!(matches!(
             Store::open(d.path()),
-            Err(StoreError::Format(FormatError::UnsupportedVersion { version: 2, .. }))
+            Err(StoreError::Format(FormatError::UnsupportedVersion {
+                version: 2,
+                ..
+            }))
         ));
-        assert_eq!(fs::read(&path).unwrap(), newer, "refusal must not modify the file");
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            newer,
+            "refusal must not modify the file"
+        );
 
         fs::write(&path, b"SQLite format 3\0 and more").unwrap();
         assert!(matches!(
@@ -184,7 +191,10 @@ mod disk {
         s.put(&b, S, b"session", b"KEEP-THIS-B").unwrap();
         let before = fs::read(d.path().join(LOG_NAME)).unwrap();
         assert!(contains(&before, b"SECRET-TOKEN-A"));
-        assert!(contains(&before, b"DELETED-VALUE-A"), "delete alone leaves the bytes");
+        assert!(
+            contains(&before, b"DELETED-VALUE-A"),
+            "delete alone leaves the bytes"
+        );
 
         assert_eq!(s.clear_partition(&a).unwrap(), 1);
         let after = fs::read(d.path().join(LOG_NAME)).unwrap();
@@ -247,7 +257,10 @@ mod disk {
         let len = fs::metadata(d.path().join(LOG_NAME)).unwrap().len();
         // Live data is ~100 KB; without compaction the log would be ~6 MB.
         // Bound: 2 * live + 1 MiB slack + one record.
-        assert!(len < 2 * 100_100 + (1 << 20) + 100_100, "log is {len} bytes");
+        assert!(
+            len < 2 * 100_100 + (1 << 20) + 100_100,
+            "log is {len} bytes"
+        );
         drop(s);
         let s = Store::open(d.path()).unwrap();
         assert_eq!(s.get(&a, S, b"k"), Some(&value[..]));

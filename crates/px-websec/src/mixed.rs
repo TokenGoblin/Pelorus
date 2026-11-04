@@ -212,10 +212,16 @@ mod tests {
     }
     fn node(s: &str) -> ContextNode {
         let url = u(s);
-        ContextNode { origin: Origin::from_url(&url), url }
+        ContextNode {
+            origin: Origin::from_url(&url),
+            url,
+        }
     }
     fn ctx(top: &str) -> Context {
-        Context { document: node(top), ancestors: vec![] }
+        Context {
+            document: node(top),
+            ancestors: vec![],
+        }
     }
 
     #[test]
@@ -233,7 +239,10 @@ mod tests {
             "http://[::1]/",
             "ws://localhost/",
         ] {
-            assert!(is_origin_potentially_trustworthy(&Origin::from_url(&u(yes))), "{yes}");
+            assert!(
+                is_origin_potentially_trustworthy(&Origin::from_url(&u(yes))),
+                "{yes}"
+            );
         }
         for no in [
             "http://a.example/",
@@ -247,7 +256,10 @@ mod tests {
             "http://localhost.example/",
             "http://evil-localhost/",
         ] {
-            assert!(!is_origin_potentially_trustworthy(&Origin::from_url(&u(no))), "{no}");
+            assert!(
+                !is_origin_potentially_trustworthy(&Origin::from_url(&u(no))),
+                "{no}"
+            );
         }
         assert!(!is_origin_potentially_trustworthy(&Origin::new_opaque()));
     }
@@ -265,7 +277,14 @@ mod tests {
         ] {
             assert!(is_url_potentially_trustworthy(&u(yes)), "{yes}");
         }
-        for no in ["http://a.example/", "about:config", "blob:http://a.example/id", "custom://x/", "javascript:1", "blob:garbage"] {
+        for no in [
+            "http://a.example/",
+            "about:config",
+            "blob:http://a.example/id",
+            "custom://x/",
+            "javascript:1",
+            "blob:garbage",
+        ] {
             assert!(!is_url_potentially_trustworthy(&u(no)), "{no}");
         }
     }
@@ -298,10 +317,25 @@ mod tests {
     #[test]
     fn secure_page_blocks_blockable_http() {
         let c = ctx("https://a.example/");
-        for k in [RequestKind::Script, RequestKind::Style, RequestKind::Fetch, RequestKind::Subframe, RequestKind::Font, RequestKind::Worker, RequestKind::Track] {
-            assert_eq!(check_request(&c, k, &u("http://x.example/a")), Verdict::Block, "{k:?}");
+        for k in [
+            RequestKind::Script,
+            RequestKind::Style,
+            RequestKind::Fetch,
+            RequestKind::Subframe,
+            RequestKind::Font,
+            RequestKind::Worker,
+            RequestKind::Track,
+        ] {
+            assert_eq!(
+                check_request(&c, k, &u("http://x.example/a")),
+                Verdict::Block,
+                "{k:?}"
+            );
         }
-        assert_eq!(check_request(&c, RequestKind::WebSocket, &u("ws://x.example/")), Verdict::Block);
+        assert_eq!(
+            check_request(&c, RequestKind::WebSocket, &u("ws://x.example/")),
+            Verdict::Block
+        );
     }
 
     #[test]
@@ -316,10 +350,19 @@ mod tests {
             Verdict::Upgrade(u("https://x.example:8080/v"))
         );
         // Un-upgradable insecure scheme: fail closed.
-        assert_eq!(check_request(&c, RequestKind::Audio, &u("ftp://x.example/a")), Verdict::Block);
+        assert_eq!(
+            check_request(&c, RequestKind::Audio, &u("ftp://x.example/a")),
+            Verdict::Block
+        );
         // IP-address hosts are not upgraded (MC2), so they are blocked.
-        assert_eq!(check_request(&c, RequestKind::Image, &u("http://203.0.113.5/i.png")), Verdict::Block);
-        assert_eq!(check_request(&c, RequestKind::ImageSet, &u("http://x.example/i.png")), Verdict::Block);
+        assert_eq!(
+            check_request(&c, RequestKind::Image, &u("http://203.0.113.5/i.png")),
+            Verdict::Block
+        );
+        assert_eq!(
+            check_request(&c, RequestKind::ImageSet, &u("http://x.example/i.png")),
+            Verdict::Block
+        );
         // Response check catches a redirect target.
         assert_eq!(check_response(&c, &u("http://x.example/")), Verdict::Block);
         assert_eq!(check_response(&c, &u("https://x.example/")), Verdict::Allow);
@@ -344,8 +387,14 @@ mod tests {
     #[test]
     fn insecure_page_is_not_mixed() {
         let c = ctx("http://a.example/");
-        assert_eq!(check_request(&c, RequestKind::Script, &u("http://x.example/")), Verdict::Allow);
-        assert_eq!(check_request(&c, RequestKind::Image, &u("http://x.example/")), Verdict::Allow);
+        assert_eq!(
+            check_request(&c, RequestKind::Script, &u("http://x.example/")),
+            Verdict::Allow
+        );
+        assert_eq!(
+            check_request(&c, RequestKind::Image, &u("http://x.example/")),
+            Verdict::Allow
+        );
     }
 
     #[test]
@@ -355,17 +404,32 @@ mod tests {
             ancestors: vec![node("https://top.example/")],
         };
         assert!(c.prohibits_mixed());
-        assert_eq!(check_request(&c, RequestKind::Script, &u("http://x.example/")), Verdict::Block);
+        assert_eq!(
+            check_request(&c, RequestKind::Script, &u("http://x.example/")),
+            Verdict::Block
+        );
         // Insecure all the way up: fine.
-        let c2 = Context { document: node("http://frame.example/"), ancestors: vec![node("http://top.example/")] };
-        assert_eq!(check_request(&c2, RequestKind::Script, &u("http://x.example/")), Verdict::Allow);
+        let c2 = Context {
+            document: node("http://frame.example/"),
+            ancestors: vec![node("http://top.example/")],
+        };
+        assert_eq!(
+            check_request(&c2, RequestKind::Script, &u("http://x.example/")),
+            Verdict::Allow
+        );
     }
 
     #[test]
     fn file_pages_prohibit_mixed() {
         let c = ctx("file:///tmp/a.html");
-        assert_eq!(check_request(&c, RequestKind::Script, &u("http://x.example/")), Verdict::Block);
-        assert_eq!(check_request(&c, RequestKind::Script, &u("file:///tmp/b.js")), Verdict::Allow);
+        assert_eq!(
+            check_request(&c, RequestKind::Script, &u("http://x.example/")),
+            Verdict::Block
+        );
+        assert_eq!(
+            check_request(&c, RequestKind::Script, &u("file:///tmp/b.js")),
+            Verdict::Allow
+        );
     }
 
     #[test]

@@ -27,10 +27,17 @@ mod cookies_on_disk {
         let psl = psl();
 
         let mut jar = Jar::new();
-        jar.store(&psl, &a, "sid=A-SESSION; Domain=cdn.example; Path=/; Secure; SameSite=None; Max-Age=3600").unwrap();
-        jar.store(&psl, &a, "theme=dark; Path=/; Max-Age=3600").unwrap();
+        jar.store(
+            &psl,
+            &a,
+            "sid=A-SESSION; Domain=cdn.example; Path=/; Secure; SameSite=None; Max-Age=3600",
+        )
+        .unwrap();
+        jar.store(&psl, &a, "theme=dark; Path=/; Max-Age=3600")
+            .unwrap();
         jar.store(&psl, &a, "tmp=session-only; Path=/").unwrap();
-        jar.store(&psl, &b, "sid=B-SESSION; Path=/; Max-Age=3600").unwrap();
+        jar.store(&psl, &b, "sid=B-SESSION; Path=/; Max-Age=3600")
+            .unwrap();
 
         let now = Instant::now();
         {
@@ -45,8 +52,17 @@ mod cookies_on_disk {
         let s = Store::open(d.path()).unwrap();
         let mut fresh = Jar::new();
         let report = load(&s, &psl, &a, &mut fresh, 1_030, true);
-        assert_eq!(report, LoadReport { loaded: 3, ..LoadReport::default() });
-        let mut names: Vec<&str> = visible(&fresh, &a).iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            report,
+            LoadReport {
+                loaded: 3,
+                ..LoadReport::default()
+            }
+        );
+        let mut names: Vec<&str> = visible(&fresh, &a)
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
         names.sort_unstable();
         assert_eq!(names, ["sid", "theme", "tmp"]);
         // Partition a's load surfaced nothing from partition b.
@@ -85,7 +101,10 @@ mod cookies_on_disk {
         let mut out = Jar::new();
         load(&s, &psl, &a, &mut out, 0, true);
         let v = visible(&out, &a);
-        assert_eq!((v.len(), v[0].name.as_str(), v[0].value.as_str()), (1, "two", "2b"));
+        assert_eq!(
+            (v.len(), v[0].name.as_str(), v[0].value.as_str()),
+            (1, "two", "2b")
+        );
     }
 
     #[test]
@@ -95,9 +114,11 @@ mod cookies_on_disk {
         let psl = psl();
         let mut s = Store::open(d.path()).unwrap();
         // Garbage under the cookie namespace.
-        s.put(&a, Namespace::Cookies, b"junk", b"not a cookie").unwrap();
+        s.put(&a, Namespace::Cookies, b"junk", b"not a cookie")
+            .unwrap();
         // Page storage under the same key bytes is a different namespace.
-        s.put(&a, Namespace::Storage, b"junk", b"page data").unwrap();
+        s.put(&a, Namespace::Storage, b"junk", b"page data")
+            .unwrap();
         let mut jar = Jar::new();
         let r = load(&s, &psl, &a, &mut jar, 0, true);
         assert_eq!((r.loaded, r.rejected), (0, 1));
@@ -106,8 +127,8 @@ mod cookies_on_disk {
 
     #[test]
     fn a_planted_supercookie_is_refused_on_load() {
-        use px_store::cookies::StoredCookie;
         use px_net::cookie::SameSite;
+        use px_store::cookies::StoredCookie;
         let d = TempDir::new("cookies-super");
         let a = pk("a.example", "www.cdn.example");
         let psl = psl();
@@ -124,7 +145,13 @@ mod cookies_on_disk {
             same_site: SameSite::Lax,
             expires_unix: Some(10_000),
         };
-        s.put(&a, Namespace::Cookies, &evil.store_key().unwrap(), &evil.encode().unwrap()).unwrap();
+        s.put(
+            &a,
+            Namespace::Cookies,
+            &evil.store_key().unwrap(),
+            &evil.encode().unwrap(),
+        )
+        .unwrap();
         let mut jar = Jar::new();
         let r = load(&s, &psl, &a, &mut jar, 0, true);
         assert_eq!((r.loaded, r.rejected), (0, 1));

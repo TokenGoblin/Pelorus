@@ -153,9 +153,17 @@ pub fn encode_record(op: &Op<'_>) -> Result<Vec<u8>, FormatError> {
     let mut body = Vec::with_capacity(6 + pid.len() + key.len() + value.len());
     body.push(code);
     body.push(ns);
-    body.extend_from_slice(&u16::try_from(pid.len()).map_err(|_| FormatError::RecordTooLarge)?.to_le_bytes());
+    body.extend_from_slice(
+        &u16::try_from(pid.len())
+            .map_err(|_| FormatError::RecordTooLarge)?
+            .to_le_bytes(),
+    );
     body.extend_from_slice(pid);
-    body.extend_from_slice(&u16::try_from(key.len()).map_err(|_| FormatError::RecordTooLarge)?.to_le_bytes());
+    body.extend_from_slice(
+        &u16::try_from(key.len())
+            .map_err(|_| FormatError::RecordTooLarge)?
+            .to_le_bytes(),
+    );
     body.extend_from_slice(key);
     body.extend_from_slice(value);
     let len = u32::try_from(body.len()).map_err(|_| FormatError::RecordTooLarge)?;
@@ -288,20 +296,30 @@ mod tests {
         assert_eq!(h.len(), HEADER_LEN);
         assert_eq!(check_header(&h), Ok(Header::Valid));
         // magic, version 1, flags 0 spelled out by hand.
-        assert_eq!(h.get(..12), Some(&b"PXSL\x01\x00\x00\x00\x00\x00\x00\x00"[..]));
+        assert_eq!(
+            h.get(..12),
+            Some(&b"PXSL\x01\x00\x00\x00\x00\x00\x00\x00"[..])
+        );
     }
 
     #[test]
     fn every_header_prefix_is_fresh_and_nothing_panics() {
         let h = header_bytes();
         for n in 0..HEADER_LEN {
-            assert_eq!(check_header(h.get(..n).unwrap()), Ok(Header::Fresh), "n={n}");
+            assert_eq!(
+                check_header(h.get(..n).unwrap()),
+                Ok(Header::Fresh),
+                "n={n}"
+            );
         }
     }
 
     #[test]
     fn foreign_file_is_not_a_store() {
-        assert_eq!(check_header(b"SQLite format 3\0"), Err(FormatError::NotAStore));
+        assert_eq!(
+            check_header(b"SQLite format 3\0"),
+            Err(FormatError::NotAStore)
+        );
         assert_eq!(check_header(b"SQ"), Err(FormatError::NotAStore));
     }
 
@@ -311,13 +329,19 @@ mod tests {
         h[4] = 2;
         assert_eq!(
             check_header(&h),
-            Err(FormatError::UnsupportedVersion { version: 2, flags: 0 })
+            Err(FormatError::UnsupportedVersion {
+                version: 2,
+                flags: 0
+            })
         );
         let mut h = header_bytes();
         h[8] = 1;
         assert_eq!(
             check_header(&h),
-            Err(FormatError::UnsupportedVersion { version: 1, flags: 1 })
+            Err(FormatError::UnsupportedVersion {
+                version: 1,
+                flags: 1
+            })
         );
     }
 

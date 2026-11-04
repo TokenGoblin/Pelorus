@@ -248,8 +248,19 @@ fn is_cors_unsafe_byte(b: u8) -> bool {
     (b < 0x20 && b != 0x09)
         || matches!(
             b,
-            b'"' | b'(' | b')' | b':' | b'<' | b'>' | b'?' | b'@' | b'[' | b'\\' | b']' | b'{'
-                | b'}' | 0x7f
+            b'"' | b'('
+                | b')'
+                | b':'
+                | b'<'
+                | b'>'
+                | b'?'
+                | b'@'
+                | b'['
+                | b'\\'
+                | b']'
+                | b'{'
+                | b'}'
+                | 0x7f
         )
 }
 
@@ -257,8 +268,20 @@ fn is_token_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric()
         || matches!(
             b,
-            b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_'
-                | b'`' | b'|' | b'~'
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
         )
 }
 
@@ -460,7 +483,10 @@ pub fn preflight_request(request: &CorsRequest) -> PreflightRequest {
     ];
     let names = unsafe_header_names(&request.headers);
     if !names.is_empty() {
-        headers.push(Header::new("Access-Control-Request-Headers", &names.join(",")));
+        headers.push(Header::new(
+            "Access-Control-Request-Headers",
+            &names.join(","),
+        ));
     }
     PreflightRequest {
         method: "OPTIONS".to_string(),
@@ -685,15 +711,16 @@ impl PreflightCache {
                 .as_deref()
                 .is_some_and(|m| m == request.method || (m == "*" && !include))
         });
-        let method_ok = method_hit || (is_safelisted_method(&request.method) && !request.use_cors_preflight_flag);
+        let method_ok = method_hit
+            || (is_safelisted_method(&request.method) && !request.use_cors_preflight_flag);
         if !method_ok {
             return false;
         }
         let header_hit = |name: &str| {
             live().any(|e| {
-                e.header.as_deref().is_some_and(|h| {
-                    h == name || (h == "*" && !include && name != "authorization")
-                })
+                e.header
+                    .as_deref()
+                    .is_some_and(|h| h == name || (h == "*" && !include && name != "authorization"))
             })
         };
         if request
@@ -798,8 +825,8 @@ pub fn filter_response(
         Tainting::Cors => {
             let exposed = extract_list(&response.headers, "Access-Control-Expose-Headers")
                 .unwrap_or_default();
-            let wildcard = request.credentials != CredentialsMode::Include
-                && exposed.iter().any(|e| e == "*");
+            let wildcard =
+                request.credentials != CredentialsMode::Include && exposed.iter().any(|e| e == "*");
             const SAFE: &[&str] = &[
                 "cache-control",
                 "content-language",
@@ -846,7 +873,12 @@ mod tests {
         }
     }
     fn simple() -> CorsRequest {
-        req("GET", "https://api.example/x", vec![], CredentialsMode::Omit)
+        req(
+            "GET",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Omit,
+        )
     }
     fn resp(status: u16, hs: &[(&str, &str)]) -> CorsResponse {
         CorsResponse {
@@ -868,7 +900,10 @@ mod tests {
             assert!(
                 matches!(
                     classify(&req(m, "https://a.example/", vec![], CredentialsMode::Omit)),
-                    Classification::Preflighted(PreflightReasons { unsafe_method: true, .. })
+                    Classification::Preflighted(PreflightReasons {
+                        unsafe_method: true,
+                        ..
+                    })
                 ),
                 "{m}"
             );
@@ -887,8 +922,14 @@ mod tests {
         };
         assert_eq!(ct("text/plain"), Classification::Simple);
         assert_eq!(ct("TEXT/PLAIN; charset=utf-8"), Classification::Simple);
-        assert_eq!(ct("multipart/form-data; boundary=x"), Classification::Simple);
-        assert_eq!(ct("application/x-www-form-urlencoded"), Classification::Simple);
+        assert_eq!(
+            ct("multipart/form-data; boundary=x"),
+            Classification::Simple
+        );
+        assert_eq!(
+            ct("application/x-www-form-urlencoded"),
+            Classification::Simple
+        );
         // Not safelisted:
         assert_ne!(ct("application/json"), Classification::Simple);
         assert_ne!(ct("text/plain, application/json"), Classification::Simple); // comma list? essence "text/plain, application/json" is not a token pair
@@ -918,7 +959,10 @@ mod tests {
     #[test]
     fn value_length_limits() {
         let long = "a".repeat(129);
-        assert_eq!(unsafe_header_names(&[Header::new("Accept", &long)]), vec!["accept"]);
+        assert_eq!(
+            unsafe_header_names(&[Header::new("Accept", &long)]),
+            vec!["accept"]
+        );
         let ok = "a".repeat(128);
         assert!(unsafe_header_names(&[Header::new("Accept", &ok)]).is_empty());
         // 9 x 128 = 1152 > 1024: every otherwise-safelisted header becomes unsafe.
@@ -969,7 +1013,10 @@ mod tests {
         assert_eq!(p.credentials, CredentialsMode::SameOrigin);
         assert_eq!(p.url.serialize(true), "https://api.example/x?y=1");
         assert!(p.headers.contains(&Header::new("Accept", "*/*")));
-        assert!(p.headers.contains(&Header::new("Access-Control-Request-Method", "PUT")));
+        assert!(
+            p.headers
+                .contains(&Header::new("Access-Control-Request-Method", "PUT"))
+        );
         assert!(p.headers.contains(&Header::new(
             "Access-Control-Request-Headers",
             "content-type,x-token"
@@ -978,8 +1025,17 @@ mod tests {
 
     #[test]
     fn preflight_request_omits_headers_list_when_empty() {
-        let p = preflight_request(&req("DELETE", "https://a.example/", vec![], CredentialsMode::Omit));
-        assert!(!p.headers.iter().any(|h| h.name == "Access-Control-Request-Headers"));
+        let p = preflight_request(&req(
+            "DELETE",
+            "https://a.example/",
+            vec![],
+            CredentialsMode::Omit,
+        ));
+        assert!(
+            !p.headers
+                .iter()
+                .any(|h| h.name == "Access-Control-Request-Headers")
+        );
     }
 
     #[test]
@@ -994,21 +1050,47 @@ mod tests {
     #[test]
     fn cors_check_matrix() {
         let none = simple();
-        let inc = req("GET", "https://api.example/x", vec![], CredentialsMode::Include);
+        let inc = req(
+            "GET",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Include,
+        );
         let h = |v: &[(&str, &str)]| resp(200, v).headers;
         // Missing.
-        assert_eq!(cors_check(&none, &h(&[])), Err(CorsError::MissingAllowOrigin));
+        assert_eq!(
+            cors_check(&none, &h(&[])),
+            Err(CorsError::MissingAllowOrigin)
+        );
         // Wildcard without credentials.
         assert!(cors_check(&none, &h(&[("Access-Control-Allow-Origin", "*")])).is_ok());
         // Wildcard with credentials: rejected.
         assert_eq!(
-            cors_check(&inc, &h(&[("Access-Control-Allow-Origin", "*"), ("Access-Control-Allow-Credentials", "true")])),
+            cors_check(
+                &inc,
+                &h(&[
+                    ("Access-Control-Allow-Origin", "*"),
+                    ("Access-Control-Allow-Credentials", "true")
+                ])
+            ),
             Err(CorsError::OriginMismatch)
         );
         // Exact origin.
-        assert!(cors_check(&none, &h(&[("access-control-allow-origin", "https://app.example")])).is_ok());
+        assert!(
+            cors_check(
+                &none,
+                &h(&[("access-control-allow-origin", "https://app.example")])
+            )
+            .is_ok()
+        );
         // Wrong origin, trailing slash, case.
-        for bad in ["https://other.example", "https://app.example/", "HTTPS://APP.EXAMPLE", "null", ""] {
+        for bad in [
+            "https://other.example",
+            "https://app.example/",
+            "HTTPS://APP.EXAMPLE",
+            "null",
+            "",
+        ] {
             assert_eq!(
                 cors_check(&none, &h(&[("Access-Control-Allow-Origin", bad)])),
                 Err(CorsError::OriginMismatch),
@@ -1017,7 +1099,13 @@ mod tests {
         }
         // Credentials: needs exactly `true`.
         let acao = ("Access-Control-Allow-Origin", "https://app.example");
-        assert!(cors_check(&inc, &h(&[acao, ("Access-Control-Allow-Credentials", "true")])).is_ok());
+        assert!(
+            cors_check(
+                &inc,
+                &h(&[acao, ("Access-Control-Allow-Credentials", "true")])
+            )
+            .is_ok()
+        );
         for bad in ["True", "TRUE", "1", "yes", "true, true", " false"] {
             assert_eq!(
                 cors_check(&inc, &h(&[acao, ("Access-Control-Allow-Credentials", bad)])),
@@ -1025,7 +1113,10 @@ mod tests {
                 "{bad}"
             );
         }
-        assert_eq!(cors_check(&inc, &h(&[acao])), Err(CorsError::CredentialsNotAllowed));
+        assert_eq!(
+            cors_check(&inc, &h(&[acao])),
+            Err(CorsError::CredentialsNotAllowed)
+        );
         // Duplicate ACAO headers combine to "a, b" and fail.
         assert_eq!(
             cors_check(&none, &h(&[acao, acao])),
@@ -1041,36 +1132,81 @@ mod tests {
 
     #[test]
     fn preflight_validation_methods() {
-        let put = req("PUT", "https://api.example/x", vec![], CredentialsMode::Omit);
+        let put = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Omit,
+        );
         assert_eq!(
             validate_preflight(&put, &grant_resp(&[])).unwrap_err(),
             CorsError::MethodNotAllowed
         );
-        let g = validate_preflight(&put, &grant_resp(&[("Access-Control-Allow-Methods", "GET, PUT")])).unwrap();
+        let g = validate_preflight(
+            &put,
+            &grant_resp(&[("Access-Control-Allow-Methods", "GET, PUT")]),
+        )
+        .unwrap();
         assert_eq!(g.methods, vec!["GET", "PUT"]);
         assert_eq!(g.max_age, 5);
         // Methods are case-sensitive.
-        assert!(validate_preflight(&put, &grant_resp(&[("Access-Control-Allow-Methods", "put")])).is_err());
+        assert!(
+            validate_preflight(
+                &put,
+                &grant_resp(&[("Access-Control-Allow-Methods", "put")])
+            )
+            .is_err()
+        );
         // Wildcard works without credentials only.
-        assert!(validate_preflight(&put, &grant_resp(&[("Access-Control-Allow-Methods", "*")])).is_ok());
-        let putc = req("PUT", "https://api.example/x", vec![], CredentialsMode::Include);
+        assert!(
+            validate_preflight(&put, &grant_resp(&[("Access-Control-Allow-Methods", "*")])).is_ok()
+        );
+        let putc = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Include,
+        );
         let r = grant_resp(&[
             ("Access-Control-Allow-Methods", "*"),
             ("Access-Control-Allow-Credentials", "true"),
         ]);
-        assert_eq!(validate_preflight(&putc, &r).unwrap_err(), CorsError::MethodNotAllowed);
+        assert_eq!(
+            validate_preflight(&putc, &r).unwrap_err(),
+            CorsError::MethodNotAllowed
+        );
         // A safelisted method needs no listing (header-only preflight).
-        let post = req("POST", "https://api.example/x", vec![Header::new("X-A", "1")], CredentialsMode::Omit);
-        assert!(validate_preflight(&post, &grant_resp(&[("Access-Control-Allow-Headers", "x-a")])).is_ok());
+        let post = req(
+            "POST",
+            "https://api.example/x",
+            vec![Header::new("X-A", "1")],
+            CredentialsMode::Omit,
+        );
+        assert!(
+            validate_preflight(
+                &post,
+                &grant_resp(&[("Access-Control-Allow-Headers", "x-a")])
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn preflight_validation_status() {
-        let put = req("PUT", "https://api.example/x", vec![], CredentialsMode::Omit);
+        let put = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Omit,
+        );
         let mut r = grant_resp(&[("Access-Control-Allow-Methods", "PUT")]);
         for s in [301, 403, 404, 500, 199, 0] {
             r.status = s;
-            assert_eq!(validate_preflight(&put, &r).unwrap_err(), CorsError::PreflightStatus, "{s}");
+            assert_eq!(
+                validate_preflight(&put, &r).unwrap_err(),
+                CorsError::PreflightStatus,
+                "{s}"
+            );
         }
         for s in [200, 204, 299] {
             r.status = s;
@@ -1097,14 +1233,24 @@ mod tests {
         let star = grant_resp(&[("Access-Control-Allow-Headers", "*")]);
         assert!(validate_preflight(&r, &star).is_ok());
         // Wildcard with credentials is a literal "*": rejected.
-        let rc = req("GET", "https://api.example/x", vec![Header::new("X-Token", "1")], CredentialsMode::Include);
+        let rc = req(
+            "GET",
+            "https://api.example/x",
+            vec![Header::new("X-Token", "1")],
+            CredentialsMode::Include,
+        );
         let star_c = grant_resp(&[
             ("Access-Control-Allow-Headers", "*"),
             ("Access-Control-Allow-Credentials", "true"),
         ]);
         assert!(validate_preflight(&rc, &star_c).is_err());
         // Authorization is never covered by `*`.
-        let ra = req("GET", "https://api.example/x", vec![Header::new("Authorization", "t")], CredentialsMode::Omit);
+        let ra = req(
+            "GET",
+            "https://api.example/x",
+            vec![Header::new("Authorization", "t")],
+            CredentialsMode::Omit,
+        );
         assert_eq!(
             validate_preflight(&ra, &star).unwrap_err(),
             CorsError::HeaderNotAllowed("authorization".into())
@@ -1123,11 +1269,19 @@ mod tests {
 
     #[test]
     fn max_age_rules() {
-        let put = req("PUT", "https://api.example/x", vec![], CredentialsMode::Omit);
+        let put = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Omit,
+        );
         let age = |v: &str| {
             validate_preflight(
                 &put,
-                &grant_resp(&[("Access-Control-Allow-Methods", "PUT"), ("Access-Control-Max-Age", v)]),
+                &grant_resp(&[
+                    ("Access-Control-Allow-Methods", "PUT"),
+                    ("Access-Control-Max-Age", v),
+                ]),
             )
             .unwrap()
             .max_age
@@ -1144,15 +1298,32 @@ mod tests {
 
     #[test]
     fn credentialed_preflight_requires_credentials_header() {
-        let put = req("PUT", "https://api.example/x", vec![], CredentialsMode::Include);
+        let put = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Include,
+        );
         let r = grant_resp(&[("Access-Control-Allow-Methods", "PUT")]);
-        assert_eq!(validate_preflight(&put, &r).unwrap_err(), CorsError::CredentialsNotAllowed);
+        assert_eq!(
+            validate_preflight(&put, &r).unwrap_err(),
+            CorsError::CredentialsNotAllowed
+        );
     }
 
     #[test]
     fn preflight_cache_key_and_expiry() {
-        let r = req("PUT", "https://api.example/x", vec![Header::new("X-T", "1")], CredentialsMode::Omit);
-        let g = PreflightGrant { methods: vec!["PUT".into()], header_names: vec!["X-T".into()], max_age: 100 };
+        let r = req(
+            "PUT",
+            "https://api.example/x",
+            vec![Header::new("X-T", "1")],
+            CredentialsMode::Omit,
+        );
+        let g = PreflightGrant {
+            methods: vec!["PUT".into()],
+            header_names: vec!["X-T".into()],
+            max_age: 100,
+        };
         let mut c = PreflightCache::new();
         assert!(!c.covers("p1", &r, 0));
         c.store("p1", &r, &g, 1000);
@@ -1187,9 +1358,23 @@ mod tests {
 
     #[test]
     fn preflight_cache_credentials_asymmetry() {
-        let plain = req("PUT", "https://api.example/x", vec![], CredentialsMode::Omit);
-        let cred = req("PUT", "https://api.example/x", vec![], CredentialsMode::Include);
-        let g = PreflightGrant { methods: vec!["PUT".into()], header_names: vec![], max_age: 100 };
+        let plain = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Omit,
+        );
+        let cred = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Include,
+        );
+        let g = PreflightGrant {
+            methods: vec!["PUT".into()],
+            header_names: vec![],
+            max_age: 100,
+        };
         let mut c = PreflightCache::new();
         // A non-credentialed grant must not satisfy a credentialed request.
         c.store("p", &plain, &g, 0);
@@ -1204,25 +1389,57 @@ mod tests {
 
     #[test]
     fn preflight_cache_wildcards() {
-        let r = req("PUT", "https://api.example/x", vec![Header::new("X-T", "1"), Header::new("Authorization", "a")], CredentialsMode::Omit);
-        let g = PreflightGrant { methods: vec!["*".into()], header_names: vec!["*".into()], max_age: 100 };
+        let r = req(
+            "PUT",
+            "https://api.example/x",
+            vec![Header::new("X-T", "1"), Header::new("Authorization", "a")],
+            CredentialsMode::Omit,
+        );
+        let g = PreflightGrant {
+            methods: vec!["*".into()],
+            header_names: vec!["*".into()],
+            max_age: 100,
+        };
         let mut c = PreflightCache::new();
         c.store("p", &r, &g, 0);
         assert!(!c.covers("p", &r, 1), "authorization is not wildcarded");
-        let r2 = req("PUT", "https://api.example/x", vec![Header::new("X-T", "1")], CredentialsMode::Omit);
+        let r2 = req(
+            "PUT",
+            "https://api.example/x",
+            vec![Header::new("X-T", "1")],
+            CredentialsMode::Omit,
+        );
         assert!(c.covers("p", &r2, 1));
     }
 
     #[test]
     fn cache_is_bounded_and_zero_age_not_stored() {
         let mut c = PreflightCache::new();
-        let g0 = PreflightGrant { methods: vec!["PUT".into()], header_names: vec![], max_age: 0 };
-        let r = req("PUT", "https://api.example/x", vec![], CredentialsMode::Omit);
+        let g0 = PreflightGrant {
+            methods: vec!["PUT".into()],
+            header_names: vec![],
+            max_age: 0,
+        };
+        let r = req(
+            "PUT",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Omit,
+        );
         c.store("p", &r, &g0, 0);
         assert!(c.is_empty());
         for i in 0..(MAX_CACHE_ENTRIES + 50) {
-            let r = req("PUT", &format!("https://api.example/{i}"), vec![], CredentialsMode::Omit);
-            let g = PreflightGrant { methods: vec!["PUT".into()], header_names: vec![], max_age: 100 };
+            let r = req(
+                "PUT",
+                &format!("https://api.example/{i}"),
+                vec![],
+                CredentialsMode::Omit,
+            );
+            let g = PreflightGrant {
+                methods: vec!["PUT".into()],
+                header_names: vec![],
+                max_age: 100,
+            };
             c.store("p", &r, &g, 0);
         }
         assert_eq!(c.len(), MAX_CACHE_ENTRIES);
@@ -1275,7 +1492,12 @@ mod tests {
         let get = simple();
         assert!(should_send_origin_header(&get, Tainting::Cors));
         assert!(!should_send_origin_header(&get, Tainting::Basic));
-        let post = req("POST", "https://app.example/", vec![], CredentialsMode::Omit);
+        let post = req(
+            "POST",
+            "https://app.example/",
+            vec![],
+            CredentialsMode::Omit,
+        );
         assert!(should_send_origin_header(&post, Tainting::Basic));
     }
 
@@ -1296,11 +1518,27 @@ mod tests {
         let names: Vec<&str> = f.headers.iter().map(|h| h.name.as_str()).collect();
         assert_eq!(names, vec!["Content-Type", "X-Public"]);
         // Wildcard (no credentials).
-        let w = resp(200, &[("X-A", "1"), ("Set-Cookie", "c"), ("Access-Control-Expose-Headers", "*")]);
-        let names: Vec<String> = filter_response(&r, Tainting::Cors, &w).headers.into_iter().map(|h| h.name).collect();
+        let w = resp(
+            200,
+            &[
+                ("X-A", "1"),
+                ("Set-Cookie", "c"),
+                ("Access-Control-Expose-Headers", "*"),
+            ],
+        );
+        let names: Vec<String> = filter_response(&r, Tainting::Cors, &w)
+            .headers
+            .into_iter()
+            .map(|h| h.name)
+            .collect();
         assert_eq!(names, vec!["X-A", "Access-Control-Expose-Headers"]);
         // Wildcard ignored with credentials.
-        let rc = req("GET", "https://api.example/x", vec![], CredentialsMode::Include);
+        let rc = req(
+            "GET",
+            "https://api.example/x",
+            vec![],
+            CredentialsMode::Include,
+        );
         assert!(filter_response(&rc, Tainting::Cors, &w).headers.is_empty());
         // Basic hides only cookies.
         let b = filter_response(&r, Tainting::Basic, &response);
@@ -1313,14 +1551,35 @@ mod tests {
 
     #[test]
     fn forbidden_names_and_methods() {
-        for n in ["Cookie", "HOST", "origin", "Referer", "Sec-Fetch-Mode", "proxy-authorization", "Transfer-Encoding", "Access-Control-Request-Method"] {
+        for n in [
+            "Cookie",
+            "HOST",
+            "origin",
+            "Referer",
+            "Sec-Fetch-Mode",
+            "proxy-authorization",
+            "Transfer-Encoding",
+            "Access-Control-Request-Method",
+        ] {
             assert!(is_forbidden_request_header(n, b"x"), "{n}");
         }
-        for n in ["Accept", "X-Custom", "Authorization", "Content-Type", "secure"] {
+        for n in [
+            "Accept",
+            "X-Custom",
+            "Authorization",
+            "Content-Type",
+            "secure",
+        ] {
             assert!(!is_forbidden_request_header(n, b"x"), "{n}");
         }
-        assert!(is_forbidden_request_header("X-HTTP-Method-Override", b"trace"));
-        assert!(is_forbidden_request_header("X-Method-Override", b"PUT, CONNECT"));
+        assert!(is_forbidden_request_header(
+            "X-HTTP-Method-Override",
+            b"trace"
+        ));
+        assert!(is_forbidden_request_header(
+            "X-Method-Override",
+            b"PUT, CONNECT"
+        ));
         assert!(!is_forbidden_request_header("X-HTTP-Method", b"PUT"));
         assert!(is_forbidden_request_header("X-HTTP-Method", &[0xff]));
         for m in ["CONNECT", "trace", "Track"] {
@@ -1339,10 +1598,18 @@ mod tests {
     #[test]
     fn every_enforcement_point_is_reached() {
         trace::reset();
-        let r = req("PUT", "https://api.example/x", vec![Header::new("X-T", "1")], CredentialsMode::Omit);
+        let r = req(
+            "PUT",
+            "https://api.example/x",
+            vec![Header::new("X-T", "1")],
+            CredentialsMode::Omit,
+        );
         let _ = classify(&r);
         let _ = preflight_request(&r);
-        let resp = grant_resp(&[("Access-Control-Allow-Methods", "PUT"), ("Access-Control-Allow-Headers", "x-t")]);
+        let resp = grant_resp(&[
+            ("Access-Control-Allow-Methods", "PUT"),
+            ("Access-Control-Allow-Headers", "x-t"),
+        ]);
         let g = validate_preflight(&r, &resp);
         let mut c = PreflightCache::new();
         if let Ok(g) = g {
@@ -1371,16 +1638,25 @@ mod tests {
             for _ in 0..(next() % 6) {
                 let nl = (next() % 12) as usize;
                 let vl = (next() % 200) as usize;
-                let name: String = (0..nl).map(|_| (b'a' + (next() % 26) as u8) as char).collect();
+                let name: String = (0..nl)
+                    .map(|_| (b'a' + (next() % 26) as u8) as char)
+                    .collect();
                 let value: Vec<u8> = (0..vl).map(|_| (next() & 0xff) as u8).collect();
                 hs.push(Header { name, value });
             }
             let mut rq = simple();
             rq.headers = hs.clone();
-            rq.credentials = if next() & 1 == 0 { CredentialsMode::Include } else { CredentialsMode::Omit };
+            rq.credentials = if next() & 1 == 0 {
+                CredentialsMode::Include
+            } else {
+                CredentialsMode::Omit
+            };
             let _ = classify(&rq);
             let _ = preflight_request(&rq);
-            let rs = CorsResponse { status: (next() % 600) as u16, headers: hs };
+            let rs = CorsResponse {
+                status: (next() % 600) as u16,
+                headers: hs,
+            };
             let _ = validate_preflight(&rq, &rs);
             let _ = cors_check(&rq, &rs.headers);
             let _ = filter_response(&rq, Tainting::Cors, &rs);

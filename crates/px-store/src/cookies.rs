@@ -386,7 +386,11 @@ mod tests {
             c.to_set_cookie(1_040).unwrap(),
             "sid=abc123; Domain=cdn.example; Path=/app; Secure; HttpOnly; SameSite=None; Max-Age=60"
         );
-        assert_eq!(c.to_set_cookie(1_100), None, "expiring exactly now is expired");
+        assert_eq!(
+            c.to_set_cookie(1_100),
+            None,
+            "expiring exactly now is expired"
+        );
         assert_eq!(c.to_set_cookie(5_000), None);
     }
 
@@ -397,14 +401,27 @@ mod tests {
         let now = Instant::now();
         let stored = StoredCookie::from_cookie(&live, now, 1_000).unwrap();
         // Parsed an instant ago, so 100 s minus a hair, rounded up: 100 or 101.
-        assert!(matches!(stored.expires_unix, Some(1_100 | 1_101)), "{stored:?}");
+        assert!(
+            matches!(stored.expires_unix, Some(1_100 | 1_101)),
+            "{stored:?}"
+        );
         let again = parse(&psl(), &origin(), &stored.to_set_cookie(1_000).unwrap()).unwrap();
-        for (a, b) in [(&live.name, &again.name), (&live.value, &again.value), (&live.domain, &again.domain), (&live.path, &again.path)] {
+        for (a, b) in [
+            (&live.name, &again.name),
+            (&live.value, &again.value),
+            (&live.domain, &again.domain),
+            (&live.path, &again.path),
+        ] {
             assert_eq!(a, b);
         }
         assert_eq!(
             (live.host_only, live.secure, live.http_only, live.same_site),
-            (again.host_only, again.secure, again.http_only, again.same_site)
+            (
+                again.host_only,
+                again.secure,
+                again.http_only,
+                again.same_site
+            )
         );
         assert!(again.expires_at.is_some());
     }
@@ -412,7 +429,10 @@ mod tests {
     #[test]
     fn expired_cookies_are_not_captured() {
         let past = parse(&psl(), &origin(), "a=b; Max-Age=0").unwrap();
-        assert_eq!(StoredCookie::from_cookie(&past, Instant::now(), 1_000), None);
+        assert_eq!(
+            StoredCookie::from_cookie(&past, Instant::now(), 1_000),
+            None
+        );
     }
 
     #[test]

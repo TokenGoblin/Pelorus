@@ -74,7 +74,10 @@ impl fmt::Display for FormatError {
         match self {
             Self::NotAStore => write!(f, "not a store file"),
             Self::UnsupportedVersion { version, flags } => {
-                write!(f, "unsupported store format (version {version}, flags {flags:#x})")
+                write!(
+                    f,
+                    "unsupported store format (version {version}, flags {flags:#x})"
+                )
             }
             Self::BadHeader => write!(f, "store header is damaged"),
             Self::RecordTooLarge => write!(f, "record exceeds the size bound"),

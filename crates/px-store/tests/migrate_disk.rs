@@ -32,7 +32,11 @@ mod migration {
             for e in fs::read_dir(dir).unwrap() {
                 let e = e.unwrap();
                 let name = e.file_name().into_string().unwrap();
-                let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+                let rel = if prefix.is_empty() {
+                    name
+                } else {
+                    format!("{prefix}/{name}")
+                };
                 let path = e.path();
                 if e.file_type().unwrap().is_dir() {
                     out.insert(rel.clone(), None);
@@ -74,7 +78,8 @@ mod migration {
         s.put(&a, Namespace::Storage, b"token", b"A-TOKEN").unwrap();
         s.put(&b, Namespace::Storage, b"token", b"B-TOKEN").unwrap();
         let mut jar = Jar::new();
-        jar.store(&psl, &a, "sid=A-COOKIE; Path=/; Max-Age=100000").unwrap();
+        jar.store(&psl, &a, "sid=A-COOKIE; Path=/; Max-Age=100000")
+            .unwrap();
         let cookies = jar.cookies_for(&a, "/", false);
         save(&mut s, &a, &cookies, Instant::now(), 5_000).unwrap();
         drop(s);
@@ -101,16 +106,25 @@ mod migration {
     #[test]
     fn populated_profile_migrates_with_zero_data_loss() {
         let (root, original) = fresh("populated", 6 << 20);
-        assert!(original.len() > 12, "profile should be populated: {}", original.len());
+        assert!(
+            original.len() > 12,
+            "profile should be populated: {}",
+            original.len()
+        );
         let out = migrate(root.path(), NEW, &[OLD]).unwrap();
         match &out {
-            Outcome::Migrated { from, files, source_removed, bytes, .. } => {
+            Outcome::Migrated {
+                from,
+                files,
+                source_removed,
+                bytes,
+                ..
+            } => {
                 assert_eq!(from, OLD);
                 assert!(*source_removed);
                 let want_files = original.values().filter(|v| v.is_some()).count();
                 assert_eq!(*files, want_files);
-                let want_bytes: u64 =
-                    original.values().flatten().map(|v| v.len() as u64).sum();
+                let want_bytes: u64 = original.values().flatten().map(|v| v.len() as u64).sum();
                 assert_eq!(*bytes, want_bytes);
             }
             other => panic!("{other:?}"),
@@ -124,15 +138,24 @@ mod migration {
         let a = pk("a.example", "www.cdn.example");
         let b = pk("b.example", "www.cdn.example");
         let s = Store::open(&root.path().join(NEW).join("store")).unwrap();
-        assert_eq!(s.get(&a, Namespace::Storage, b"token"), Some(&b"A-TOKEN"[..]));
-        assert_eq!(s.get(&b, Namespace::Storage, b"token"), Some(&b"B-TOKEN"[..]));
+        assert_eq!(
+            s.get(&a, Namespace::Storage, b"token"),
+            Some(&b"A-TOKEN"[..])
+        );
+        assert_eq!(
+            s.get(&b, Namespace::Storage, b"token"),
+            Some(&b"B-TOKEN"[..])
+        );
         let mut jar = Jar::new();
         let r = load(&s, &psl(), &a, &mut jar, 5_100, true);
         assert_eq!(r.loaded, 1);
         assert_eq!(jar.cookies_for(&a, "/", false)[0].value, "A-COOKIE");
 
         // Idempotent.
-        assert_eq!(migrate(root.path(), NEW, &[OLD]).unwrap(), Outcome::AlreadyCurrent);
+        assert_eq!(
+            migrate(root.path(), NEW, &[OLD]).unwrap(),
+            Outcome::AlreadyCurrent
+        );
     }
 
     #[test]
@@ -164,27 +187,51 @@ mod migration {
             let new = root.path().join(NEW);
 
             let r = migrate_with_hook(root.path(), NEW, &[OLD], &mut |n| n == k);
-            assert!(matches!(r, Err(MigrateError::Injected(n)) if n == k), "k={k}: {r:?}");
+            assert!(
+                matches!(r, Err(MigrateError::Injected(n)) if n == k),
+                "k={k}: {r:?}"
+            );
 
             // Safe state 1: nothing committed, legacy completely intact.
             // Safe state 2: committed; the new profile is complete.
             if new.exists() {
-                assert_eq!(without_marker(snapshot(&new)), original, "k={k}: committed but incomplete");
+                assert_eq!(
+                    without_marker(snapshot(&new)),
+                    original,
+                    "k={k}: committed but incomplete"
+                );
             } else {
-                assert_eq!(snapshot(&old), original, "k={k}: legacy damaged before commit");
+                assert_eq!(
+                    snapshot(&old),
+                    original,
+                    "k={k}: legacy damaged before commit"
+                );
             }
 
             // Resume.
-            let r = migrate(root.path(), NEW, &[OLD]).unwrap_or_else(|e| panic!("k={k}: resume {e}"));
+            let r =
+                migrate(root.path(), NEW, &[OLD]).unwrap_or_else(|e| panic!("k={k}: resume {e}"));
             assert!(
-                matches!(r, Outcome::Migrated { source_removed: true, .. } | Outcome::CleanedUp { source_removed: true }),
+                matches!(
+                    r,
+                    Outcome::Migrated {
+                        source_removed: true,
+                        ..
+                    } | Outcome::CleanedUp {
+                        source_removed: true
+                    }
+                ),
                 "k={k}: {r:?}"
             );
             assert_eq!(without_marker(snapshot(&new)), original, "k={k}");
             assert!(!old.exists(), "k={k}: legacy left behind");
             assert!(!root.path().join(format!("{NEW}{STAGING_SUFFIX}")).exists());
             // And again: nothing to do.
-            assert_eq!(migrate(root.path(), NEW, &[OLD]).unwrap(), Outcome::AlreadyCurrent, "k={k}");
+            assert_eq!(
+                migrate(root.path(), NEW, &[OLD]).unwrap(),
+                Outcome::AlreadyCurrent,
+                "k={k}"
+            );
         }
     }
 
@@ -205,8 +252,15 @@ mod migration {
         let (root, original) = fresh("existing", 1000);
         fs::create_dir_all(root.path().join(NEW)).unwrap();
         fs::write(root.path().join(NEW).join("mine.txt"), b"in use").unwrap();
-        assert_eq!(migrate(root.path(), NEW, &[OLD]).unwrap(), Outcome::AlreadyCurrent);
-        assert_eq!(snapshot(&root.path().join(OLD)), original, "legacy untouched");
+        assert_eq!(
+            migrate(root.path(), NEW, &[OLD]).unwrap(),
+            Outcome::AlreadyCurrent
+        );
+        assert_eq!(
+            snapshot(&root.path().join(OLD)),
+            original,
+            "legacy untouched"
+        );
         let new = snapshot(&root.path().join(NEW));
         assert_eq!(new.len(), 1);
         assert_eq!(new["mine.txt"].as_deref(), Some(&b"in use"[..]));
@@ -228,13 +282,19 @@ mod migration {
         // The list is append-ordered: the last name is the most recent.
         migrate(root.path(), NEW, &[OLDER, OLD]).unwrap();
         assert_eq!(without_marker(snapshot(&root.path().join(NEW))), original);
-        assert_eq!(fs::read(root.path().join(OLDER).join("ancient.txt")).unwrap(), b"older");
+        assert_eq!(
+            fs::read(root.path().join(OLDER).join("ancient.txt")).unwrap(),
+            b"older"
+        );
     }
 
     #[test]
     fn nothing_to_do_without_a_legacy_directory() {
         let root = TempDir::new("none");
-        assert_eq!(migrate(root.path(), NEW, &[OLD, OLDER]).unwrap(), Outcome::NoLegacy);
+        assert_eq!(
+            migrate(root.path(), NEW, &[OLD, OLDER]).unwrap(),
+            Outcome::NoLegacy
+        );
         assert!(!root.path().join(NEW).exists());
     }
 
@@ -242,14 +302,20 @@ mod migration {
     fn hostile_names_are_refused() {
         let root = TempDir::new("names");
         for bad in ["", "..", "a/b", "../x", "."] {
-            assert!(matches!(
-                migrate(root.path(), NEW, &[bad]),
-                Err(MigrateError::InvalidConfigName(_))
-            ), "{bad:?}");
-            assert!(matches!(
-                migrate(root.path(), bad, &[OLD]),
-                Err(MigrateError::InvalidConfigName(_))
-            ), "{bad:?}");
+            assert!(
+                matches!(
+                    migrate(root.path(), NEW, &[bad]),
+                    Err(MigrateError::InvalidConfigName(_))
+                ),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(
+                    migrate(root.path(), bad, &[OLD]),
+                    Err(MigrateError::InvalidConfigName(_))
+                ),
+                "{bad:?}"
+            );
         }
     }
 
@@ -269,12 +335,18 @@ mod migration {
             }
             false
         });
-        assert!(matches!(r, Err(MigrateError::VerificationFailed(_))), "{r:?}");
+        assert!(
+            matches!(r, Err(MigrateError::VerificationFailed(_))),
+            "{r:?}"
+        );
         assert!(!root.path().join(NEW).exists(), "nothing may be committed");
         assert!(!root.path().join(format!("{NEW}{STAGING_SUFFIX}")).exists());
         // Nothing deleted: legacy is the original plus the edit.
         let mut expect = original;
-        expect.insert("large.bin".into(), Some(b"changed under the migration".to_vec()));
+        expect.insert(
+            "large.bin".into(),
+            Some(b"changed under the migration".to_vec()),
+        );
         assert_eq!(snapshot(&old), expect);
     }
 
@@ -303,7 +375,12 @@ mod migration {
         fs::write(old.join("added-later.txt"), b"new data").unwrap();
 
         let r = migrate(root.path(), NEW, &[OLD]).unwrap();
-        assert_eq!(r, Outcome::CleanedUp { source_removed: false });
+        assert_eq!(
+            r,
+            Outcome::CleanedUp {
+                source_removed: false
+            }
+        );
         let left = snapshot(&old);
         let keys: Vec<&str> = left.keys().map(String::as_str).collect();
         assert_eq!(keys, ["added-later.txt", "naïve file (1).json"]);
@@ -321,7 +398,11 @@ mod migration {
         fn symlink_inside_the_tree_refuses_the_whole_migration() {
             let (root, _) = fresh("symlink", 1000);
             let outside = TempDir::new("outside");
-            fs::write(outside.path().join("secret.txt"), b"not part of the profile").unwrap();
+            fs::write(
+                outside.path().join("secret.txt"),
+                b"not part of the profile",
+            )
+            .unwrap();
             let old = root.path().join(OLD);
             symlink(outside.path(), old.join("cache/escape")).unwrap();
             let before = fs::read_link(old.join("cache/escape")).unwrap();
@@ -332,7 +413,10 @@ mod migration {
             assert_eq!(fs::read_link(old.join("cache/escape")).unwrap(), before);
             assert!(old.join("large.bin").exists());
             assert!(old.join("store/store.log").exists());
-            assert_eq!(fs::read(outside.path().join("secret.txt")).unwrap(), b"not part of the profile");
+            assert_eq!(
+                fs::read(outside.path().join("secret.txt")).unwrap(),
+                b"not part of the profile"
+            );
             assert!(!root.path().join(NEW).exists());
             assert!(!root.path().join(format!("{NEW}{STAGING_SUFFIX}")).exists());
         }
@@ -380,13 +464,20 @@ mod migration {
             let _ = migrate_with_hook(root.path(), NEW, &[OLD], &mut |n| n == first_cleanup);
             let outside = TempDir::new("swap-outside");
             fs::create_dir_all(outside.path().join("level1/level2/level3")).unwrap();
-            fs::write(outside.path().join("level1/level2/level3/blob.bin"), pattern(70_000)).unwrap();
+            fs::write(
+                outside.path().join("level1/level2/level3/blob.bin"),
+                pattern(70_000),
+            )
+            .unwrap();
             fs::remove_dir_all(old.join("cache")).unwrap();
             symlink(outside.path(), old.join("cache")).unwrap();
 
             migrate(root.path(), NEW, &[OLD]).unwrap();
             assert!(
-                outside.path().join("level1/level2/level3/blob.bin").exists(),
+                outside
+                    .path()
+                    .join("level1/level2/level3/blob.bin")
+                    .exists(),
                 "a file outside the profile was deleted through a symlink"
             );
         }

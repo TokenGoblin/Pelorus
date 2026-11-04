@@ -235,7 +235,10 @@ impl Store {
         if self.log_len.saturating_add(record.len() as u64) > MAX_LOG_BYTES {
             self.rewrite(&|_| false)?;
         }
-        let result = self.file.write_all(record).and_then(|()| self.file.sync_data());
+        let result = self
+            .file
+            .write_all(record)
+            .and_then(|()| self.file.sync_data());
         match result {
             Ok(()) => {
                 self.log_len = self.log_len.saturating_add(record.len() as u64);
@@ -295,7 +298,10 @@ mod tests {
         let mut seen = Vec::new();
         for (i, _) in production.match_indices("    pub fn ") {
             let rest = production.get(i + "    pub fn ".len()..).unwrap();
-            let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
             let signature = rest.split('{').next().unwrap();
             if !signature.contains("PartitionKey") {
                 assert!(
@@ -306,7 +312,14 @@ mod tests {
             seen.push(name);
         }
         // Every data method is present, so the scan is not vacuous.
-        for want in ["put", "get", "delete", "keys", "clear_partition", "clear_site"] {
+        for want in [
+            "put",
+            "get",
+            "delete",
+            "keys",
+            "clear_partition",
+            "clear_site",
+        ] {
             assert!(seen.iter().any(|n| n == want), "{want} missing from scan");
         }
         // The no-key list is exact: no stale entries.
