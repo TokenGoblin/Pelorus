@@ -26,6 +26,8 @@ px-dom = { path = "../crates/px-dom", features = ["testing"] }
 px-text = { path = "../crates/px-text" }
 # Phase 12: the CSP parser reads attacker-controlled headers.
 px-websec = { path = "../crates/px-websec" }
+# Phase 19: filter lists are untrusted text through the px-block parser.
+px-block = { path = "../crates/px-block" }
 # Phase 11: the WebIDL parser and generator sit in the build chain.
 px-bindings = { path = "../crates/px-bindings" }
 # Phase 20: the update manifest, signature file and Ed25519 verifier read
@@ -140,6 +142,13 @@ bench = false
 [[bin]]
 name = "webidl_parse"
 path = "fuzz_targets/webidl_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "filter_parse"
+path = "fuzz_targets/filter_parse.rs"
 test = false
 doc = false
 bench = false
