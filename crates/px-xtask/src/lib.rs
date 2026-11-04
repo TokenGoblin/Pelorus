@@ -16,6 +16,7 @@ pub mod gates;
 pub mod git;
 pub mod glob;
 pub mod proc;
+pub mod scan;
 
 #[cfg(test)]
 pub mod testutil;

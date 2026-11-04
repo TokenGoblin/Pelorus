@@ -65,6 +65,7 @@ use super::suites::{self, Suite};
 use crate::Gate;
 use crate::git;
 use crate::proc;
+use crate::scan::{self, is_comment_line, is_space, is_word};
 use std::path::Path;
 
 /// The three items as named test suites, plus a robustness floor: `(item,
@@ -122,15 +123,6 @@ pub const CRASH_FLOOR: usize = 20;
 
 pub const LAYOUT_SRC: &str = "crates/px-layout/src";
 
-fn is_word(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-/// Shell `[[:space:]]`.
-fn is_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\u{b}' | '\u{c}' | '\r')
-}
-
 fn is_op(c: char) -> bool {
     matches!(c, '-' | '+' | '*' | '/')
 }
@@ -145,12 +137,6 @@ pub fn count_ref_files(paths: &[String]) -> usize {
 
 pub fn count_html_files(paths: &[String]) -> usize {
     paths.iter().filter(|p| p.ends_with(".html")).count()
-}
-
-/// A line that is only a `//` comment (leading whitespace allowed). Comments
-/// are excluded from all the source scans.
-pub fn is_comment_line(line: &str) -> bool {
-    line.trim_start_matches(is_space).starts_with("//")
 }
 
 /// `f32` / `f64` as a whole word. `f32` in a layout crate is the specific thing
@@ -245,28 +231,10 @@ pub fn does_field_math(line: &str) -> bool {
     !exempt
 }
 
-/// All files under `dir`, recursively, without following symlinks (as
-/// `grep -r` does for links met during the walk).
-fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let Ok(t) = e.file_type() else { continue };
-        if t.is_dir() {
-            walk(&e.path(), out);
-        } else if t.is_file() {
-            out.push(e.path());
-        }
-    }
-}
-
 /// `path:line:content` for every non-comment line under `crates/px-layout/src`
 /// that satisfies `hit`, in path order -- the shape `grep -rn` printed.
 pub fn scan(root: &Path, hit: fn(&str) -> bool) -> Vec<String> {
-    let mut files = Vec::new();
-    walk(&root.join(LAYOUT_SRC), &mut files);
-    files.sort();
+    let files = scan::walk_files(&root.join(LAYOUT_SRC));
     let mut found = Vec::new();
     for f in files {
         let Ok(bytes) = std::fs::read(&f) else {
@@ -431,15 +399,6 @@ mod tests {
         assert_eq!(count_ref_files(&p), 2);
         let h = v(&["a.html", "b.htm", "c.html.x", "d.html"]);
         assert_eq!(count_html_files(&h), 2);
-    }
-
-    #[test]
-    fn comment_lines() {
-        assert!(is_comment_line("  // f32"));
-        assert!(is_comment_line("//! f32"));
-        assert!(is_comment_line("\t/// f32"));
-        assert!(!is_comment_line("let x: f32; // trailing"));
-        assert!(!is_comment_line(""));
     }
 
     #[test]
