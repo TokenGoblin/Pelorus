@@ -38,7 +38,7 @@
 //! the tuple constructor, because this is exactly the kind of invariant that
 //! holds for a year and then does not.
 
-use app_units::Au;
+pub use app_units::Au;
 
 /// Au from whole CSS pixels, clamped.
 ///

@@ -1,6 +1,12 @@
 #![forbid(unsafe_code)]
 
-//! Display list construction.
+//! Display list construction (Phase 8).
 //!
-//! Phase 0 skeleton: no implementation. Phase 8 fills this in;
-//! see docs/build-spec.md §9 and this crate's CLAUDE.md.
+//! [`display_list`] defines the flat, ordered list of paint operations that sits
+//! between layout and any rasterizer. Building one from a laid-out document, the
+//! software rasterizer and the PNG encoder are separate modules added in their own
+//! commits; see docs/build-spec.md section 9 and this crate's CLAUDE.md.
+
+pub mod display_list;
+
+pub use display_list::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect};
