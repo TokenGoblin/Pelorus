@@ -380,22 +380,19 @@ pub fn conformance_lines(output: &str) -> Vec<&str> {
 /// test run is also "did not report a number".
 fn check_conformance(g: &mut Gate, root: &Path) {
     g.info("html5lib conformance (see docs/adr/019-conformance-gate-exclusions.md)");
-    let prog = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let reported = match proc::capture_merged(
-        &prog,
-        &[
-            "test",
-            "-p",
-            "px-dom",
-            "--locked",
-            "--test",
-            "html5lib",
-            "--",
-            "--nocapture",
-            "--test-threads=1",
-        ],
-        Some(root),
-    ) {
+    let mut cmd = proc::cargo_command(root);
+    cmd.args([
+        "test",
+        "-p",
+        "px-dom",
+        "--locked",
+        "--test",
+        "html5lib",
+        "--",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    let reported = match proc::capture_merged_cmd(cmd) {
         Ok((out, success)) => {
             let lines = conformance_lines(&out);
             for l in &lines {

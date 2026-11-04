@@ -10,6 +10,7 @@ pub mod compat_list;
 pub mod count_lines;
 pub mod dom;
 pub mod flex_grid;
+pub mod ipc;
 pub mod layout;
 pub mod not_serializable;
 pub mod setup_build_python;
@@ -84,6 +85,11 @@ pub static GATES: &[GateSpec] = &[
         name: "flex-grid",
         about: "Phase 7: flexbox/grid reftest and crashtest suites, corpus floors, grid-lanes excluded",
         run: flex_grid::run,
+    },
+    GateSpec {
+        name: "ipc",
+        about: "Phase 1: hostile-identity/crash-restart/size-limit suites, content-release build, px-browser end to end, wire identity and ChannelId scans",
+        run: ipc::run,
     },
     GateSpec {
         name: "layout",

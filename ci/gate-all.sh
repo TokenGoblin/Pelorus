@@ -28,7 +28,7 @@ unsafe-headers:cargo xtask unsafe-headers
 brand-leak:cargo xtask brand-leak
 structure:cargo xtask structure
 compat-list:cargo xtask compat-list
-ipc:bash ci/gate-ipc.sh
+ipc:cargo xtask ipc
 sandbox:bash ci/gate-sandbox.sh
 network:bash ci/gate-network.sh
 dom:cargo xtask dom

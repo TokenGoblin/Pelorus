@@ -1,6 +1,6 @@
 //! `cargo xtask not-serializable <TypeName> <file>...` -- assert a type is not
 //! serialisable. Port of `ci/check_not_serializable.py`, which was only ever
-//! called by `ci/gate-ipc.sh`; it is a gate of its own here so that script
+//! called by `cargo xtask ipc`; it is a gate of its own here so that script
 //! (and its eventual port) calls one command.
 //!
 //! Used for `ChannelId`, which is the broker's answer to "who sent this". If
@@ -9,7 +9,7 @@
 //!
 //! # This is the weaker of two checks, on purpose
 //!
-//! `ci/gate-ipc.sh` also asserts that `px-broker` has no `serde` dependency at
+//! `cargo xtask ipc` also asserts that `px-broker` has no `serde` dependency at
 //! all. That is the check that actually holds the property: without a
 //! dependency, a derive of the serialisation trait cannot name the trait under
 //! any spelling or alias, so the guarantee is structural rather than a matter

@@ -10,7 +10,7 @@
 //! # Authority
 //!
 //! Nothing in [`Request`] identifies its sender, and there is no way to add
-//! such a field without `ci/gate-ipc.sh` failing. The broker learns who sent a
+//! such a field without `cargo xtask ipc` failing. The broker learns who sent a
 //! message from which channel it arrived on (invariant 9). A message may
 //! *reference* a resource — a [`FrameId`] it wants to act on — and the broker
 //! decides whether the channel it came from is entitled to it. That is a

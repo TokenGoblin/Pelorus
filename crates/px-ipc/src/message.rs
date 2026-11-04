@@ -6,7 +6,7 @@
 //! pid, no tab, no origin, no partition key. This is invariant 9 expressed as
 //! a type rather than as a rule to be remembered: the broker takes the sender
 //! from the connection a message arrived on, so a confused-deputy attack has
-//! nothing to say. `ci/gate-ipc.sh` fails if such a field appears.
+//! nothing to say. `cargo xtask ipc` fails if such a field appears.
 //!
 //! A request may still *name a resource* — [`Request::FrameHost`] carries the
 //! [`FrameId`] it asks about. That is not an identity claim: the broker checks

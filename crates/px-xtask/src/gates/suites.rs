@@ -16,7 +16,7 @@
 use crate::Gate;
 use crate::proc;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// One gate item: `(item name, test-name filter, file that must carry the
 /// tests)`.
@@ -59,6 +59,60 @@ pub fn count_test_attrs(src: &str, filter: &str) -> usize {
         .count()
 }
 
+/// Why a suite was refused. The shared wording is [`problem_message`]; a gate
+/// whose script said more than that (ipc) formats its own.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Problem {
+    /// The filter matches no test in `--list`.
+    NoTests,
+    /// The home file does not exist.
+    NoHome,
+    /// No `#[test]` sits next to a `fn <filter>` in the home file.
+    NoAttr,
+    /// This many matching tests are `#[ignore]`d.
+    Ignored(usize),
+}
+
+/// The conditions, in the order the scripts applied them. `Ok` is
+/// `(matched, in_home)`.
+pub fn judge(
+    filter: &str,
+    listed: &str,
+    home_src: Option<&str>,
+    ignored: &str,
+) -> Result<(usize, usize), Problem> {
+    let matched = count_listed_tests(listed);
+    if matched == 0 {
+        return Err(Problem::NoTests);
+    }
+    let Some(src) = home_src else {
+        return Err(Problem::NoHome);
+    };
+    let in_home = count_test_attrs(src, filter);
+    if in_home == 0 {
+        return Err(Problem::NoAttr);
+    }
+    let skipped = count_listed_matching(ignored, filter);
+    if skipped > 0 {
+        return Err(Problem::Ignored(skipped));
+    }
+    Ok((matched, in_home))
+}
+
+/// The `FAIL` line for a [`Problem`].
+pub fn problem_message(item: &str, filter: &str, home: &str, p: &Problem) -> String {
+    match p {
+        Problem::NoTests => format!("gate item '{item}' has no tests matching '{filter}'"),
+        Problem::NoHome => {
+            format!("gate item '{item}' expects tests in {home}, which does not exist")
+        }
+        Problem::NoAttr => {
+            format!("gate item '{item}' has no #[test] fn matching '{filter}' in {home}")
+        }
+        Problem::Ignored(n) => format!("gate item '{item}' has {n} #[ignore]d test(s)"),
+    }
+}
+
 /// Decide one suite. `Ok` carries the `ok` line, `Err` the `FAIL` line.
 ///
 /// `listed` is the `--list <filter>` output, `ignored` the `--list --ignored`
@@ -71,41 +125,28 @@ pub fn judge_suite(
     home_src: Option<&str>,
     ignored: &str,
 ) -> Result<String, String> {
-    let matched = count_listed_tests(listed);
-    if matched == 0 {
-        return Err(format!(
-            "gate item '{item}' has no tests matching '{filter}'"
-        ));
+    match judge(filter, listed, home_src, ignored) {
+        Ok((matched, in_home)) => Ok(format!(
+            "{item}: {matched} test(s), {in_home} in {home}, none ignored"
+        )),
+        Err(p) => Err(problem_message(item, filter, home, &p)),
     }
-    let Some(src) = home_src else {
-        return Err(format!(
-            "gate item '{item}' expects tests in {home}, which does not exist"
-        ));
-    };
-    let in_home = count_test_attrs(src, filter);
-    if in_home == 0 {
-        return Err(format!(
-            "gate item '{item}' has no #[test] fn matching '{filter}' in {home}"
-        ));
-    }
-    let skipped = count_listed_matching(ignored, filter);
-    if skipped > 0 {
-        return Err(format!(
-            "gate item '{item}' has {skipped} #[ignore]d test(s)"
-        ));
-    }
-    Ok(format!(
-        "{item}: {matched} test(s), {in_home} in {home}, none ignored"
-    ))
+}
+
+/// The `--list` lines of tests whose line contains `filter` (what
+/// `grep "$filter"` printed from the ignored listing).
+pub fn matching_lines<'a>(listing: &'a str, filter: &str) -> Vec<&'a str> {
+    listing
+        .lines()
+        .filter(|l| l.ends_with(": test") && l.contains(filter))
+        .collect()
 }
 
 /// stdout of `cargo <args>` in `root`, stderr discarded, exit status ignored
 /// (as `cmd 2>/dev/null | grep` did). `None` if cargo cannot be started.
 pub fn cargo_stdout(root: &Path, args: &[&str]) -> Option<String> {
-    let prog = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let o = Command::new(prog)
+    let o = proc::cargo_command(root)
         .args(args)
-        .current_dir(root)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -126,17 +167,31 @@ pub fn cargo_available(root: &Path) -> bool {
     cargo_stdout(root, &["--version"]).is_some()
 }
 
-/// Judge every suite against the workspace's real test listing.
+/// Report one refused suite: `(gate, item, filter, home, problem, ignored
+/// listing)`.
+pub type Reporter = fn(&mut Gate, &str, &str, &str, &Problem, &str);
+
+/// Judge every suite against the workspace's real test listing, using the
+/// shared wording.
 pub fn check_suites(g: &mut Gate, root: &Path, suites: &[Suite]) {
+    check_suites_with(g, root, suites, |g, item, filter, home, p, _| {
+        g.fail(problem_message(item, filter, home, p));
+    });
+}
+
+/// As [`check_suites`], with the gate supplying the failure report.
+pub fn check_suites_with(g: &mut Gate, root: &Path, suites: &[Suite], report: Reporter) {
     let ignored = list_tests(root, &["--ignored"]);
     for (item, filter, home) in suites {
         let listed = list_tests(root, &[filter]);
         let src = std::fs::read(root.join(home))
             .ok()
             .map(|b| String::from_utf8_lossy(&b).into_owned());
-        match judge_suite(item, filter, home, &listed, src.as_deref(), &ignored) {
-            Ok(m) => g.ok(m),
-            Err(m) => g.fail(m),
+        match judge(filter, &listed, src.as_deref(), &ignored) {
+            Ok((matched, in_home)) => g.ok(format!(
+                "{item}: {matched} test(s), {in_home} in {home}, none ignored"
+            )),
+            Err(p) => report(g, item, filter, home, &p, &ignored),
         }
     }
 }
@@ -247,5 +302,22 @@ mod tests {
         assert_eq!(r.unwrap_err(), "gate item 'i' has 2 #[ignore]d test(s)");
         let other = "z::unrelated: test\nsummary layout_reftest_ not a test line\n";
         assert!(judge_suite("i", "layout_reftest_", "t.rs", LISTING, src, other).is_ok());
+    }
+
+    #[test]
+    fn problems_are_distinguished_and_matching_lines_listed() {
+        let src = Some("#[test]\nfn layout_reftest_one() {}\n");
+        assert_eq!(judge("f", "", src, ""), Err(Problem::NoTests));
+        assert_eq!(judge("f", "a: test\n", None, ""), Err(Problem::NoHome));
+        assert_eq!(
+            judge("f", "a: test\n", Some("fn f_x() {}"), ""),
+            Err(Problem::NoAttr)
+        );
+        let ign = "x::f_a: test\ny::g: test\nf_b: test\n";
+        assert_eq!(
+            judge("f_", "a: test\n", Some("#[test]\nfn f_x() {}"), ign),
+            Err(Problem::Ignored(2))
+        );
+        assert_eq!(matching_lines(ign, "f_"), ["x::f_a: test", "f_b: test"]);
     }
 }

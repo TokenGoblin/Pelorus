@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Phase 1 gate
         shell: bash
-        run: ci/gate-ipc.sh
+        run: cargo xtask ipc
 
   # Phase 2 gate: a policy is applied, refusal below the floor is real and
   # says why, the ladder is documented, and no test-only capability reaches a

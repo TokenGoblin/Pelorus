@@ -28,7 +28,7 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   needs unsafe and this crate forbids it. The transport is generic over
   Read + Write so the eventual socket replaces inherited pipes without
   touching a caller.
-- Nothing in the wire vocabulary may name its own sender. ci/gate-ipc.sh
+- Nothing in the wire vocabulary may name its own sender. cargo xtask ipc
   fails on such a field. Naming a resource is fine; the broker authorises it.
 - Adversarial review: this crate gets a session whose only job is attacking
   the previous session's output (§10).
