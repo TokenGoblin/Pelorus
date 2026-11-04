@@ -1,6 +1,6 @@
 //! The vendored CSS2 subset is readable, parseable, and paired.
 //!
-//! Not a gate item, and named so it cannot be mistaken for one: `ci/gate-layout.sh`
+//! Not a gate item, and named so it cannot be mistaken for one: `cargo xtask layout`
 //! matches the reftest item on `layout_reftest_`, and nothing here starts with
 //! that. A corpus that parses proves nothing about layout, and a gate item
 //! satisfied by a corpus check would be the same mistake as a filter that matched
@@ -42,7 +42,7 @@ fn corpus_is_vendored_and_paired() {
     let files = corpus_files();
     assert!(
         files.len() >= 80,
-        "the vendored subset has {} files; ci/gate-layout.sh pins the pair count \
+        "the vendored subset has {} files; cargo xtask layout pins the pair count \
          and this pins the file count, so both have to move deliberately",
         files.len()
     );

@@ -28,7 +28,7 @@
 //!
 //! So the engine's own progress is held by a pinned **count** instead:
 //! [`MATCH_FLOOR`] may not fall, and the corpus size is pinned separately in
-//! `ci/gate-layout.sh`. A threshold with a fixed denominator and a fixed
+//! `cargo xtask layout`. A threshold with a fixed denominator and a fixed
 //! numerator cannot be met by deleting tests, which is the failure ADR 019's
 //! pattern exists to prevent — this is that pattern applied to a number that is
 //! expected to *rise* rather than to an exclusion set expected to shrink.
@@ -205,7 +205,7 @@ const MATCH_FLOOR: usize = 54;
 /// **Detected, not listed.** A hand-written list of these would go stale as the
 /// corpus is re-vendored, and — worse — would be a place to park a genuine layout
 /// failure. This asks the parsed document, so the only way to get a pair in here
-/// is to put script in the test file, which `ci/gate-layout.sh`'s pinned corpus
+/// is to put script in the test file, which `cargo xtask layout`'s pinned corpus
 /// count and PROVENANCE would both notice.
 ///
 /// They stay in the denominator. ADR 019's pattern is that a conformance figure
@@ -457,7 +457,7 @@ fn layout_reftest_the_subset_is_present_and_paired() {
     let found = pairs();
     assert!(
         found.len() >= 40,
-        "ci/gate-layout.sh pins the corpus at 40 pairs or more; found {}",
+        "cargo xtask layout pins the corpus at 40 pairs or more; found {}",
         found.len()
     );
 }
@@ -472,7 +472,7 @@ fn layout_reftest_the_subset_is_present_and_paired() {
 /// ```
 ///
 /// An instrument, not an assertion, and deliberately **not a test**. The obvious
-/// shape for it is an `#[ignore]`d test — which `ci/gate-layout.sh` rejects,
+/// shape for it is an `#[ignore]`d test — which `cargo xtask layout` rejects,
 /// because a gate item whose tests can be ignored is not a gate, and the check
 /// matches on the `layout_reftest_` name prefix rather than on intent. Renaming it
 /// out of the prefix would have passed the check while leaving an ignored test in
@@ -644,7 +644,7 @@ fn layout_reftest_matches_at_or_above_the_pinned_floor() {
 
     assert!(
         total >= 40,
-        "the corpus shrank to {total} pairs; ci/gate-layout.sh pins it at 40"
+        "the corpus shrank to {total} pairs; cargo xtask layout pins it at 40"
     );
     assert!(
         passed >= MATCH_FLOOR,

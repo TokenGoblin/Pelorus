@@ -34,7 +34,7 @@
 //! construct invalid Au values, but it may lead to panics and overflows."*
 //!
 //! So the rule for `px-layout` is: **never write `Au(...)`.** Use [`px`],
-//! [`au`], or `Au::from_px`, all of which clamp. `ci/gate-layout.sh` scans for
+//! [`au`], or `Au::from_px`, all of which clamp. `cargo xtask layout` scans for
 //! the tuple constructor, because this is exactly the kind of invariant that
 //! holds for a year and then does not.
 
@@ -87,7 +87,7 @@ impl LogicalSize {
     /// No clamping happens here, and the doc used to claim it did. It does not
     /// need to: an `Au` built through [`px`], [`au`] or `Au::from_px` is already
     /// in range, and one built through the tuple constructor is the thing
-    /// `ci/gate-layout.sh` refuses. Saying "clamped" where nothing clamps is worse
+    /// `cargo xtask layout` refuses. Saying "clamped" where nothing clamps is worse
     /// than saying nothing, because it invites exactly the out-of-range value the
     /// rest of this module is built to keep out.
     #[must_use]

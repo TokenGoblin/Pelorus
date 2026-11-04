@@ -294,7 +294,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Phase 6 gate
         shell: bash
-        run: ci/gate-layout.sh
+        run: cargo xtask layout
 
   # Phase 7 gate (ci/gate-flex-grid.sh). `continue-on-error` is set in the phase's
   # first commit and must be deleted in its last, so the gate's CI behaviour is

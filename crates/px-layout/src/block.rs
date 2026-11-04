@@ -2119,7 +2119,7 @@ fn resolve_block_size(style: &ComputedValues) -> Option<Au> {
         // definite length converts, and a percentage — which has no basis while
         // the containing block's height is auto — returns None, which is the
         // `auto` this function already means. It also keeps floats out of
-        // px-layout, which ci/gate-layout.sh enforces, where `Au::from_f32_px`
+        // px-layout, which cargo xtask layout enforces, where `Au::from_f32_px`
         // would not.
         Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
         _ => None,

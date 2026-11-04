@@ -2,6 +2,7 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod layout;
 pub mod structure;
 
 use crate::Gate;
@@ -28,6 +29,11 @@ pub static GATES: &[GateSpec] = &[
         name: "brand-leak",
         about: "the product name appears only where tests/brand/allowlist.txt permits (build-spec §2.2)",
         run: brand_leak::run,
+    },
+    GateSpec {
+        name: "layout",
+        about: "Phase 6: CSS2 reftest subset, box-tree determinism, deep nesting, Au source scans",
+        run: layout::run,
     },
     GateSpec {
         name: "structure",
