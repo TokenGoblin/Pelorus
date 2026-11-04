@@ -6,6 +6,7 @@ pub mod compat_list;
 pub mod flex_grid;
 pub mod layout;
 pub mod structure;
+pub mod unsafe_audit;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -52,6 +53,11 @@ pub static GATES: &[GateSpec] = &[
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
+    },
+    GateSpec {
+        name: "unsafe-audit",
+        about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
+        run: unsafe_audit::run,
     },
     GateSpec {
         name: "vendor-wpt",

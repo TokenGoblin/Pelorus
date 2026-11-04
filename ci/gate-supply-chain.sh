@@ -62,39 +62,8 @@ if need cargo-auditable "cargo install --locked cargo-auditable"; then
     [ "$checked" -gt 0 ] || fail "no release binaries found to check for an SBOM"
 fi
 
-BASELINE="ci/unsafe-baseline.json"
-if [ ! -f "$BASELINE" ]; then
-    fail "$BASELINE is missing — there is no committed unsafe baseline to compare against"
-else
-    info "unsafe audit against $BASELINE"
-    current="$(mktemp)"
-    if bash ci/unsafe-audit.sh > "$current"; then
-        "$PY_BIN" - "$BASELINE" "$current" <<'PY' || fail "dependency-tree unsafe count increased"
-import json, sys
-base = json.load(open(sys.argv[1]))
-cur = json.load(open(sys.argv[2]))
-bad = False
-for crate, n in sorted(cur.items()):
-    was = base.get(crate)
-    if was is None:
-        print(f"FAIL new crate with unsafe: {crate} ({n})", file=sys.stderr)
-        bad = True
-    elif n > was:
-        print(f"FAIL {crate} unsafe count {was} -> {n}", file=sys.stderr)
-        bad = True
-for crate, n in sorted(base.items()):
-    if crate not in cur:
-        print(f"note baseline crate no longer present: {crate} ({n}) — "
-              f"regenerate the baseline", file=sys.stderr)
-    elif cur[crate] < n:
-        print(f"note {crate} unsafe count fell {n} -> {cur[crate]} — "
-              f"regenerate the baseline", file=sys.stderr)
-sys.exit(1 if bad else 0)
-PY
-    else
-        fail "unsafe audit could not run"
-    fi
-    rm -f "$current"
-fi
+# Counts `unsafe` tokens over the vendored dependency tree and compares against
+# ci/unsafe-baseline.json (`cargo xtask unsafe-audit --write` regenerates it).
+cargo xtask unsafe-audit || fail "dependency-tree unsafe count increased"
 
 verdict "supply-chain"
