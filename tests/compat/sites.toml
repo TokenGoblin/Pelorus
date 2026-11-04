@@ -6,7 +6,7 @@
 # that decides Phase 23.
 #
 # STATUS: EMPTY. The list is a Phase 0 deliverable and cannot be written by
-# anyone but the person who will daily-drive the browser. ci/check_compat_sites.py
+# anyone but the person who will daily-drive the browser. `cargo xtask compat-list`
 # fails until there are forty entries, each with at least one assertion. An
 # entry with no assertion is worse than a missing one: it counts towards forty
 # and tests nothing.

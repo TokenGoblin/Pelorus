@@ -294,6 +294,15 @@ impl<R: Read, W: Write> Channel<R, W> {
         if !rest.is_empty() {
             return Err(IpcError::Malformed);
         }
+
+        // postcard accepts non-canonical varints (a value padded with
+        // continuation bytes), so two different bodies could still decode to
+        // one message. Insist on the one canonical encoding, keeping the
+        // frame-to-message mapping injective as documented above.
+        let canonical = postcard::to_allocvec(&message).map_err(|_| IpcError::Malformed)?;
+        if canonical.as_slice() != body {
+            return Err(IpcError::Malformed);
+        }
         Ok(message)
     }
 

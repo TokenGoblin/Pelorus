@@ -16,7 +16,10 @@ pub mod gates;
 pub mod git;
 pub mod glob;
 pub mod proc;
+pub mod pybuild;
 pub mod scan;
+pub mod sha256;
+pub mod tar;
 
 #[cfg(test)]
 pub mod testutil;

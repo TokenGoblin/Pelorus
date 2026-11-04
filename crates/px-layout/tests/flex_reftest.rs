@@ -45,7 +45,10 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 
 /// How many pairs must match. **It may not fall.** Raising it is a deliberate
 /// commit whose diff says the engine improved.
-const MATCH_FLOOR: usize = 70;
+///
+/// History: 70 with flex unimplemented (flex containers laid out as plain blocks);
+/// 150 once `flex.rs` landed (+80, 0 panics, 0 pairs lost).
+const MATCH_FLOOR: usize = 150;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 543).
 const MIN_PAIRS: usize = 540;

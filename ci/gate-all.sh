@@ -11,9 +11,9 @@
 # under two environments and is driven by the workflow, which varies HOME,
 # CARGO_HOME and — on Linux — the user between runs. Run it by hand:
 #
-#   ci/build-and-hash.sh /tmp/a > /tmp/a.txt
-#   ci/build-and-hash.sh /tmp/some/deeper/path > /tmp/b.txt
-#   ci/compare-hashes.sh /tmp/a.txt /tmp/b.txt
+#   cargo xtask build-and-hash /tmp/a > /tmp/a.txt
+#   cargo xtask build-and-hash /tmp/some/deeper/path > /tmp/b.txt
+#   cargo xtask compare-hashes /tmp/a.txt /tmp/b.txt
 
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -22,12 +22,12 @@ cd "$(git rev-parse --show-toplevel)"
 # Ported gates are added with the xtask command; this list shrinks to nothing
 # in scripts and then gate-all.sh itself becomes `cargo xtask all`.
 CHECKS="
-build:bash ci/gate-build.sh
+build:cargo xtask build
 supply-chain:bash ci/gate-supply-chain.sh
-unsafe-headers:bash ci/gate-unsafe-headers.sh
+unsafe-headers:cargo xtask unsafe-headers
 brand-leak:cargo xtask brand-leak
 structure:cargo xtask structure
-compat-list:bash ci/gate-compat-list.sh
+compat-list:cargo xtask compat-list
 ipc:bash ci/gate-ipc.sh
 sandbox:bash ci/gate-sandbox.sh
 network:bash ci/gate-network.sh

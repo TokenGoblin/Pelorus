@@ -2,12 +2,22 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod build;
+pub mod build_and_hash;
+pub mod check_build_python_pin;
+pub mod compare_hashes;
+pub mod compat_list;
+pub mod count_lines;
 pub mod dom;
 pub mod flex_grid;
 pub mod layout;
+pub mod not_serializable;
+pub mod setup_build_python;
 pub mod structure;
 pub mod style;
 pub mod suites;
+pub mod unsafe_audit;
+pub mod unsafe_headers;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -36,6 +46,36 @@ pub static GATES: &[GateSpec] = &[
         run: brand_leak::run,
     },
     GateSpec {
+        name: "build",
+        about: "Phase 0: release build, clippy -D warnings and fmt --check, all --locked",
+        run: build::run,
+    },
+    GateSpec {
+        name: "build-and-hash",
+        about: "TOOL: reproducible build in a scratch dir; prints the SHA-256 manifest of the release binaries (invariant 7)",
+        run: build_and_hash::run,
+    },
+    GateSpec {
+        name: "check-build-python-pin",
+        about: "TOOL: a Python env holds exactly the pins in build-python/requirements.txt (ADR 023)",
+        run: check_build_python_pin::run,
+    },
+    GateSpec {
+        name: "compare-hashes",
+        about: "reproducible builds: two hash manifests (from build-and-hash) must be identical (invariant 7)",
+        run: compare_hashes::run,
+    },
+    GateSpec {
+        name: "compat-list",
+        about: "the forty-site compat list: forty entries, each with assertions, no urls (build-spec §8)",
+        run: compat_list::run,
+    },
+    GateSpec {
+        name: "count-lines",
+        about: "TOOL: regenerate the README size section (--check: fail if stale)",
+        run: count_lines::run,
+    },
+    GateSpec {
         name: "dom",
         about: "Phase 4: html5lib corpus, stale-handle/nesting suites, px-dom source scans, fuzz targets",
         run: dom::run,
@@ -51,6 +91,16 @@ pub static GATES: &[GateSpec] = &[
         run: layout::run,
     },
     GateSpec {
+        name: "not-serializable",
+        about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
+        run: not_serializable::run,
+    },
+    GateSpec {
+        name: "setup-build-python",
+        about: "TOOL: build the pinned Python venv stylo's build.rs needs; prints the interpreter path (ADR 023)",
+        run: setup_build_python::run,
+    },
+    GateSpec {
         name: "structure",
         about: "crate CLAUDE.md, px-brand endpoint, exec bits, commit identity, fuzz corpus",
         run: structure::run,
@@ -59,6 +109,16 @@ pub static GATES: &[GateSpec] = &[
         name: "style",
         about: "Phase 5: computed-style/cascade suites, property-set floor, stylo decision ADR, ADR 021 tripwire, px-css unsafe rule",
         run: style::run,
+    },
+    GateSpec {
+        name: "unsafe-audit",
+        about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
+        run: unsafe_audit::run,
+    },
+    GateSpec {
+        name: "unsafe-headers",
+        about: "gate check 4: per-crate unsafe header rules, local waiver scans, px-css zero-unsafe counts",
+        run: unsafe_headers::run,
     },
     GateSpec {
         name: "vendor-wpt",

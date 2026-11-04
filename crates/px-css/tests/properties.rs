@@ -307,3 +307,38 @@ fn properties_each_one_cascades_and_changes_the_computed_value() {
         unchanged.join("\n  ")
     );
 }
+
+/// The grid properties Phase 7's layout reads that the manifest does not list.
+///
+/// `grid-*` is behind the `layout.grid.enabled` pref (ADR 025, item 3), which
+/// `StyleEngine::new` turns on. A declaration for a disabled property parses and
+/// cascades nothing, so each of these must move off its initial value; `display:
+/// grid` is checked too because `inline-grid` is pref-gated in the parser.
+#[test]
+fn properties_grid_longhands_layout_reads_all_compute() {
+    let cases: &[(&str, &str)] = &[
+        (
+            "grid-template-areas",
+            "grid-template-areas: \"a b\" \"c d\"",
+        ),
+        ("grid-row-start", "grid-row-start: 2"),
+        ("grid-row-end", "grid-row-end: span 3"),
+        ("grid-column-start", "grid-column-start: foo"),
+        ("grid-column-end", "grid-column-end: -1"),
+        ("grid-auto-rows", "grid-auto-rows: 30px"),
+        ("grid-auto-columns", "grid-auto-columns: minmax(10px, 1fr)"),
+        ("justify-items", "justify-items: end"),
+        ("justify-self", "justify-self: center"),
+        ("order", "order: 3"),
+        ("display", "display: grid"),
+    ];
+    let mut unchanged = Vec::new();
+    for (property, declaration) in cases {
+        if computed_value(property, None) == computed_value(property, Some(declaration)) {
+            unchanged.push(*declaration);
+        }
+    }
+    assert!(unchanged.is_empty(), "did not compute: {unchanged:?}");
+    let inline = computed_value("display", Some("display: inline-grid"));
+    assert_eq!(inline, vec!["inline-grid".to_owned()]);
+}

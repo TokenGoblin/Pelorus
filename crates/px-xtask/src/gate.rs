@@ -13,6 +13,10 @@ use std::process::ExitCode;
 pub struct Gate {
     name: String,
     failures: Vec<String>,
+    /// Machine mode: stdout carries exactly one payload (see `payload`) and
+    /// every other line, verdict included, goes to stderr. For commands whose
+    /// caller substitutes their output, such as `setup-build-python`.
+    machine: bool,
 }
 
 fn out(s: &str) {
@@ -30,17 +34,36 @@ impl Gate {
         Gate {
             name: name.to_string(),
             failures: Vec::new(),
+            machine: false,
+        }
+    }
+
+    /// Switch to machine mode: only `payload` writes to stdout.
+    pub fn machine_output(&mut self) {
+        self.machine = true;
+    }
+
+    /// The one thing a machine-mode command prints on stdout, bare.
+    pub fn payload(&self, s: impl AsRef<str>) {
+        out(s.as_ref());
+    }
+
+    fn say(&self, s: &str) {
+        if self.machine {
+            err(s);
+        } else {
+            out(s);
         }
     }
 
     /// `  message` on stdout.
     pub fn info(&self, msg: impl AsRef<str>) {
-        out(&format!("  {}", msg.as_ref()));
+        self.say(&format!("  {}", msg.as_ref()));
     }
 
     /// `ok   message` on stdout.
     pub fn ok(&self, msg: impl AsRef<str>) {
-        out(&format!("ok   {}", msg.as_ref()));
+        self.say(&format!("ok   {}", msg.as_ref()));
     }
 
     /// `FAIL message` on stderr; counts toward the verdict.
@@ -69,7 +92,7 @@ impl Gate {
     /// Print the verdict and return the exit code (0 pass, 1 fail).
     pub fn verdict(&self) -> ExitCode {
         if self.failures.is_empty() {
-            out(&format!("\n{}: PASS", self.name));
+            self.say(&format!("\n{}: PASS", self.name));
             ExitCode::SUCCESS
         } else {
             err(&format!("\n{}: FAIL ({})", self.name, self.failures.len()));
@@ -91,6 +114,14 @@ mod tests {
         assert_eq!(g.fail_count(), 2);
         assert_eq!(g.failures(), ["a", "b"]);
         assert!(!g.passed());
+    }
+
+    #[test]
+    fn machine_mode_keeps_stdout_for_the_payload() {
+        let mut g = Gate::new("t");
+        assert!(!g.machine);
+        g.machine_output();
+        assert!(g.machine);
     }
 
     #[test]
