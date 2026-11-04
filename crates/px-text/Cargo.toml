@@ -13,3 +13,8 @@ publish.workspace = true
 # reached directly where needed), no `libm`, no `tracing`.
 harfrust = { version = "0.15.0", default-features = false, features = ["std"] }
 skrifa = { version = "0.49.0", default-features = false, features = ["std"] }
+# UAX #14 line breaking and UAX #29 graphemes. Already in Cargo.lock through
+# stylo and url at this version, so this line adds no crate. Default features
+# are the ones the lock already compiles (compiled_data; auto, which brings the
+# LSTM models for Thai, Lao, Khmer and Myanmar).
+icu_segmenter = "2.3.0"

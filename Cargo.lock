@@ -955,6 +955,7 @@ name = "px-text"
 version = "0.0.0"
 dependencies = [
  "harfrust",
+ "icu_segmenter",
  "skrifa",
 ]
 
