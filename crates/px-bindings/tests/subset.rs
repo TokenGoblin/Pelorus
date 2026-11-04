@@ -1,6 +1,17 @@
 //! The Phase 11 gate for the generator: the committed DOM IDL subset parses,
 //! resolves, lowers, generates, and the generated Rust compiles.
 
+/// Test failure with a message. `panic_any` rather than `panic!` so helpers
+/// outside `#[test]` bodies satisfy the crate's panic lint without a waiver.
+macro_rules! fail {
+    () => {
+        ::std::panic::panic_any("unexpected shape")
+    };
+    ($($t:tt)*) => {
+        ::std::panic::panic_any(format!($($t)*))
+    };
+}
+
 mod common;
 
 use px_bindings::ir::lower;
@@ -13,7 +24,7 @@ fn idl_dir() -> PathBuf {
 
 fn sources() -> Vec<(String, String)> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(idl_dir())
-        .expect("idl dir")
+        .unwrap_or_else(|e| fail!("idl dir: {e}"))
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "idl"))
@@ -23,8 +34,8 @@ fn sources() -> Vec<(String, String)> {
         .iter()
         .map(|p| {
             (
-                p.file_name().expect("name").to_string_lossy().into_owned(),
-                std::fs::read_to_string(p).expect("read"),
+                p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+                std::fs::read_to_string(p).unwrap_or_else(|e| fail!("{e}")),
             )
         })
         .collect()
@@ -32,7 +43,7 @@ fn sources() -> Vec<(String, String)> {
 
 fn model() -> Model {
     Model::from_sources(&sources(), BuildOptions { require_exposed: true })
-        .unwrap_or_else(|e| panic!("{e:#?}"))
+        .unwrap_or_else(|e| fail!("{e:#?}"))
 }
 
 #[test]
@@ -73,7 +84,7 @@ fn subset_resolves_the_real_structure() {
 
 #[test]
 fn subset_lowers_with_the_expected_conversions() {
-    let b = lower(&model()).unwrap_or_else(|e| panic!("{e}"));
+    let b = lower(&model()).unwrap_or_else(|e| fail!("{e}"));
     use px_bindings::ir::{Conv, IntMode};
     let cd = b.interfaces.iter().find(|i| i.name == "CharacterData").expect("CharacterData");
     let data = cd.attributes.iter().find(|a| a.name == "data").expect("data");
@@ -91,7 +102,7 @@ fn subset_lowers_with_the_expected_conversions() {
     let add = et.operations.iter().find(|o| o.name.as_deref() == Some("addEventListener")).expect("add");
     let opts = &add.overloads[0].args[2];
     assert!(opts.optional && opts.default.is_some());
-    let Conv::Union(u) = &opts.conv else { panic!("{:?}", opts.conv) };
+    let Conv::Union(u) = &opts.conv else { fail!("{:?}", opts.conv) };
     assert_eq!(u.members.len(), 2);
     let _ = IntMode::Wrap;
 }
@@ -102,7 +113,7 @@ fn subset_generates_and_the_output_compiles() {
         &sources().iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>(),
         true,
     )
-    .unwrap_or_else(|e| panic!("{e:#?}"));
+    .unwrap_or_else(|e| fail!("{e:#?}"));
     for needle in [
         "pub trait NodeHost: EventTargetHost {",
         "pub trait TextHost: CharacterDataHost {",

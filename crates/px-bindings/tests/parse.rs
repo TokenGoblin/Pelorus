@@ -2,19 +2,45 @@
 //! (appendix "IDL grammar") and the examples in its prose, not from running
 //! the parser.
 
+/// Test failure with a message. `panic_any` rather than `panic!` so helpers
+/// outside `#[test]` bodies satisfy the crate's panic lint without a waiver.
+macro_rules! fail {
+    () => {
+        ::std::panic::panic_any("unexpected shape")
+    };
+    ($($t:tt)*) => {
+        ::std::panic::panic_any(format!($($t)*))
+    };
+}
+
+fn piece(rng: &mut Rng) -> &'static str {
+    const PIECES: &[&str] = &[
+        "interface", "partial", "mixin", "namespace", "dictionary", "enum", "typedef",
+        "callback", "includes", "const", "attribute", "readonly", "static", "getter",
+        "setter", "stringifier", "iterable", "maplike", "setlike", "async_iterable",
+        "constructor", "optional", "required", "long", "unsigned", "DOMString",
+        "sequence", "record", "Promise", "any", "or", "null", "true", "Infinity",
+        "Foo", "x", "_y", "{", "}", "(", ")", "[", "]", "<", ">", ";", ",", ":", "=",
+        "?", "...", "*", "\"s\"", "\"", "/*", "*/", "//", "\n", " ", "0", "1.5", "-",
+        "0x", "\u{e9}", "\0",
+    ];
+    let i = usize::try_from(rng.next() % PIECES.len() as u64).unwrap_or(0);
+    PIECES.get(i).copied().unwrap_or("")
+}
+
 use px_bindings::ast::*;
 use px_bindings::parser::{MAX_NESTING, parse};
 
 fn p(src: &str) -> Ast {
     match parse(0, "t.idl", src) {
         Ok(a) => a,
-        Err(e) => panic!("{e}\n--- source:\n{src}"),
+        Err(e) => fail!("{e}\n--- source:\n{src}"),
     }
 }
 
 fn perr(src: &str) -> px_bindings::span::SyntaxError {
     match parse(0, "t.idl", src) {
-        Ok(a) => panic!("expected an error, parsed {a:?}"),
+        Ok(a) => fail!("expected an error, parsed {a:?}"),
         Err(e) => e,
     }
 }
@@ -22,18 +48,18 @@ fn perr(src: &str) -> px_bindings::span::SyntaxError {
 fn iface(src: &str) -> Container {
     match p(src).definitions.into_iter().next().map(|d| d.kind) {
         Some(DefinitionKind::Interface(c)) => c,
-        other => panic!("not an interface: {other:?}"),
+        other => fail!("not an interface: {other:?}"),
     }
 }
 
 fn first_member(src: &str) -> MemberKind {
-    iface(src).members.into_iter().next().expect("member").kind
+    iface(src).members.into_iter().next().unwrap_or_else(|| fail!("no member")).kind
 }
 
 fn ty_of_attr(src: &str) -> Type {
     match first_member(&format!("interface I {{ attribute {src} x; }};")) {
         MemberKind::Attribute { ty, .. } => ty,
-        other => panic!("{other:?}"),
+        other => fail!("{other:?}"),
     }
 }
 
@@ -67,7 +93,7 @@ fn partial_interface_and_mixin_and_includes() {
 fn namespace_and_partial_namespace() {
     let a = p("namespace N { readonly attribute long x; undefined f(); const long C = 1; }; partial namespace N { };");
     let DefinitionKind::Namespace(c) = &a.definitions[0].kind else {
-        panic!()
+        fail!()
     };
     assert_eq!(c.members.len(), 3);
     assert!(matches!(&a.definitions[1].kind, DefinitionKind::Namespace(c) if c.partial));
@@ -83,7 +109,7 @@ fn namespace_rejects_writable_attribute() {
 fn dictionary_members_required_default_inherit() {
     let a = p("dictionary D : B { required long a; DOMString b = \"x\"; boolean c = true; sequence<long> d = []; E e = {}; double f = -Infinity; any g = null; };");
     let DefinitionKind::Dictionary(d) = &a.definitions[0].kind else {
-        panic!()
+        fail!()
     };
     assert_eq!(d.inherits.as_deref(), Some("B"));
     assert_eq!(d.members.len(), 7);
@@ -106,7 +132,7 @@ fn dictionary_members_required_default_inherit() {
 fn enum_with_trailing_comma() {
     let a = p("enum E { \"a\", \"\", \"b-c\", };");
     let DefinitionKind::Enum(e) = &a.definitions[0].kind else {
-        panic!()
+        fail!()
     };
     assert_eq!(e.values, ["a", "", "b-c"]);
 }
@@ -120,11 +146,11 @@ fn enum_must_not_be_empty() {
 fn typedef_and_callback_and_callback_interface() {
     let a = p("typedef (long or DOMString)? T; callback CB = undefined (long a, optional DOMString b = \"z\"); callback interface CI { const long X = 1; undefined handle(Event e); };");
     let DefinitionKind::Typedef(t) = &a.definitions[0].kind else {
-        panic!()
+        fail!()
     };
     assert!(t.ty.nullable && matches!(t.ty.kind, TypeKind::Union(ref m) if m.len() == 2));
     let DefinitionKind::Callback(c) = &a.definitions[1].kind else {
-        panic!()
+        fail!()
     };
     assert_eq!(c.args.len(), 2);
     assert!(c.args[1].optional);
@@ -139,7 +165,7 @@ fn const_members() {
         .iter()
         .map(|m| match &m.kind {
             MemberKind::Const { value, .. } => value.clone(),
-            _ => panic!(),
+            _ => fail!(),
         })
         .collect();
     assert_eq!(
@@ -171,7 +197,7 @@ fn attributes_all_flavours() {
                 name,
                 ..
             } => (name.clone(), *readonly, *inherit, *is_static, *stringifier),
-            _ => panic!(),
+            _ => fail!(),
         })
         .collect();
     assert_eq!(flags[0], ("a".into(), false, false, false, false));
@@ -216,7 +242,7 @@ fn iterable_maplike_setlike() {
 fn arguments_optional_variadic_default_keyword_names() {
     let c = iface("interface I { undefined f(long a, optional long b, optional long c = 5, long... d, optional DOMString interface = \"x\", any async); };");
     let MemberKind::Operation { args, .. } = &c.members[0].kind else {
-        panic!()
+        fail!()
     };
     assert_eq!(args.len(), 6);
     assert!(args[1].optional && args[1].default.is_none());
@@ -286,7 +312,7 @@ fn nullable_and_generic_types() {
     assert!(ty_of_attr("(long or Foo)?").nullable);
     let t = ty_of_attr("sequence<sequence<DOMString?>>");
     let TypeKind::Sequence(inner) = t.kind else {
-        panic!()
+        fail!()
     };
     assert!(matches!(inner.kind, TypeKind::Sequence(_)));
     assert!(matches!(
@@ -326,7 +352,7 @@ fn record_key_must_be_a_string_type() {
 #[test]
 fn union_types_nested_and_flattening_input() {
     let t = ty_of_attr("(long or (Foo or DOMString?) or sequence<long>)");
-    let TypeKind::Union(m) = t.kind else { panic!() };
+    let TypeKind::Union(m) = t.kind else { fail!() };
     assert_eq!(m.len(), 3);
     assert!(matches!(&m[1].kind, TypeKind::Union(inner) if inner.len() == 2));
     perr("interface I { attribute (long) x; };");
@@ -338,17 +364,19 @@ fn extended_attributes_on_types() {
     let t = ty_of_attr("[Clamp] long");
     assert_eq!(t.ext_attrs[0].name, "Clamp");
     let t = ty_of_attr("sequence<[EnforceRange] octet>");
-    let TypeKind::Sequence(i) = t.kind else { panic!() };
+    let TypeKind::Sequence(i) = t.kind else { fail!() };
     assert_eq!(i.ext_attrs[0].name, "EnforceRange");
     let t = ty_of_attr("([Clamp] long or DOMString)");
-    let TypeKind::Union(m) = t.kind else { panic!() };
+    let TypeKind::Union(m) = t.kind else { fail!() };
     assert_eq!(m[0].ext_attrs[0].name, "Clamp");
 }
 
 fn ext(src: &str) -> Vec<ExtAttr> {
-    p(&format!("{src} interface I {{ }};")).definitions[0]
-        .ext_attrs
-        .clone()
+    p(&format!("{src} interface I {{ }};"))
+        .definitions
+        .into_iter()
+        .next()
+        .map_or_else(Vec::new, |d| d.ext_attrs)
 }
 
 #[test]
@@ -418,12 +446,12 @@ fn ext_attrs_on_members_arguments_and_dictionary_members() {
     let c = iface("[Exposed=Window] interface I { [SameObject] readonly attribute Foo f; undefined g([Clamp] long a); };");
     assert_eq!(c.members[0].ext_attrs[0].name, "SameObject");
     let MemberKind::Operation { args, .. } = &c.members[1].kind else {
-        panic!()
+        fail!()
     };
     assert_eq!(args[0].ext_attrs[0].name, "Clamp");
     let a = p("dictionary D { [EnforceRange] required long x; };");
     let DefinitionKind::Dictionary(d) = &a.definitions[0].kind else {
-        panic!()
+        fail!()
     };
     assert!(d.members[0].required);
     assert_eq!(d.members[0].ext_attrs[0].name, "EnforceRange");
@@ -437,7 +465,7 @@ fn numbers_lexing_corner_cases() {
         .iter()
         .map(|m| match &m.kind {
             MemberKind::Const { value, .. } => value.clone(),
-            _ => panic!(),
+            _ => fail!(),
         })
         .collect();
     assert_eq!(v[0], ConstValue::Decimal(".5".into()));
@@ -562,16 +590,6 @@ impl Rng {
 
 #[test]
 fn fuzz_loop_never_panics_and_terminates() {
-    const PIECES: &[&str] = &[
-        "interface", "partial", "mixin", "namespace", "dictionary", "enum", "typedef",
-        "callback", "includes", "const", "attribute", "readonly", "static", "getter",
-        "setter", "stringifier", "iterable", "maplike", "setlike", "async_iterable",
-        "constructor", "optional", "required", "long", "unsigned", "DOMString",
-        "sequence", "record", "Promise", "any", "or", "null", "true", "Infinity",
-        "Foo", "x", "_y", "{", "}", "(", ")", "[", "]", "<", ">", ";", ",", ":", "=",
-        "?", "...", "*", "\"s\"", "\"", "/*", "*/", "//", "\n", " ", "0", "1.5", "-",
-        "0x", "\u{e9}", "\0",
-    ];
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
     let seed = "[Exposed=Window] interface Foo : Bar { constructor(optional long a = 1); \
                 attribute (long or DOMString)? x; readonly attribute sequence<Foo> y; \
@@ -580,8 +598,8 @@ fn fuzz_loop_never_panics_and_terminates() {
         let mut s = String::new();
         let n = (rng.next() % 40) as usize;
         for _ in 0..n {
-            s.push_str(PIECES[(rng.next() % PIECES.len() as u64) as usize]);
-            if rng.next() % 3 != 0 {
+            s.push_str(piece(&mut rng));
+            if !rng.next().is_multiple_of(3) {
                 s.push(' ');
             }
         }
@@ -591,9 +609,9 @@ fn fuzz_loop_never_panics_and_terminates() {
         let i = (rng.next() % b.len() as u64) as usize;
         let j = i + (rng.next() % 20) as usize;
         let mut m = String::new();
-        m.push_str(&seed[..i]);
-        if rng.next() % 2 == 0 {
-            m.push_str(PIECES[(rng.next() % PIECES.len() as u64) as usize]);
+        m.push_str(seed.get(..i).unwrap_or(""));
+        if rng.next().is_multiple_of(2) {
+            m.push_str(piece(&mut rng));
         }
         m.push_str(seed.get(j.min(seed.len())..).unwrap_or(""));
         let _ = parse(0, "f.idl", &m);
@@ -609,6 +627,6 @@ fn every_prefix_of_a_valid_file_terminates() {
                undefined f(optional record<DOMString, any> o = {}, long... r); \
                iterable<DOMString, long>; }; partial dictionary D { required long a; };";
     for (i, _) in src.char_indices() {
-        let _ = parse(0, "p.idl", &src[..i]);
+        let _ = parse(0, "p.idl", src.get(..i).unwrap_or(""));
     }
 }

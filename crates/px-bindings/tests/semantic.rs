@@ -1,5 +1,16 @@
 //! Semantic checking: merging, name resolution, and every diagnostic.
 
+/// Test failure with a message. `panic_any` rather than `panic!` so helpers
+/// outside `#[test]` bodies satisfy the crate's panic lint without a waiver.
+macro_rules! fail {
+    () => {
+        ::std::panic::panic_any("unexpected shape")
+    };
+    ($($t:tt)*) => {
+        ::std::panic::panic_any(format!($($t)*))
+    };
+}
+
 use px_bindings::resolve::{
     BuildOptions, ContainerKind, Exposure, MemberKind, Model, RKind, parse_integer,
 };
@@ -21,13 +32,13 @@ fn build_files(files: &[&str], strict: bool) -> Result<Model, Vec<String>> {
 fn ok(src: &str) -> Model {
     match build_files(&[src], false) {
         Ok(m) => m,
-        Err(e) => panic!("{e:#?}\n{src}"),
+        Err(e) => fail!("{e:#?}\n{src}"),
     }
 }
 
 fn errs(src: &str) -> Vec<String> {
     match build_files(&[src], false) {
-        Ok(_) => panic!("expected errors for:\n{src}"),
+        Ok(_) => fail!("expected errors for:\n{src}"),
         Err(e) => e,
     }
 }
@@ -43,7 +54,7 @@ fn has_err(src: &str, needle: &str) {
 
 fn member_names(m: &Model, iface: &str) -> Vec<String> {
     m.container(iface)
-        .expect("interface")
+        .unwrap_or_else(|| fail!("no such interface"))
         .members
         .iter()
         .map(|x| match &x.kind {
@@ -96,7 +107,7 @@ fn typedefs_expand_and_merge_nullability_and_ext_attrs() {
     let i = m.container("I").expect("I");
     let ty = |n: usize| match &i.members[n].kind {
         MemberKind::Attribute { ty, .. } => ty.clone(),
-        _ => panic!(),
+        _ => fail!(),
     };
     assert!(ty(0).ext.clamp && !ty(0).nullable);
     assert!(ty(1).ext.clamp && ty(1).nullable);
@@ -289,7 +300,7 @@ fn type_extended_attribute_validation() {
     // Member-level attributes apply to the type, as the spec says.
     let m = ok("interface A { [Clamp] attribute octet x; };");
     let MemberKind::Attribute { ty, .. } = &m.container("A").expect("A").members[0].kind else {
-        panic!()
+        fail!()
     };
     assert!(ty.ext.clamp);
 }

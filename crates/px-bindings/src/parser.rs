@@ -1093,10 +1093,10 @@ impl<'a> Parser<'a> {
     fn ext_attr(&mut self) -> PResult<ExtAttr> {
         let save = self.pos;
         let start = self.peek().span;
-        if let Some(attr) = self.ext_attr_form(start) {
-            if self.at_attr_end() {
-                return Ok(attr);
-            }
+        if let Some(attr) = self.ext_attr_form(start)
+            && self.at_attr_end()
+        {
+            return Ok(attr);
         }
         self.pos = save;
         // `enter`/`leave` are balanced even on error paths, so depth is
@@ -1207,10 +1207,8 @@ impl<'a> Parser<'a> {
                             _ => "}",
                         });
                     }
-                    ")" | "]" | "}" => {
-                        if stack.pop() != Some(t.text) {
-                            return Err(self.err_expected(&["a matching close bracket"]));
-                        }
+                    ")" | "]" | "}" if stack.pop() != Some(t.text) => {
+                        return Err(self.err_expected(&["a matching close bracket"]));
                     }
                     _ => {}
                 }

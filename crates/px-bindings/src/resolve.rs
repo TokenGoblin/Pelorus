@@ -1184,10 +1184,10 @@ impl<'a> Builder<'a> {
             }
         }
         for ((is_static, name), sigs) in &ops {
-            if plain_names.contains_key(&(*is_static, *name)) {
-                if let Some((_, span)) = sigs.first() {
-                    self.err(*span, format!("operation `{name}` clashes with an attribute or constant of the same name in `{owner}`"));
-                }
+            if plain_names.contains_key(&(*is_static, *name))
+                && let Some((_, span)) = sigs.first()
+            {
+                self.err(*span, format!("operation `{name}` clashes with an attribute or constant of the same name in `{owner}`"));
             }
             let mut seen = BTreeSet::new();
             for (sig, span) in sigs {
@@ -1336,11 +1336,11 @@ impl<'a> Builder<'a> {
             }
         }
         for d in &model.dictionaries {
-            if let Some(p) = &d.inherits {
-                if model.dictionary(p).is_none() {
-                    self.err(d.span, format!("`{}` inherits `{p}`, which is not a dictionary", d.name));
-                    continue;
-                }
+            if let Some(p) = &d.inherits
+                && model.dictionary(p).is_none()
+            {
+                self.err(d.span, format!("`{}` inherits `{p}`, which is not a dictionary", d.name));
+                continue;
             }
             let mut cur = d.inherits.as_deref();
             let mut steps = 0usize;
