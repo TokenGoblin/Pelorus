@@ -1,0 +1,94 @@
+test262 subset, vendored by `cargo xtask vendor-test262`. Do not edit by hand.
+
+Source:   https://github.com/tc39/test262
+Commit:   831359a4192ef83b8c50f91363d2ff739fe550f6
+Licence:  BSD (Ecma International), see LICENSE beside this file. Each test
+          says "governed by the BSD license found in the LICENSE file".
+Layout:   test/ (tests, upstream relative paths), harness/ (the harness files
+          the kept tests include), INDEX (one line per test: flags, negative,
+          includes, features, so the runner needs no YAML parser), LICENSE.
+
+Files considered under test/: 54078
+Kept: 10356 tests, 14856007 bytes of tests (target 15000000); 25 harness files, 169354 bytes.
+Sampling share n/D: 117/1000 per directory (8000 for hard-sampled ones).
+Bytes in never-sampled directories: 7991631.
+Reproduce: cargo xtask vendor-test262 --rev 831359a4192ef83b8c50f91363d2ff739fe550f6 --target-bytes 15000000
+
+Dropped, 43722 files, by reason (first matching reason in rule order):
+       8  dir:built-ins/AbstractModuleSource
+     389  dir:built-ins/Atomics
+      67  dir:built-ins/ShadowRealm
+     104  dir:built-ins/SharedArrayBuffer
+    4613  dir:built-ins/Temporal
+     116  dir:harness
+    3382  dir:intl402
+    1495  dir:staging
+      35  feature:IsHTMLDDA
+      18  feature:Iterator.prototype.join
+     117  feature:SharedArrayBuffer
+       8  feature:Temporal
+      89  feature:await-dictionary
+      24  feature:decorators
+     968  feature:dynamic-import
+      35  feature:error-stack-accessor
+      49  feature:immutable-arraybuffer
+       6  feature:import-defer
+       5  feature:import.meta
+      26  feature:legacy-regexp
+       2  feature:nonextensible-applies-to-private
+       1  feature:source-phase-imports
+       1  feature:top-level-await
+     818  flag:module
+     283  module-fixture
+      20  not-a-js-file
+   31043  sampled-out
+
+Selection rule (crates/px-xtask/src/gates/vendor_test262.rs):
+
+1. Only `*.js` files under test/. Excluded by directory:
+  - test/intl402/ (Intl is absent in v1 (ADR 040))
+  - test/staging/ (staging tests are unstable and engine-specific)
+  - test/harness/ (tests of the harness files themselves, not of the language)
+  - test/built-ins/Temporal/ (Temporal is absent in v1 (ADR 040))
+  - test/built-ins/ShadowRealm/ (ShadowRealm proposal, not shipped)
+  - test/built-ins/SharedArrayBuffer/ (SharedArrayBuffer is absent in v1 (ADR 040))
+  - test/built-ins/Atomics/ (Atomics works on SharedArrayBuffer, absent in v1)
+  - test/built-ins/AbstractModuleSource/ (source-phase-imports proposal)
+2. Excluded: `*_FIXTURE.js` (module helper files, not tests), files without a
+   parsable frontmatter block, files that are not UTF-8.
+3. Excluded by flag: `module`. The Phase 10 host runs classic scripts; a
+   module loader arrives with the DOM. Annex B is vendored (ADR 040 turns it on).
+4. Excluded by feature (a test is dropped when ANY of its `features:` matches):
+   - case-insensitive prefix: temporal, intl, webassembly, sharedarraybuffer, atomics, shadowrealm
+   - every entry of the "Proposed language features" section of the checkout's
+     features.txt (stage 3 and below)
+   - needs a module loader: dynamic-import, import.meta, top-level-await, json-modules, import-attributes, export-star-as-namespace-from-module, arbitrary-module-namespace-names
+   - needs a host object or capability we do not provide: IsHTMLDDA, host-gc-required
+5. Excluded: any test with a `locale:` field, any test using `$262.agent` or
+   including atomicsHelper.js, any test whose `includes:` names a harness file
+   that is not in the checkout.
+6. Sampled to at most 15000000 bytes of test files. Survivors of 1 to 5 are
+   grouped by leaf directory and taken in sorted path order; the i-th file of
+   a directory is kept when ceil((i+1)*n/D) > ceil(i*n/D), with D = 1000 (a
+   share of n/D, evenly spread, the first file always kept). One n is chosen
+   for the whole corpus: the largest that fits the target. Directories in the
+   hard-sampled list use D = 8000 instead:
+  - test/built-ins/RegExp/property-escapes/
+7. Never sampled (kept in full):
+  - test/built-ins/Promise/
+  - test/built-ins/AsyncFunction/
+  - test/built-ins/AsyncGeneratorFunction/
+  - test/built-ins/AsyncGeneratorPrototype/
+  - test/built-ins/AsyncFromSyncIteratorPrototype/
+  - test/built-ins/AsyncIteratorPrototype/
+  - test/built-ins/Array/prototype/map/
+  - test/built-ins/Array/prototype/filter/
+  - test/built-ins/Array/prototype/reduce/
+  - test/built-ins/Array/prototype/sort/
+  - test/language/expressions/async-*/
+  - test/language/expressions/await/
+  - test/language/statements/async-*/
+  - test/language/statements/for*/
+  - test/language/eval-code/
+8. harness/: assert.js, sta.js, doneprintHandle.js, and every file a kept test
+   includes.

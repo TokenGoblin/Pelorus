@@ -27,10 +27,12 @@ pub mod structure;
 pub mod style;
 pub mod suites;
 pub mod supply_chain;
+pub mod test262;
 pub mod unsafe_audit;
 pub mod unsafe_headers;
 pub mod update_hsts;
 pub mod update_psl;
+pub mod vendor_test262;
 pub mod vendor_wpt;
 
 use crate::Gate;
@@ -179,6 +181,11 @@ pub static GATES: &[GateSpec] = &[
         run: supply_chain::run,
     },
     GateSpec {
+        name: "test262",
+        about: "Phase 10: run the vendored test262 subset against the engine under a ratchet (--engine, --update, --filter; not in `all`)",
+        run: test262::run,
+    },
+    GateSpec {
         name: "unsafe-audit",
         about: "dependency-tree unsafe-token count against ci/unsafe-baseline.json (--write regenerates it)",
         run: unsafe_audit::run,
@@ -197,6 +204,11 @@ pub static GATES: &[GateSpec] = &[
         name: "update-psl",
         about: "TOOL: refresh data/public_suffix_list.dat and its version file (--check, --from-file)",
         run: update_psl::run,
+    },
+    GateSpec {
+        name: "vendor-test262",
+        about: "TOOL: vendor the rule-selected test262 subset into tests/test262 (--rev, --from-checkout, --target-bytes)",
+        run: vendor_test262::run,
     },
     GateSpec {
         name: "vendor-wpt",
