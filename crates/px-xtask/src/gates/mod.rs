@@ -2,6 +2,7 @@
 
 pub mod all_rust;
 pub mod brand_leak;
+pub mod flex_grid;
 pub mod structure;
 
 use crate::Gate;
@@ -28,6 +29,11 @@ pub static GATES: &[GateSpec] = &[
         name: "brand-leak",
         about: "the product name appears only where tests/brand/allowlist.txt permits (build-spec §2.2)",
         run: brand_leak::run,
+    },
+    GateSpec {
+        name: "flex-grid",
+        about: "Phase 7: flexbox/grid reftest and crashtest suites, corpus floors, grid-lanes excluded",
+        run: flex_grid::run,
     },
     GateSpec {
         name: "structure",
