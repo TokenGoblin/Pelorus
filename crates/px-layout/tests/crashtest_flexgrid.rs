@@ -13,7 +13,7 @@
 //!
 //! # Why these were missing for the whole of Phase 6
 //!
-//! `ci/vendor-css2-reftests.sh` pairs a test with a `-ref.html` of the same name.
+//! `cargo xtask vendor-wpt` (CSS2 mode) pairs a test with a `-ref.html` of the same name.
 //! A crashtest has none, so all 28 in these seven directories were silently
 //! skipped, and nobody looked until Phase 7's corpus was being surveyed and 14
 //! turned up in `css-flexbox` and `css-grid`. They are the inputs Chrome and

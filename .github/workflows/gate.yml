@@ -296,7 +296,7 @@ jobs:
         shell: bash
         run: cargo xtask layout
 
-  # Phase 7 gate (ci/gate-flex-grid.sh). `continue-on-error` is set in the phase's
+  # Phase 7 gate (`cargo xtask flex-grid`). `continue-on-error` is set in the phase's
   # first commit and must be deleted in its last, so the gate's CI behaviour is
   # exercised all along rather than discovered on the closing day. It fails by
   # design until the flex and grid reftest suites exist.
@@ -312,7 +312,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Phase 7 gate
         shell: bash
-        run: ci/gate-flex-grid.sh
+        run: cargo xtask flex-grid
 
   # ADR 011: sanitizers over the audited unsafe core. The second and only other
   # consumer of the nightly ADR 006 fences to fuzz/ — same pinned version, named
