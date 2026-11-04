@@ -58,6 +58,7 @@ pub mod cookies;
 mod engine;
 pub mod error;
 pub mod format;
+pub mod migrate;
 pub mod store;
 
 pub use engine::{
