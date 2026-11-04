@@ -70,6 +70,10 @@ jobs:
           - { target: channel_stream, shard: 2 }
           - { target: broker_sequence, shard: 1 }
           - { target: frame_response, shard: 1 }
+          # Phase 8: the GPU process vocabulary, both directions. gpu_response
+          # is the privileged side decoding a sandboxed process.
+          - { target: gpu_response, shard: 1 }
+          - { target: gpu_request, shard: 1 }
           - { target: http_response, shard: 1 }
           - { target: http_response, shard: 2 }
           - { target: http_chunked, shard: 1 }

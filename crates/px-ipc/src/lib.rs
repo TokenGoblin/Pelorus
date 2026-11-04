@@ -49,6 +49,7 @@ use std::io::{Read, Write};
 
 use serde::{Serialize, de::DeserializeOwned};
 
+pub mod gpu;
 pub mod message;
 
 pub use message::{FrameHost, FrameId, Request, Response};
@@ -171,6 +172,13 @@ impl<R: Read, W: Write> Channel<R, W> {
             scratch: Vec::new(),
             poisoned: false,
         }
+    }
+
+    /// Testing only: the raw writer, so a test peer can put bytes on the wire
+    /// that the codec would never produce (garbage, an oversized prefix).
+    #[cfg(feature = "testing")]
+    pub fn raw_writer(&mut self) -> &mut W {
+        &mut self.writer
     }
 
     /// Whether an earlier error may have left the stream misaligned.

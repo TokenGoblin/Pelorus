@@ -55,6 +55,12 @@ pub const SUITES: &[Suite] = &[
         "crates/px-content/tests/crash_restart.rs",
     ),
     ("size-limits", "size_limit", "crates/px-ipc/src/lib.rs"),
+    // Phase 8: the GPU vocabulary is decoded from a sandboxed process.
+    (
+        "gpu-wire-hostile",
+        "gpu_hostile",
+        "crates/px-ipc/tests/hostile_gpu.rs",
+    ),
 ];
 
 /// The wire vocabulary may not carry a field that names the sender.

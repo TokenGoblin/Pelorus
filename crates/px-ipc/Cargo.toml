@@ -16,3 +16,8 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 # an attacker may fully control — see this crate's CLAUDE.md.
 [lints]
 workspace = true
+
+[features]
+# §14.4: the GPU vocabulary's probe and fault-injection variants exist only
+# under this feature, so a release build has no such variant to name or decode.
+testing = []
