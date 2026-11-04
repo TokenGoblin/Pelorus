@@ -1099,3 +1099,13 @@ five pairs it was blocking.
   `display: block`, which is why HN produces 122 boxes rather than none. The
   missing part is the internal table model — rows, cells, column widths, the
   anonymous table boxes §17.2.1 generates.
+
+## Reconsider css-grid/grid-lanes after Phase 7
+
+- **Found in:** phase 7, ADR 031
+- **Belongs to:** unassigned (after phase 7)
+- **What:** `css/css-grid/grid-lanes/` is a separate, newer module and a large share
+  of the css-grid directory. ADR 031 excludes it from the Phase 7 subset so the
+  threshold is not set by an unrelated feature. It is excluded, not rejected.
+- **Why deferred:** nothing implements it, and counting it would shrink the graded
+  fraction for no signal.

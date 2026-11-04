@@ -1,6 +1,6 @@
 # 031 — Phase 7's corpus is chosen by `rel="match"` hrefs, and grid-lanes is out of scope
 
-- **Status:** proposed
+- **Status:** accepted (user delegated the recommendation, 2026-11-04)
 - **Date:** 2026-11-04
 - **Phase:** 7
 - **Invariants touched:** none. Like ADR 019 and 028, this fixes what a §9 gate
@@ -15,7 +15,7 @@ threshold", with no threshold and no subset. Measured in full
 Phase 10. Roughly a third of `css-grid` is `grid-lanes`, a separate and newer
 module than the grid layout §9 means.
 
-## Decision (proposed)
+## Decision
 
 1. **Pair references by reading `<link rel="match" href>`**, not by filename.
    Nearly half the hrefs leave the test's directory.
