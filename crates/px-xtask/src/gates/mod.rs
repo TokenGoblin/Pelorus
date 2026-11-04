@@ -6,6 +6,7 @@ pub mod compat_list;
 pub mod count_lines;
 pub mod flex_grid;
 pub mod layout;
+pub mod not_serializable;
 pub mod structure;
 pub mod unsafe_audit;
 pub mod unsafe_headers;
@@ -55,6 +56,11 @@ pub static GATES: &[GateSpec] = &[
         name: "layout",
         about: "Phase 6: CSS2 reftest subset, box-tree determinism, deep nesting, Au source scans",
         run: layout::run,
+    },
+    GateSpec {
+        name: "not-serializable",
+        about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
+        run: not_serializable::run,
     },
     GateSpec {
         name: "structure",
