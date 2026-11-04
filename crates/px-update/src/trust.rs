@@ -338,6 +338,10 @@ pub(crate) mod tests {
 
     /// Signature file signed by the given seeds over `DOMAIN || bytes`.
     pub(crate) fn sigfile(bytes: &[u8], signers: &[u8]) -> SignatureSet {
+        SignatureSet::parse(sigfile_text(bytes, signers).as_bytes()).unwrap()
+    }
+
+    pub(crate) fn sigfile_text(bytes: &[u8], signers: &[u8]) -> String {
         let mut msg = SIGN_DOMAIN.to_vec();
         msg.extend_from_slice(bytes);
         let mut v: Vec<(KeyId, [u8; 64])> = signers
@@ -345,11 +349,9 @@ pub(crate) mod tests {
             .map(|n| (key_id(&pk(*n)), sign(&seed(*n), &msg)))
             .collect();
         v.sort();
-        let text: String = v
-            .iter()
+        v.iter()
             .map(|(id, s)| format!("sig {} {}\n", hex::encode(&id.0), hex::encode(s)))
-            .collect();
-        SignatureSet::parse(text.as_bytes()).unwrap()
+            .collect()
     }
 
     pub(crate) fn trust1(signers: &[u8], threshold: u8) -> Trust {

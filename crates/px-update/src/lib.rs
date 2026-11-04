@@ -6,6 +6,7 @@
 //! `Transport` trait that px-net will implement. See docs/adr/041 and this
 //! crate's CLAUDE.md.
 
+pub mod client;
 pub mod ed25519;
 pub mod hex;
 pub mod manifest;
