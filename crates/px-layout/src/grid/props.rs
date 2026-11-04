@@ -554,8 +554,10 @@ impl ItemStyle {
             max_width: max_kind(&style.clone_max_width()),
             max_height: max_kind(&style.clone_max_height()),
             border_box: style.clone_box_sizing() == BoxSizing::BorderBox,
-            scrolls: style.clone_overflow_x() != Overflow::Visible
-                || style.clone_overflow_y() != Overflow::Visible,
+            // "Scrollable overflow value": `clip` is not one (css-overflow-3), so a
+            // `clip` item keeps its content-based automatic minimum size.
+            scrolls: !matches!(style.clone_overflow_x(), Overflow::Visible | Overflow::Clip)
+                || !matches!(style.clone_overflow_y(), Overflow::Visible | Overflow::Clip),
             margin_auto_inline: (auto(&margin.margin_left), auto(&margin.margin_right)),
             margin_auto_block: (auto(&margin.margin_top), auto(&margin.margin_bottom)),
         }

@@ -809,6 +809,29 @@ impl Container {
             }
             height = height.max(self.min_block);
         }
+        // A percentage `row-gap` against an indefinite height is zero while the
+        // rows are sized (the percentage is cyclic) and resolves against the
+        // resulting height afterwards (css-sizing-3 section 5.2.1): it moves the
+        // rows, not the container's height.
+        let (gaps, total) = match &self.cs.row_gap {
+            Some(l) if self.definite_block.is_none() => {
+                let gap = resolve(l, Some(height)).map_or(Au(0), floor0);
+                if gap == self.row_gap {
+                    (gaps, total)
+                } else {
+                    let gaps = gaps_for(&self.rows.collapsed, gap);
+                    let mut total = Au(0);
+                    for s in &row_size {
+                        total += *s;
+                    }
+                    for g in &gaps {
+                        total += *g;
+                    }
+                    (gaps, total)
+                }
+            }
+            _ => (gaps, total),
+        };
         let row_pos = positions(
             &row_size,
             &gaps,
