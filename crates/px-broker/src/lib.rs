@@ -35,6 +35,9 @@
 //! [`ContentProcess`], and every broker-side wait has a deadline. See
 //! [`ContentProcess::next_request`].
 
+mod script;
+pub use script::{DeathCause, OPENING_DEADLINE, ScriptOutcome, ScriptSession, fresh_seed};
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};

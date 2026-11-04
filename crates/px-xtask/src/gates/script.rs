@@ -113,6 +113,38 @@ pub const SUITES: &[Suite] = &[
         "script_clock_process_",
         "crates/px-content/tests/script_clock.rs",
     ),
+    // The broker side (ADR 040, ADR 009): the broker's ScriptSession drives the
+    // real content binary under the sandbox profile.
+    (
+        "broker-runs-script-under-the-sandbox-profile",
+        "script_broker_sandbox_",
+        "crates/px-content/tests/script_broker.rs",
+    ),
+    (
+        "broker-runaway-ends-dead-or-unresponsive-broker-alive",
+        "script_broker_runaway_",
+        "crates/px-content/tests/script_broker.rs",
+    ),
+    (
+        "broker-two-tabs-one-runaway-the-other-answers",
+        "script_broker_isolation_",
+        "crates/px-content/tests/script_broker.rs",
+    ),
+    (
+        "broker-restart-within-the-bound",
+        "script_broker_restart_",
+        "crates/px-content/tests/script_broker.rs",
+    ),
+    (
+        "broker-hostile-content-peer-fails-closed",
+        "script_broker_hostile_",
+        "crates/px-broker/src/script.rs",
+    ),
+    (
+        "broker-spawn-refuses-without-a-sandbox",
+        "script_broker_spawn_",
+        "crates/px-content/tests/script_broker.rs",
+    ),
 ];
 
 /// What is still to be built, and the unit that owns it: `(item, unit, filter,

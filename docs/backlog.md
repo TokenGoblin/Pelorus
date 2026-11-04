@@ -1109,12 +1109,10 @@ follows.
   missing part is the internal table model — rows, cells, column widths, the
   anonymous table boxes §17.2.1 generates.
 
-## ADR 040 timer property 4 contradicts property 5; broker side of the script channel is unwired
+## ADR 040 timer property 4 contradicts property 5
 
 - **Found in:** phase 10 units 1 and 3, `px-script` clock and `px-content`
-- **Belongs to:** phase 10 (user decision on the ADR wording); the broker half
-  to whichever unit first needs a broker to drive a content process (unit 4's
-  "two tabs" test, or Phase 11)
+- **Belongs to:** phase 10 (user decision on the ADR wording)
 - **What (1):** ADR 040 says reads "within one quantum" return identical values
   and that 10 ms of reads give 100 distinct values. Both cannot hold: if a whole
   quantum returned one value, consecutive quanta that round to the same grid
@@ -1124,15 +1122,37 @@ follows.
   an instant fixed by the seed). Re-reading one raw instant is always stable.
   The tests assert that, and say why. The user should confirm the formula over
   the wording, or change the formula to a per-quantum bit and give up property 5.
-- **What (2):** `ContentProcess` in `px-broker` still decodes only `Request`
-  from a content process and sends only `Response`, so the broker cannot yet
-  send `ScriptRequest::Init`/`RunScript` or read a `ScriptResponse`. Phase 10's
-  tests drive the real content binary over its real pipes from the test side
-  (unsandboxed); the broker relay, and a test of script under the sandbox
-  profile, are not written. The broker links no engine either way.
 - **Also:** Boa 0.22 defines `SharedArrayBuffer` and has no feature to remove
   it, so the host deletes the global; `import()` through Boa's default module
   loader reads the working directory, so the host installs the idle loader.
+
+## Broker script session: what is not yet covered
+
+- **Found in:** phase 10, `px_broker::ScriptSession` (`crates/px-broker/src/script.rs`)
+- **Belongs to:** phase 11 (the first real consumer) and phase 17 (the allow-list)
+- **What:** (1) The seccomp filter is still the Phase 2 deny-list, so Boa, its reader
+  and watchdog threads and the clock all run under it unchanged; nothing was added to
+  the policy. When Phase 17 writes the allow-list it must include what this
+  process really uses. `strace -f -c` over the unsandboxed content binary plus its test harness
+  (so a superset: it includes the harness's fork/exec/wait4/pipe2/dup2) saw: access, arch_prctl,
+  brk, clock_nanosleep, clone3, close, execve, fcntl, fstat, futex, getpid, getrandom, gettid,
+  ioctl, kill, madvise, mmap, mprotect, munmap, openat, pipe2, poll, prctl, pread64, prlimit64,
+  read, restart_syscall, rseq, rt_sigaction, rt_sigprocmask, sched_getaffinity, set_robust_list,
+  set_tid_address, sigaltstack, statx, tgkill, wait4, write. The content half needs the
+  allocator, futex and clone3 for the two helper threads, clock_nanosleep, tgkill for `abort`,
+  sigaltstack/rt_sigaction for the stack guard, read/write on the two pipes. Re-measure under
+  the `script_broker_sandbox_` suite when writing the list. (2) Only Linux was run;
+  the Windows restricted-token path has the same test but it has not been executed
+  here. (3) The hostile-peer tests (`script_broker_hostile_`) use in-memory pipes in
+  place of a fake content binary, because a second binary would have to ship or hide
+  behind a feature the workspace test listing cannot see. They exercise the real
+  reader, queues and decode path; a real fake process (silent grandchild holding the
+  pipe, SIGSTOP) is not tested here. (4) `ScriptSession` serves exactly one script at a
+  time per session and has no relay for `setTimeout` results after a `RunScript` answer
+  (unsolicited `Terminated` only); page-driven output is Phase 11. (5) `fresh_seed` is
+  best-effort entropy from `RandomState`, clock, pid and a counter, not a CSPRNG.
+- **Why deferred:** each needs a decision (an allow-list, an ADR for a randomness
+  source) or a consumer that does not exist yet.
 
 ## Reconsider css-grid/grid-lanes after Phase 7
 
