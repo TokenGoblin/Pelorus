@@ -74,6 +74,11 @@ pub enum TerminateReason {
     TimerOverflow,
     /// One checkpoint ran more than [`Caps::checkpoint_budget`] microtasks.
     MicrotaskBudget,
+    /// The engine raised a runtime-limit error: loop iterations, recursion
+    /// depth or stack size. See [`crate::Limits`].
+    RuntimeLimit,
+    /// The engine reported an internal failure (`EngineError::Panic`).
+    EnginePanic,
 }
 
 /// A macrotask.

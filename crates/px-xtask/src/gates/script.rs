@@ -69,6 +69,18 @@ pub const SUITES: &[Suite] = &[
         "script_stress_",
         "crates/px-script/tests/stress.rs",
     ),
+    // Unit 4: resource limits, layer 1 (the engine) and the heartbeat the
+    // watchdog reads. The runaway and isolation items are below.
+    (
+        "engine-limits-are-terminal",
+        "script_limits_engine_",
+        "crates/px-script/tests/limits.rs",
+    ),
+    (
+        "watchdog-heartbeat-signal",
+        "script_limits_heartbeat_",
+        "crates/px-script/src/watch.rs",
+    ),
     // Unit 3: the coarse clock.
     (
         "timer-resolution-properties",

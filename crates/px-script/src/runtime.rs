@@ -16,17 +16,20 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use boa_engine::error::EngineError;
 use boa_engine::job::{GenericJob, Job, JobExecutor, PromiseJob};
 use boa_engine::native_function::NativeFunction;
-use boa_engine::{Context, JsArgs, JsNativeError, JsObject, JsResult, JsValue, js_string};
+use boa_engine::{Context, JsArgs, JsError, JsNativeError, JsObject, JsResult, JsValue, js_string};
 
 use boa_engine::context::time::{Clock, JsInstant};
 use boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
 use boa_engine::property::Attribute;
 
 use crate::clock::{CoarseClock, RawClock, mix};
-use crate::queue::{Caps, LoopCore, MAX_DELAY_MS, Task, TimerId};
+use crate::queue::{Caps, LoopCore, MAX_DELAY_MS, Task, TerminateReason, TimerId};
+use crate::watch::Heartbeat;
 
 /// The coarse clock as the host holds it: over a raw clock chosen at build.
 pub(crate) type HostCoarse = CoarseClock<Rc<dyn RawClock>>;
@@ -65,6 +68,8 @@ pub(crate) struct Shared {
     pub coarse: Rc<HostCoarse>,
     /// `Math.random`'s state, seeded from the broker's seed.
     rng: Cell<u64>,
+    /// Bumped at every task and microtask boundary; read by the watchdog.
+    pub heartbeat: Arc<Heartbeat>,
     uncaught: RefCell<Vec<String>>,
     uncaught_count: Cell<u64>,
     /// Jobs Boa queued that this host does not run (async and timeout jobs).
@@ -80,6 +85,7 @@ impl Shared {
             core: RefCell::new(LoopCore::new(caps)),
             coarse: Rc::new(CoarseClock::new(raw, seed)),
             rng: Cell::new(mix(seed ^ RANDOM_DOMAIN)),
+            heartbeat: Arc::new(Heartbeat::new()),
             uncaught: RefCell::new(Vec::new()),
             uncaught_count: Cell::new(0),
             dropped_jobs: Cell::new(0),
@@ -109,6 +115,25 @@ impl Shared {
     #[cfg(feature = "testing")]
     pub fn clock_log(&self) -> Vec<u64> {
         self.clock_log.borrow().clone()
+    }
+
+    /// Look at an error that crossed the native boundary. An engine error (a
+    /// runtime limit, or the engine's own panic) is not script's to handle: it
+    /// stops script for good here, whatever the script does next. Boa 0.22.0
+    /// makes these uncatchable inside the VM already; this does not rely on
+    /// that. What it cannot see is an error the engine itself discards before
+    /// it reaches a caller (see the limits tests). Returns whether the error
+    /// was terminal.
+    pub fn note_error(&self, error: &JsError) -> bool {
+        let Some(engine) = error.as_engine() else {
+            return false;
+        };
+        let reason = match engine {
+            EngineError::RuntimeLimit(_) => TerminateReason::RuntimeLimit,
+            _ => TerminateReason::EnginePanic,
+        };
+        self.core.borrow_mut().terminate(reason);
+        true
     }
 
     fn record_uncaught(&self, message: String) {
@@ -143,12 +168,16 @@ impl Shared {
             let Some(job) = next else {
                 return;
             };
+            self.heartbeat.beat();
             let outcome = match job {
                 Microtask::Promise(job) => job.call(context),
                 Microtask::Generic(job) => job.call(context),
                 Microtask::Callback(callback) => callback.call(&JsValue::undefined(), &[], context),
             };
             if let Err(error) = outcome {
+                if self.note_error(&error) {
+                    return;
+                }
                 self.record_uncaught(error.to_string());
             }
         }
@@ -162,10 +191,14 @@ impl Shared {
             return false;
         };
         let call = fired.payload;
+        self.heartbeat.beat();
         if let Err(error) = call
             .callback
             .call(&JsValue::undefined(), &call.args, context)
         {
+            if self.note_error(&error) {
+                return true;
+            }
             self.record_uncaught(error.to_string());
         }
         // Microtasks run after the callback and before the timer is re-armed

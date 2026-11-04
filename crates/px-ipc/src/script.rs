@@ -148,6 +148,11 @@ pub enum TerminateReason {
     TimerOverflow,
     /// One microtask checkpoint ran more jobs than its budget.
     MicrotaskBudget,
+    /// The engine raised a runtime-limit error (loop iterations, recursion
+    /// depth or stack size). Script is stopped, however it handled the error.
+    RuntimeLimit,
+    /// The engine reported an internal failure it cannot continue from.
+    EnginePanic,
 }
 
 /// What a script run came to.
@@ -201,6 +206,14 @@ pub enum ScriptRequest {
     /// Testing only: report the raw values the clock returned to script.
     #[cfg(feature = "testing")]
     ClockLog,
+    /// Testing only: how long the content process lets script run without a
+    /// task or microtask boundary before it aborts itself (the watchdog; ADR
+    /// 040). Zero is refused. The shipping value is a constant, not a message.
+    #[cfg(feature = "testing")]
+    WatchdogMillis {
+        /// The new limit, in milliseconds.
+        millis: u32,
+    },
 }
 
 /// Content process to broker. `non_exhaustive` for the reason on [`ScriptRequest`].

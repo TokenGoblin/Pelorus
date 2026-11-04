@@ -228,6 +228,8 @@ fn wire_reason(reason: TerminateReason) -> Wire {
         TerminateReason::MicrotaskQueueOverflow => Wire::MicrotaskQueueOverflow,
         TerminateReason::TimerOverflow => Wire::TimerOverflow,
         TerminateReason::MicrotaskBudget => Wire::MicrotaskBudget,
+        TerminateReason::RuntimeLimit => Wire::RuntimeLimit,
+        TerminateReason::EnginePanic => Wire::EnginePanic,
     }
 }
 
