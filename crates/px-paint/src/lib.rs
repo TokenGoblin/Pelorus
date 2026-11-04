@@ -8,5 +8,6 @@
 //! commits; see docs/build-spec.md section 9 and this crate's CLAUDE.md.
 
 pub mod display_list;
+pub mod png;
 
 pub use display_list::{BorderSide, BorderStyle, Color, DisplayList, Item, Rect};
