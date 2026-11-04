@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<title>Overflow clip, nested two deep</title>
+<style>
+body { margin: 20px }
+#outer { width: 300px; height: 200px; overflow: hidden; background: #ccc }
+#inner { width: 150px; height: 100px; overflow: hidden; margin: 40px 0 0 200px; background: #aaa }
+#big { width: 400px; height: 400px; background: #c33 }
+#spill { width: 500px; height: 30px; background: #36c; margin-left: 100px }
+</style>
+<div id="outer"><div id="inner"><div id="big"></div></div><div id="spill"></div></div>

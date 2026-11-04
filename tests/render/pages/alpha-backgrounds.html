@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<title>Transparent and alpha backgrounds</title>
+<style>
+body { margin: 0; background: #fff }
+#s { position: relative; width: 400px; height: 200px; margin: 30px; background: #36c }
+.a { position: absolute; width: 200px; height: 120px }
+#a { left: 20px; top: 20px; background: rgba(255, 0, 0, 0.5) }
+#b { left: 120px; top: 60px; background: rgba(0, 255, 0, 0.5) }
+#c { left: 250px; top: 10px; width: 100px; background: transparent; border: 6px solid rgba(255, 255, 0, 0.5) }
+</style>
+<div id="s"><div class="a" id="a"></div><div class="a" id="b"></div><div class="a" id="c"></div></div>

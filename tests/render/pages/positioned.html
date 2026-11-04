@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<title>Positioned boxes</title>
+<style>
+body { margin: 0 }
+#rel { position: relative; width: 400px; height: 300px; margin: 50px; background: #ddd }
+.p { position: absolute; width: 120px; height: 120px }
+#a { top: 20px; left: 20px; background: #c33; z-index: 1 }
+#b { top: 60px; left: 80px; background: #3c3; z-index: 2 }
+#c { right: 20px; bottom: 20px; background: #33c }
+#flow { position: relative; left: 250px; top: 20px; width: 80px; height: 80px; background: #fc0 }
+</style>
+<div id="rel"><div class="p" id="a"></div><div class="p" id="b"></div><div class="p" id="c"></div><div id="flow"></div></div>
