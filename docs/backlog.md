@@ -1156,3 +1156,16 @@ follows.
   `tab-size` (a tab is eight spaces) and font features are not applied.
 - **Why deferred:** each needs inline boxes (the box tree has none) or a style-engine change;
   neither fits a unit that replaces the text metric.
+
+## Filesystem symbol audit for px-store
+
+- **Found in:** phase 13 (px-store)
+- **Belongs to:** unassigned (before the Phase 13 gate is called closed)
+- **What:** px-store is the first crate that writes files, but no gate audits the
+  filesystem symbols a crate links (rename, unlink, ftruncate, fsync, symlink,
+  directory iteration) the way the network symbol audit covers sockets. Nothing
+  mechanical stops another crate from adding file writes, or px-store from gaining a
+  symlink-following call. Today this rests on review and the migration tests (symlink
+  refusal, fail-at-every-step).
+- **Why deferred:** it needs a symbol-listing step over built artifacts and an allowlist
+  per crate; that is gate work, not store work.
