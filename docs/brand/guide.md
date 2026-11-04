@@ -76,24 +76,43 @@ Recommendation: lead with 1 for the name and use 4 as the explanatory line.
 
 ## Colour
 
-Navy for steadiness, teal for clarity, amber used sparingly because it means
-"look here", which is also what a warning is for.
+Navy for steadiness, teal for clarity and the secure state, amber used
+sparingly because it means "look here", red only for refused or blocked.
 
-| Role | Hex | Use |
+The source of truth is `crates/px-brand/src/palette.rs`; a test there fails if a
+change drops any pairing below WCAG 2.1 AA (4.5:1). Two sets, because one cannot
+serve both backgrounds (the dark-mode teal is under 2:1 on white).
+
+**On navy `#0B1226`**
+
+| Role | Hex | Contrast |
 |---|---|---|
-| Deep navy | `#070D1F` to `#14264A` | Backgrounds, logo face |
-| Bearing teal | `#5EEAD4` | Accent, secure/ok state, ring start |
-| Chart blue | `#2563EB` | Links, ring end |
-| Sight amber | `#FB923C` to `#FDE047` | The one thing to notice; warnings |
-| Instrument white | `#E2E8F0` | Text on dark, vessel arrow |
-| Slate | `#CBD5E1` | Secondary text, ticks |
+| Text | `#E2E8F0` | 15.1 |
+| Muted text | `#9FB0C8` | 8.4 |
+| Teal: secure, fine | `#5EEAD4` | 12.6 |
+| Blue: links | `#60A5FA` | 7.3 |
+| Amber: look here, warning | `#FBBF24` | 11.1 |
+| Red: refused, blocked | `#F87171` | 6.7 |
+
+**On white `#FFFFFF` or surface `#F4F7FB`**
+
+| Role | Hex | Contrast (white / surface) |
+|---|---|---|
+| Ink | `#0B1226` | 18.6 / 17.3 |
+| Muted text | `#475569` | 7.6 / 7.1 |
+| Teal | `#0F766E` | 5.5 / 5.1 |
+| Blue | `#1D4ED8` | 6.7 / 6.2 |
+| Amber | `#B45309` | 5.0 / 4.7 |
+| Red | `#B91C1C` | 6.5 / 6.0 |
 
 Rules:
 
-- **Never use red for a secure state, or green for a warning.** Teal means
-  fine, amber means look, red is reserved for refused or blocked.
-- Contrast: body text on navy must meet WCAG AA (4.5:1). Check before shipping a
-  new pairing.
+- **Never use red for a secure state, or green or teal for a warning.** Teal
+  means fine, amber means look, red means refused. Never use colour alone to
+  carry that meaning: pair it with an icon or a word.
+- The logo's gradients (`#14264A` to `#070D1F` face, `#5EEAD4` to `#2563EB`
+  ring) are artwork, not UI tokens. They sit around the navy above and are not
+  held to the text-contrast rule.
 - Invariant 3 applies: browser chrome does not change for brand reasons. This
   palette governs the logo, installer, site and documents; any change to the
   shipped UI needs the ADR invariant 3 requires.
