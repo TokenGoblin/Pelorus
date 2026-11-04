@@ -44,6 +44,9 @@ pub enum FontTransferError {
     WrongSize,
 }
 
+/// What a font message did: `Ok(Some((font, bytes)))` completed a font.
+pub type FontStep = Result<Option<(u32, Vec<u8>)>, FontTransferError>;
+
 struct InProgress {
     font: u32,
     len: usize,
@@ -132,10 +135,7 @@ impl FontAssembler {
     }
 
     /// Apply a request if it is a font message; `None` for any other request.
-    pub fn accept(
-        &mut self,
-        request: &GpuRequest,
-    ) -> Option<Result<Option<(u32, Vec<u8>)>, FontTransferError>> {
+    pub fn accept(&mut self, request: &GpuRequest) -> Option<FontStep> {
         match request {
             GpuRequest::FontBegin { font, len } => Some(self.begin(*font, *len).map(|()| None)),
             GpuRequest::FontChunk {
@@ -183,10 +183,10 @@ mod tests {
     fn transfer(a: &mut FontAssembler, id: u32, bytes: &[u8]) -> Option<(u32, Vec<u8>)> {
         let mut done = None;
         for request in font_requests(id, bytes).expect("requests") {
-            if let Some(r) = a.accept(&request) {
-                if let Some(font) = r.expect("accepted") {
-                    done = Some(font);
-                }
+            if let Some(r) = a.accept(&request)
+                && let Some(font) = r.expect("accepted")
+            {
+                done = Some(font);
             }
         }
         done

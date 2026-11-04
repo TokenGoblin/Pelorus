@@ -890,6 +890,7 @@ dependencies = [
  "px-layout",
  "px-paint",
  "px-sandbox",
+ "px-text",
 ]
 
 [[package]]

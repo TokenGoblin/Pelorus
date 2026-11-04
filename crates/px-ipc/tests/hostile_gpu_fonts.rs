@@ -58,8 +58,8 @@ fn chunk_claiming(font: u64, offset: u64, count: u64, body: &[u8]) -> Vec<u8> {
     framed(GpuRequest::TAG, &bytes)
 }
 
-fn samples() -> Vec<GpuRequest> {
-    vec![
+fn samples() -> Option<Vec<GpuRequest>> {
+    Some(vec![
         GpuRequest::Begin {
             serial: 1,
             width: 300,
@@ -80,7 +80,7 @@ fn samples() -> Vec<GpuRequest> {
                     y: 0,
                 },
             ])
-            .expect("bounded"),
+            .ok()?,
         },
         GpuRequest::FontBegin {
             font: 3,
@@ -89,7 +89,7 @@ fn samples() -> Vec<GpuRequest> {
         GpuRequest::FontChunk {
             font: 3,
             offset: 262_144,
-            bytes: FontBytes::new(vec![1, 2, 3]).expect("bounded"),
+            bytes: FontBytes::new(vec![1, 2, 3]).ok()?,
         },
         GpuRequest::Items {
             items: ItemChunk::new(vec![WireItem::GlyphRun {
@@ -104,9 +104,9 @@ fn samples() -> Vec<GpuRequest> {
                 start: 1,
                 len: 2,
             }])
-            .expect("bounded"),
+            .ok()?,
         },
-    ]
+    ])
 }
 
 /// The fuzz seeds for the new shapes are valid and canonical, so the fuzzer
@@ -131,7 +131,7 @@ fn gpu_hostile_the_fuzz_seeds_decode_and_reencode_identically() {
 
 #[test]
 fn gpu_hostile_the_new_messages_roundtrip_canonically() {
-    for request in samples() {
+    for request in samples().expect("samples") {
         let frame = encode_frame(&request).expect("encode");
         assert_eq!(decode_frame::<GpuRequest>(&frame).expect("decode"), request);
     }
@@ -139,7 +139,7 @@ fn gpu_hostile_the_new_messages_roundtrip_canonically() {
 
 #[test]
 fn gpu_hostile_the_new_messages_are_refused_when_truncated_at_every_byte() {
-    for request in samples() {
+    for request in samples().expect("samples") {
         let frame = encode_frame(&request).expect("encode");
         for cut in 0..frame.len() {
             // The transport view: the frame simply ends early.
@@ -161,7 +161,7 @@ fn gpu_hostile_the_new_messages_are_refused_when_truncated_at_every_byte() {
 
 #[test]
 fn gpu_hostile_trailing_bytes_after_the_new_messages_are_refused() {
-    for request in samples() {
+    for request in samples().expect("samples") {
         let mut body = postcard::to_allocvec(&request).expect("body");
         body.push(0);
         assert!(rejected::<GpuRequest>(&framed(GpuRequest::TAG, &body)));
