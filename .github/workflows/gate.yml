@@ -350,3 +350,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Repository structure invariants
         run: ci/gate-structure.sh
+
+  # ADR 032: the project is 100% Rust. Fails on any first-party non-Rust source
+  # that is not on crates/px-xtask/all-rust-allowlist.txt, and on any stale
+  # entry (the list may only shrink). Both platforms: the gate itself must run
+  # where the project does.
+  all-rust:
+    name: all-rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 100% Rust ratchet
+        run: cargo xtask all-rust
