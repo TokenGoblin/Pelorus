@@ -6,5 +6,19 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Phase 0 adds no dependency to any crate. build-spec §3 names what may
-# eventually go here; anything else needs an ADR before it is added.
+# §4.2 names Au by description -- "app units, i32 at 1/60 px, as Servo and Gecko
+# do" -- and app_units is that type. Already in the closure via stylo, and named
+# directly by px-css, so this adds no crate to the tree. Same version, for the
+# reason the toml dev-dependency taught: reaching for the newest resolves a second
+# copy and doubles the audit surface for nothing.
+app_units = "0.7.8"
+# Layout reads computed style, which is px-css's job, and walks the DOM the style
+# was computed against. Same versions the rest of the workspace resolves.
+px-css = { path = "../px-css", version = "0.0.0" }
+px-dom = { path = "../px-dom", version = "0.0.0" }
+stylo = { version = "0.21.0", default-features = false, features = ["servo"] }
+
+[dev-dependencies]
+# The reftest harness reads <style> elements out of the corpus, which means
+# naming html5ever's local_name! macro. Same version px-dom resolves.
+html5ever = "0.39.0"

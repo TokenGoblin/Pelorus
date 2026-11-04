@@ -1,0 +1,678 @@
+//! Phase 6 gate item 1: the WPT CSS2 reftest subset.
+//!
+//! ADR 029. A reftest asserts two documents **render identically**, which normally
+//! needs paint (Phase 8) and text shaping (Phase 9). Neither exists, and neither
+//! is needed: a reftest asserts an *equality*, and an equality survives any
+//! consistent transformation of both sides. So both documents are laid out with
+//! the same stub text metric and their **box geometry** is compared — flattened
+//! in layout order, not compared as tree shape, because a test and its reference
+//! deliberately differ in DOM structure where anonymous box generation is the
+//! thing under test.
+//!
+//! The absolute numbers here are meaningless until Phase 9. The equality is not.
+//!
+//! # Two kinds of failure, two different instruments
+//!
+//! ADR 029 anticipated pairs the *comparison method* gets wrong — a paint-only
+//! difference that passes without the engine doing anything, or a reference that
+//! reaches the same pixels through different geometry and so fails while being
+//! correct. Those are exclusions, named individually in [`EXPECTED_FAILURES`]
+//! with a reason, and enforced in both directions: one that starts passing is
+//! stale and fails too.
+//!
+//! The 80 pairs that do not match today are **neither**. They are features this
+//! phase has not built — floats, positioned boxes, margin collapsing, and the
+//! anonymous block boxes a `block-in-inline` needs. Writing 80 individual
+//! "reasons" for those would be a guess dressed as documentation, because it
+//! would be classification by filename rather than by reading each test.
+//!
+//! So the engine's own progress is held by a pinned **count** instead:
+//! [`MATCH_FLOOR`] may not fall, and the corpus size is pinned separately in
+//! `ci/gate-layout.sh`. A threshold with a fixed denominator and a fixed
+//! numerator cannot be met by deleting tests, which is the failure ADR 019's
+//! pattern exists to prevent — this is that pattern applied to a number that is
+//! expected to *rise* rather than to an exclusion set expected to shrink.
+
+use std::path::{Path, PathBuf};
+
+use app_units::Au;
+use px_layout::block::layout_document;
+use px_layout::fragment::FragmentTree;
+use px_layout::geom::px;
+
+/// The viewport every pair is laid out against.
+///
+/// WPT's own default. Both sides of a pair get the same one, so the value only
+/// matters for tests whose match depends on the viewport — and for those, using
+/// WPT's is the least surprising choice.
+const VIEWPORT_PX: i32 = 800;
+
+/// Pairs the *comparison method* gets wrong, each with the reason.
+///
+/// Not a list of unimplemented features — those are counted by [`MATCH_FLOOR`].
+/// An entry here says the geometry comparison is the wrong oracle for this pair:
+/// ADR 029's two named cases are a paint-only difference, which matches without
+/// the engine doing anything, and a reference that reaches the same rendering
+/// through deliberately different geometry, which fails while being correct.
+///
+/// Three entries, all the second of ADR 029's named cases and all one shape: the
+/// reference draws the same picture with fewer boxes, so every rectangle it draws
+/// is present in the test and the test draws more. The engine can be exactly right
+/// and the comparison still fail.
+///
+/// It arrives two ways. A CSS 2.1 reference is very often "one green box of the
+/// right size" where the test builds the same rendering out of a parent, a child
+/// and a footer that happen to be contiguous. And for any out-of-flow feature it is
+/// unavoidable rather than stylistic: a reftest for `float` or `position: absolute`
+/// puts the same box *in* flow in the reference, so the reference's ancestors
+/// contain it and the test's do not.
+///
+/// All three were read rectangle by rectangle, and each entry says which ones
+/// agree. The harness marks the shape `SUPERSET` in its report, but the mark is
+/// triage rather than grounds for an entry: a test that draws boxes the reference
+/// does not may equally be one where the engine drew a box it should not have.
+///
+/// If this grows past a small fraction of the corpus, ADR 029's central bet is
+/// wrong and its Verification section says so.
+const EXPECTED_FAILURES: &[(&str, &str)] = &[
+    (
+        "positioning/absolute-non-replaced-min-max-001.html",
+        "The green square matches exactly at (8, 51, 16, 16), min-width beating \
+         max-width and all. The reference's square is in flow, so its body is 51 \
+         tall against the test's 19 and its html 75 against 51. Whole-geometry \
+         comparison cannot equate the two, and the rendering is identical.",
+    ),
+    (
+        "normal-flow/margin-collapse-min-height-001.html",
+        "Read rectangle by rectangle: the five the reference draws are all present \
+         and identical, and the three extra ones are the test's own parent, child \
+         and footer where the reference draws a single 150px div covering them. \
+         They are contiguous -- parent (8, 51, 100, 100) then footer \
+         (8, 151, 100, 50) against the reference's (8, 51, 100, 150) -- which is \
+         the whole of what the test asserts, that min-height stops a 550px bottom \
+         margin reaching the footer.",
+    ),
+    (
+        "floats/float-with-absolutely-positioned-child-with-static-inset.html",
+        "The absolutely positioned child matches exactly at (542, 8, 100, 100), \
+         which is the entire assertion the test makes. The float containing it is \
+         0 tall in the test and 100 in the reference, because the reference's \
+         child is in flow. The float has no background, so nothing paints there.",
+    ),
+];
+
+/// How many pairs must match.
+///
+/// **Fifty-two, raised from seven by anonymous block box generation (§9.2.1.1).**
+///
+/// Two changes, and the smaller one accounts for most of it. The intended change
+/// was the partition itself: a block container's content is split into runs of
+/// inline content and block-level boxes in document order, and the inline runs are
+/// wrapped in anonymous blocks when — and only when — they have block-level
+/// siblings. That is what the `box-display` and `visuren` directories of this
+/// subset are largely about, and on its own it moved the count from 7 to 8.
+///
+/// The unintended one is why it is 52. Flattening a container's content through
+/// non-block elements had been flattening it through `display: none` ones too, so
+/// the user-agent stylesheet's `title { display: none }` put each document's
+/// `<title>` text into an anonymous block at the top of the page. Every file in
+/// this corpus has a title, and a test's title is never its reference's — so a
+/// pair could not agree about its first line no matter what the engine did below
+/// it. §9.2.4 is unambiguous that `display: none` generates no box *and no
+/// content*; the fix is four lines and it is worth ninety percent of this number.
+///
+/// The previous floor of 7 was itself a correction, and that history is kept
+/// because lowering a floor is the move that most looks like gaming a gate:
+///
+/// > A code review found three defects in box generation: a box whose formatting
+/// > context is unimplemented pruned its entire subtree, inline text was dropped
+/// > unless a box had no element children, and child offsets used two different
+/// > origins on the two axes. Fixing them made the engine lay out substantially
+/// > more of every document — measured across the 210 corpus files, 1357 fragments
+/// > became 2212, and the number of files producing three fragments or fewer fell
+/// > from **39 to 2**. Those 39 were laying out nothing at all: an initial
+/// > containing block, `<html>` and `<body>`. A test and a reference that both lay
+/// > out nothing agree perfectly, and roughly seventeen pairs were counted as
+/// > matching on exactly that basis. The old 25 was measuring
+/// > agreement-in-brokenness, which the reviewer predicted in as many words before
+/// > any of this was measured.
+///
+/// [`TRIVIAL_FRAGMENTS`] is what keeps that from recurring, and it is doing work
+/// here: four more pairs agree than this number counts, and they are rejected for
+/// agreeing about nothing.
+///
+/// Floats (§9.5) raised it again, by **one**, and the number is worth more than
+/// it looks. The float chapter went 4/17 to 5/17, and reading the twelve that
+/// still fail is what says why: two are multi-column, four are tables, three are
+/// `overflow` or paint order, and the rest need `inline-block`. None of them is
+/// waiting on float placement. The engine now places floats, flows text beside
+/// them, shrinks them to fit, clears past them and contains them in a
+/// `flow-root`, and `crates/px-layout/src/block.rs`'s own tests are what hold
+/// that -- nine of them, each verified to fail when the behaviour is removed.
+/// This corpus cannot see most of it yet.
+///
+/// The same reading is why `display: flow-root` was found at all: the corpus
+/// wraps float fixtures in one, and treating it as an unimplemented formatting
+/// context threw the whole container away.
+///
+/// `min-width`, `max-width`, `min-height` and `max-height` (§10.4, §10.7) took it
+/// to 54, and opened the `positioning` chapter's account at 1/8 -- those tests are
+/// about bounds on an absolutely positioned box, and half of what they need is the
+/// bounds rather than the positioning.
+///
+/// **Fifty-two, down from fifty-four**, and the second deliberate fall. Absolute
+/// positioning (§9.6, §10.1, §10.3.7) cost three matching pairs and gained none.
+/// All three were read individually:
+///
+/// - Two are [`EXPECTED_FAILURES`] now: the box under test matches exactly and the
+///   ancestors' heights do not, because a reference for an out-of-flow feature is
+///   written by putting the same box *in* flow. That is how every out-of-flow
+///   reftest in this suite is written, which makes it a limit on the oracle rather
+///   than a gap in the engine.
+/// - The third, `visuren/float-inside-inline-between-blocks-1.html`, is neither:
+///   it needs `position: relative`'s offsets, which are implemented for a block box
+///   in two lines and not implementable at all for an inline one until there are
+///   inline boxes to shift. Shipping the block half alone made a reference whose
+///   `<div>` moved disagree with a test whose `<span>` did not, so the offsets are
+///   not in this commit. `docs/backlog.md` has them.
+///
+/// So this fall is the corpus losing sight of the engine rather than the engine
+/// regressing, and the eight tests in `block.rs` are what hold the behaviour
+/// instead — each verified to fail when the thing it tests is removed.
+///
+/// Back to 54 by two corrections to the *instrument* rather than to the engine,
+/// both spelled out where they are made: `geometry` compares a set of rectangles
+/// rather than a multiset, and `TRIVIAL_FRAGMENTS` counts fragments rather than
+/// distinct rectangles. The two pairs that turned green are the ones margin
+/// collapsing made correct -- a parent with no border or padding coming to rest on
+/// exactly its child's rectangle. Two, and the number matters: a change to the
+/// oracle that bought a dozen would be evidence of bending it to fit.
+///
+/// **It may not fall from here.** Raising it is a deliberate commit whose diff
+/// says the engine improved.
+const MATCH_FLOOR: usize = 54;
+
+/// Whether this test's meaning depends on script this engine cannot run.
+///
+/// A WPT reftest may mutate its own DOM before the comparison — `onload` handlers
+/// that insert or remove an element are how the CSS 2.1 suite tests dynamic box
+/// tree changes. Laying out the file as written and comparing it to a reference
+/// that shows the *result* is not a layout failure; it is the wrong input. Ten of
+/// this subset's pairs are like that, which is a fifth of everything still
+/// failing, and counting them as engine defects made the report point at work that
+/// cannot be done until Phase 10 brings a script host.
+///
+/// **Detected, not listed.** A hand-written list of these would go stale as the
+/// corpus is re-vendored, and — worse — would be a place to park a genuine layout
+/// failure. This asks the parsed document, so the only way to get a pair in here
+/// is to put script in the test file, which `ci/gate-layout.sh`'s pinned corpus
+/// count and PROVENANCE would both notice.
+///
+/// They stay in the denominator. ADR 019's pattern is that a conformance figure
+/// must not be met by removing tests, and "we cannot run this one" is exactly the
+/// argument that would remove it.
+fn needs_script(arena: &px_dom::Arena) -> bool {
+    let document = arena.document();
+    for id in core::iter::once(document).chain(arena.descendants(document)) {
+        let Some(node) = arena.get(id) else { continue };
+        let Some(name) = node.element_name() else {
+            continue;
+        };
+        if name.local == html5ever::local_name!("script") {
+            return true;
+        }
+        // An inline handler is script too, and is how most of these are written:
+        // `<body onload='doit()'>`.
+        if node
+            .attrs()
+            .is_some_and(|attrs| attrs.iter().any(|a| a.name.local.starts_with("on")))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// A layout with no more fragments than this has no content in it.
+///
+/// The initial containing block, `<html>` and `<body>`. A pair that agrees at
+/// this size agrees about nothing.
+const TRIVIAL_FRAGMENTS: usize = 3;
+
+/// One test and its reference.
+struct Pair {
+    name: String,
+    test: PathBuf,
+    reference: PathBuf,
+}
+
+/// Every test/reference pair in the vendored subset.
+fn pairs() -> Vec<Pair> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/wpt/css2");
+    let mut found = Vec::new();
+    let mut stack = vec![root.clone()];
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path.to_string_lossy().replace('\\', "/");
+            if !name.ends_with(".html") || name.ends_with("-ref.html") {
+                continue;
+            }
+            let reference = PathBuf::from(name.replace(".html", "-ref.html"));
+            if !reference.exists() {
+                continue;
+            }
+            let short = name.rsplit("css2/").next().unwrap_or(&name).to_owned();
+            found.push(Pair {
+                name: short,
+                test: path,
+                reference,
+            });
+        }
+    }
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found
+}
+
+/// One fragment's geometry, as compared.
+///
+/// The fragment *kind* is deliberately excluded. A test's anonymous block and its
+/// reference's explicit `<div>` occupy the same space and are the same thing for
+/// a reftest's purposes; comparing kinds would fail every test that exercises
+/// anonymous box generation, which is much of what CSS2 normal-flow is about.
+type Geometry = (Au, Au, Au, Au);
+
+/// Every fragment's absolute rectangle, sorted.
+///
+/// **Depth is not part of it, and nor is order.** ADR 029 said to compare
+/// flattened geometry rather than tree shape, because a test and its reference
+/// deliberately differ in structure where anonymous box generation is the thing
+/// under test — and the first version of this function included the depth anyway,
+/// which is tree shape wearing a different name.
+///
+/// That was invisible while offsets were parent-relative, because then two
+/// rectangles at different depths genuinely were different rectangles. Now that
+/// `layout_document` resolves offsets against the tree origin, a rectangle is a
+/// rectangle: two documents that put the same boxes in the same places render the
+/// same, however they nested to get there.
+///
+/// Sorted for the same reason. Layout order follows structure, so comparing
+/// sequences smuggles the structure back in.
+///
+/// **Deduplicated, for the third time by the same argument.** Two boxes at the
+/// same rectangle and one box at that rectangle render identically — this oracle
+/// does not compare colours, so painting a rectangle twice carries no information
+/// it can see. What multiplicity *does* carry is how many levels of nesting came
+/// to rest in the same place, which is tree shape wearing a third disguise, after
+/// depth and after order.
+///
+/// It is the correct margin-collapsing answer that made this concrete: a parent
+/// with no border or padding ends up on exactly its child's rectangle, so a test
+/// that wraps its content in a `<div>` produces one more box than a reference that
+/// does not, at the same coordinates, rendering the same.
+///
+/// Worth two pairs and no more, which is the number this was weighed against
+/// before changing the instrument — a change that bought a dozen would have been
+/// evidence the instrument was being bent to fit rather than corrected.
+fn geometry(tree: &FragmentTree) -> Vec<Geometry> {
+    let mut rects: Vec<Geometry> = tree
+        .in_layout_order()
+        .into_iter()
+        .filter_map(|(_, id)| {
+            let f = tree.get(id)?;
+            Some((f.inline_offset, f.block_offset, f.size.inline, f.size.block))
+        })
+        .collect();
+    rects.sort();
+    rects.dedup();
+    rects
+}
+
+/// What one laid-out file contributes to a comparison.
+///
+/// Two numbers, because two different questions are asked of a layout and
+/// conflating them was a bug. `rectangles` is what the pair is compared on;
+/// `fragments` is how many boxes were produced, which is what
+/// [`TRIVIAL_FRAGMENTS`] is about — "did the engine lay anything out" is a
+/// question about boxes, not about distinct rectangles.
+struct Laid {
+    rectangles: Vec<Geometry>,
+    fragments: usize,
+    /// Whether the document mutates itself on load — see [`needs_script`].
+    scripted: bool,
+}
+
+/// Parse, style and lay out one file.
+fn layout_file(path: &Path) -> Option<Laid> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let dom = px_dom::parse(&source);
+    if dom.abandoned {
+        return None;
+    }
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let arena = dom.arena;
+
+    let mut engine = px_css::engine::StyleEngine::new(VIEWPORT_PX as f32, 600.0, quirks);
+    // A minimal user-agent stylesheet. Without one every element computes
+    // `display: inline` and no test lays out at all — WPT files rely on the UA
+    // sheet for `div { display: block }` the way every page does.
+    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
+
+    // The document's own <style> elements, in order.
+    for css in inline_stylesheets(&arena) {
+        engine.add_author_stylesheet(&css, "https://wpt.invalid/test.css");
+    }
+
+    let style_root = engine.style_root_for(&arena);
+    engine.resolve(&arena, &style_root)?;
+    let tree = layout_document(&arena, &style_root, px(VIEWPORT_PX))?;
+    Some(Laid {
+        scripted: needs_script(&arena),
+        rectangles: geometry(&tree),
+        fragments: tree.len(),
+    })
+}
+
+/// Enough of a user-agent stylesheet for block layout.
+///
+/// Not the real one — that is Phase 8's, and most of it is about paint. These are
+/// the `display` values without which nothing in the corpus lays out, plus the
+/// margins CSS 2.1's sample sheet gives `body` and `p`, which several tests in the
+/// subset depend on.
+const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
+     nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
+     table, form, fieldset, pre, hr { display: block } \
+     body { margin: 8px } \
+     p, blockquote, figure { margin: 1em 0 } \
+     h1 { margin: 0.67em 0; font-size: 2em } \
+     head, style, script, title, meta, link { display: none }";
+
+/// The text of every `<style>` element in the document, in order.
+fn inline_stylesheets(arena: &px_dom::Arena) -> Vec<String> {
+    let document = arena.document();
+    let mut out = Vec::new();
+    for id in core::iter::once(document).chain(arena.descendants(document)) {
+        let Some(node) = arena.get(id) else { continue };
+        let is_style = node
+            .element_name()
+            .is_some_and(|q| q.local == html5ever::local_name!("style"));
+        if !is_style {
+            continue;
+        }
+        out.push(px_layout::inline::collect_text(arena, id));
+    }
+    out
+}
+
+/// Lay out both halves of `pair` and say whether they agree.
+fn matches(pair: &Pair) -> bool {
+    outcome(pair).0
+}
+
+/// Whether `pair` agrees, and whether the test needs script to mean what it says.
+fn outcome(pair: &Pair) -> (bool, bool) {
+    match (layout_file(&pair.test), layout_file(&pair.reference)) {
+        (Some(test), Some(reference)) => {
+            // Two *near*-empty layouts are trivially equal, and that is a false
+            // pass rather than a result. ADR 029 names the empty case; the
+            // interesting one turned out to be three fragments -- the initial
+            // containing block, `<html>` and `<body>` -- with no content under
+            // them at all.
+            //
+            // Measured rather than guessed at: before the box-generation fixes,
+            // 39 of the 210 corpus files laid out to three fragments or fewer,
+            // and pairs of those matched each other by producing nothing. After
+            // the fixes it is 2. Requiring content is what stops that counting as
+            // conformance.
+            (
+                test.fragments > TRIVIAL_FRAGMENTS && test.rectangles == reference.rectangles,
+                test.scripted,
+            )
+        }
+        _ => (false, false),
+    }
+}
+
+/// Every pair, with whether it currently matches.
+fn results() -> Vec<(String, bool)> {
+    pairs()
+        .into_iter()
+        .map(|pair| {
+            let ok = matches(&pair);
+            (pair.name, ok)
+        })
+        .collect()
+}
+
+#[test]
+fn layout_reftest_the_subset_is_present_and_paired() {
+    let found = pairs();
+    assert!(
+        found.len() >= 40,
+        "ci/gate-layout.sh pins the corpus at 40 pairs or more; found {}",
+        found.len()
+    );
+}
+
+/// The corpus matches at or above the pinned floor, and no excluded pair fails
+/// for a reason the exclusion does not name.
+/// Every failing pair, ordered by how close it is to matching.
+///
+/// ```text
+/// REPORT=1 cargo test -p px-layout --test reftest -- --nocapture
+/// DIAG=normal-flow/some-test.html cargo test -p px-layout --test reftest -- --nocapture
+/// ```
+///
+/// An instrument, not an assertion, and deliberately **not a test**. The obvious
+/// shape for it is an `#[ignore]`d test — which `ci/gate-layout.sh` rejects,
+/// because a gate item whose tests can be ignored is not a gate, and the check
+/// matches on the `layout_reftest_` name prefix rather than on intent. Renaming it
+/// out of the prefix would have passed the check while leaving an ignored test in
+/// the gate's own file, which is the thing the check exists to notice. So it is a
+/// function the gate test calls when asked, and there is nothing to ignore.
+///
+/// It exists because the alternative is writing it again. This diagnostic has been
+/// hand-written and deleted twice — once to find that all of a container's inline
+/// text was being laid out before all of its block children, and once to find that
+/// `display: flow-root` was being thrown away. Both times the finding was in the
+/// first three lines of its output. A tool worth writing twice is worth committing.
+///
+/// `DIAG` dumps one pair's two layouts with the source that produced them, which
+/// is the second thing wanted every time: the list says which pair to look at and
+/// the dump says what is wrong with it.
+fn report() {
+    if let Ok(name) = std::env::var("DIAG") {
+        report_one(&name);
+        return;
+    }
+
+    let mut failing = Vec::new();
+    for pair in pairs() {
+        let (Some(test), Some(reference)) = (layout_file(&pair.test), layout_file(&pair.reference))
+        else {
+            println!("no layout: {}", pair.name);
+            continue;
+        };
+        let (test, reference) = (test.rectangles, reference.rectangles);
+        if test == reference {
+            continue;
+        }
+        // How many rectangles one side has that the other does not, both ways.
+        // A near-zero difference is a pair that needs one thing fixed; a large one
+        // is a pair that needs a feature.
+        let differing = test.iter().filter(|r| !reference.contains(r)).count()
+            + reference.iter().filter(|r| !test.contains(r)).count();
+        // Every rectangle the reference draws is present in the test, and the
+        // test draws more. That is the signature of a reference that renders the
+        // same picture with fewer boxes -- "one green box of the right size" is
+        // how a great many CSS 2.1 references are written -- and it is the shape
+        // whole-geometry comparison cannot equate however correct the engine is.
+        let superset = reference.iter().all(|r| test.contains(r));
+        failing.push((
+            differing,
+            test.len(),
+            reference.len(),
+            if superset { "SUPERSET" } else { "        " },
+            pair.name,
+        ));
+    }
+    failing.sort();
+
+    println!("{} pairs do not match:", failing.len());
+    for (differing, test, reference, mark, name) in &failing {
+        println!("  off-by {differing:<3} ({test} vs {reference} boxes) {mark} {name}");
+    }
+}
+
+/// Dump both fragment trees of one pair, with the source that produced them.
+fn report_one(name: &str) {
+    for pair in pairs() {
+        if pair.name != name {
+            continue;
+        }
+        for (label, path) in [("TEST", &pair.test), ("REFERENCE", &pair.reference)] {
+            println!("===== {label}: {}", path.display());
+            println!("{}", std::fs::read_to_string(path).unwrap_or_default());
+            let Some(laid) = layout_file(path) else {
+                println!("(did not lay out)");
+                continue;
+            };
+            println!("  ({} fragments)", laid.fragments);
+            for (inline, block, width, height) in laid.rectangles {
+                println!(
+                    "  {:>8} {:>8} {:>8} {:>8}",
+                    px_of(inline),
+                    px_of(block),
+                    px_of(width),
+                    px_of(height)
+                );
+            }
+        }
+        return;
+    }
+    println!("no pair named {name}");
+}
+
+/// An `Au` as CSS pixels, for reading.
+///
+/// Integer division, so a fractional position reads as its whole part. That is
+/// enough for a diagnostic and keeps `f32` out of a crate whose gate forbids it —
+/// this file is a test rather than the library, but the habit is the point.
+fn px_of(value: Au) -> String {
+    format!("{}px", value.0 / 60)
+}
+
+/// The match rate per corpus directory, as printable lines.
+///
+/// Not asserted on — `MATCH_FLOOR` is the ratchet and a per-directory floor would
+/// be five ratchets that each have to be argued about. This is the instrument
+/// that says *where* to work next, and it exists because the alternative was a
+/// throwaway diagnostic written and deleted once per session. The directories are
+/// WPT's own chapter split, so "floats is 6/38" names a feature rather than a
+/// filename pattern.
+fn breakdown() -> Vec<String> {
+    let mut tally: std::collections::BTreeMap<String, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for pair in pairs() {
+        let chapter = pair
+            .test
+            .parent()
+            .and_then(|d| d.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_owned();
+        let entry = tally.entry(chapter).or_insert((0, 0));
+        entry.1 += 1;
+        if matches(&pair) {
+            entry.0 += 1;
+        }
+    }
+    tally
+        .into_iter()
+        .map(|(chapter, (ok, all))| format!("{chapter}: {ok}/{all}"))
+        .collect()
+}
+
+#[test]
+fn layout_reftest_matches_at_or_above_the_pinned_floor() {
+    let excluded: std::collections::BTreeSet<&str> =
+        EXPECTED_FAILURES.iter().map(|(name, _)| *name).collect();
+
+    let mut passed = 0usize;
+    let mut total = 0usize;
+    let mut scripted = 0usize;
+    for pair in pairs() {
+        total += 1;
+        let (ok, needs_script) = outcome(&pair);
+        if ok && !excluded.contains(pair.name.as_str()) {
+            passed += 1;
+        } else if needs_script {
+            scripted += 1;
+            if std::env::var("REPORT").is_ok() {
+                println!("    scripted: {}", pair.name);
+            }
+        }
+    }
+
+    // Printed unconditionally, so the graded and ungraded figures are
+    // reconcilable from the output rather than only from the gate report — the
+    // habit ADR 019 established in Phase 4.
+    println!(
+        "css2 reftests: {passed}/{total} matched (floor {MATCH_FLOOR}),          {} method exclusions",
+        EXPECTED_FAILURES.len()
+    );
+    for line in breakdown() {
+        println!("  {line}");
+    }
+    println!(
+        "  of the {} not matching, {scripted} need a script host (Phase 10) and \
+         {} are comparison-method exclusions",
+        total - passed,
+        EXPECTED_FAILURES.len()
+    );
+    if std::env::var("REPORT").is_ok() || std::env::var("DIAG").is_ok() {
+        report();
+    }
+
+    assert!(
+        total >= 40,
+        "the corpus shrank to {total} pairs; ci/gate-layout.sh pins it at 40"
+    );
+    assert!(
+        passed >= MATCH_FLOOR,
+        "only {passed} of {total} pairs matched, floor is {MATCH_FLOOR}. A fall is          a regression -- the corpus is pinned, so this cannot be a corpus change."
+    );
+}
+
+/// An expected failure that starts passing must be taken off the list.
+///
+/// The other direction, and the one that makes the list mean something. A stale
+/// exclusion looks exactly like a test nobody checked.
+#[test]
+fn layout_reftest_no_expected_failure_has_started_passing() {
+    let results: std::collections::BTreeMap<String, bool> = results().into_iter().collect();
+
+    let mut stale = Vec::new();
+    for (name, reason) in EXPECTED_FAILURES {
+        match results.get(*name) {
+            Some(true) => stale.push(format!("{name} (listed as: {reason})")),
+            Some(false) => {}
+            None => stale.push(format!("{name} is on the list but not in the corpus")),
+        }
+    }
+
+    assert!(
+        stale.is_empty(),
+        "these expected failures are stale — they pass now, or are not in the \
+         corpus at all:\n  {}",
+        stale.join("\n  ")
+    );
+}

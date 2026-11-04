@@ -1,0 +1,48 @@
+WPT css-flexbox reftest subset (ADR 031).
+
+repository  https://github.com/web-platform-tests/wpt
+commit      b875b21fd9e6b688e37c10d1b6366cab7418f91e  (css/css-flexbox, sparse checkout)
+paths       preserved relative to css/css-flexbox/
+
+counts
+  candidates (files with a <link rel=match|mismatch>, crashtests/ excluded)   1011
+  kept as test+reference pairs                                                 543
+  distinct reference files among them (shared references vendored once)        450
+  support files (stylesheets, images) a kept test or reference needs             8
+  files vendored (tests + references + support, excluding this file)          1001
+
+  dropped-scripted (<script> or an on* attribute in the test)                   66
+  dropped-other                                                                402
+      reference is .xht (no XML path in px-dom, ADR 029)                       198
+      reference outside this module: /css/reference/*.html, the shared
+        "green square" references, absent from the pinned sparse checkout      104
+      test is .xhtml                                                            81
+      test is .xht                                                              18
+      rel=mismatch                                                               1
+
+Selection rule (reproducible without a script; this is what was run)
+  1. Walk css/css-flexbox/ excluding any directory named crashtests (those are
+     vendored separately in tests/wpt/css-flexbox-crashtests/).
+  2. A file is a candidate if it has a <link> whose rel contains "match" or
+     "mismatch". Read with an HTML tokenizer, not a regex.
+  3. Drop the candidate if it is not .html/.htm (.xht, .xhtml, .svg), if it has
+     rel=mismatch, or if it contains a <script> element or any attribute whose
+     name starts with "on" (the same test reftest.rs's needs_script applies).
+     Scripted tests are counted as dropped-scripted, in that order of checks.
+  4. Resolve the single rel=match href against the test's own directory
+     (absolute /css/css-flexbox/... hrefs resolve inside the module). A test
+     with more than one match link would be dropped; there were none.
+  5. Drop the pair if the reference is not .html/.htm, is outside
+     css/css-flexbox/, is missing, or itself contains script or on* attributes
+     (none did).
+  6. Vendor the test, its reference (once if shared), and any file named by
+     <link rel=stylesheet href>, <img src>, <source|video|audio|iframe|embed
+     src> or <object data> in either, if that file exists inside css/css-flexbox/.
+
+Known gaps that remain in the denominator (nothing was removed to hide them)
+  39 kept pairs reference a file that is not in the pinned sparse checkout and
+  so is NOT vendored: /fonts/ahem.css (55 references), ../support/1x1-green.png
+  (css/support/, 8), and two resources/flexbox.css links. The harness reports
+  these as "support file not vendored".
+
+Refresh by repeating the rule against a new commit; the diff is the record.
