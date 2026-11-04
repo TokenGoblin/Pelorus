@@ -1,0 +1,44 @@
+JPEG fixtures: how they were made
+=================================
+
+Generated once, locally, on 2026-11-04 with Python 3, Pillow 12.3.0 (bundled
+libjpeg-turbo) and numpy. The generators are throwaway scripts and are NOT
+committed (the repository is 100% Rust, ADR 032); this note records what they
+did. The test image is a smooth RGB gradient with a red rectangle, a green
+ellipse and a yellow diagonal line (hard chroma edges).
+
+Written by Pillow (`Image.save(..., "JPEG", ...)`):
+  base_444/422/420     33x25, quality 85, subsampling 0/1/2
+  prog_444/422/420     the same, progressive=True
+  odd_420, odd_420_prog, odd_422   35x27 (odd sizes: edge replication)
+  gray, gray_prog      mode L
+  q100_444, q5_420     extreme quantisation
+  optimized_420        optimize=True (image-specific Huffman tables)
+  one_pixel, tiny_9x17, eight   1x1, 9x17 (4:2:0), 8x8
+  restart_420, restart_rows_444   restart_marker_blocks=2, restart_marker_rows=1
+  exif_orientation6    EXIF orientation 6 present (must be ignored)
+  adobe_rgb            a 4:4:4 file with the JFIF segment replaced by an Adobe
+                       APP14 segment, transform 0: components are RGB
+  cmyk                 mode CMYK                            (must be Unsupported)
+  arith_sof9, twelve_bit, lossless_sof3
+                       a baseline file with the SOF marker changed to SOF9
+                       (arithmetic), the precision byte set to 12, or the marker
+                       changed to SOF3 (lossless)             (must be Unsupported)
+
+Written by a small baseline encoder in the generator script (standard Huffman
+and quantisation tables copied from a Pillow-written file, float DCT, box
+downsampling) for sampling layouts Pillow cannot write:
+  c_440, c_440_restart   luma 1x2, chroma 1x1 (h1v2), restart interval 3
+  c_411                  luma 4x1
+  c_410                  luma 4x2
+  c_mixed                luma 2x2, Cb 2x1, Cr 1x1 (different ratios per component)
+  c_422_wide, c_420_narrow, c_420_3wide   130x6, 4x21, 5x9 (edge cases of the
+                         fancy upsampler, including components 3 samples wide)
+  c_gray_2x2             one component declaring 2x2 sampling (non-interleaved scan)
+
+Oracle: for every decodable file, `<name>.ref.png` is Pillow's decode
+(`Image.open(...).convert("RGB")`, saved as PNG) and the MANIFEST holds the
+SHA-256 of Pillow's RGBA. The last-but-one MANIFEST column is the SHA-256 of
+OUR decoder's output (the golden). Measured: our output is byte-identical to
+Pillow's on all 30 decodable fixtures (maximum per-channel deviation 0); the
+tests nevertheless allow 2.

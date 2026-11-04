@@ -296,12 +296,10 @@ fn table_overflow_stream_stays_bounded() {
             acc >>= 8;
             n -= 8;
         }
-        if i > 0 {
-            if next < 4096 {
-                next += 1;
-                if next == (1 << width) && width < 12 {
-                    width += 1;
-                }
+        if i > 0 && next < 4096 {
+            next += 1;
+            if next == (1 << width) && width < 12 {
+                width += 1;
             }
         }
     }

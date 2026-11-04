@@ -86,6 +86,16 @@ impl Budget {
         Ok(v)
     }
 
+    /// A default-filled buffer of exactly `n` elements, charged by byte size.
+    pub fn zeroed_of<T: Copy + Default>(&mut self, n: usize) -> Result<Vec<T>, DecodeError> {
+        self.charge(mul(n, std::mem::size_of::<T>())?)?;
+        let mut v = Vec::new();
+        v.try_reserve_exact(n)
+            .map_err(|_| DecodeError::LimitExceeded("allocation"))?;
+        v.resize(n, T::default());
+        Ok(v)
+    }
+
     /// An empty buffer with capacity for exactly `n` bytes, charged.
     pub fn with_capacity(&mut self, n: usize) -> Result<Vec<u8>, DecodeError> {
         self.charge(n)?;
