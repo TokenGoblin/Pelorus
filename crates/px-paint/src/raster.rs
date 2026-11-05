@@ -69,9 +69,9 @@
 use crate::display_list::{
     BorderSide, BorderStyle, Color, DisplayList, FontId, Item, ListError, Rect,
 };
-use crate::round::Shape;
 use crate::glyph::{self, Mask, PathCmd, Scale};
 use crate::png;
+use crate::round::Shape;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -676,8 +676,11 @@ pub fn rasterize_with(
                 }
                 let clip_t = (clip.rect.x0, clip.rect.y0, clip.rect.x1, clip.rect.y1);
                 let shaped = |x: i64, y: i64| clip.factor(x, y);
-                let shape_fn: Option<&dyn Fn(i64, i64) -> u32> =
-                    if clip.rounds.is_empty() { None } else { Some(&shaped) };
+                let shape_fn: Option<&dyn Fn(i64, i64) -> u32> = if clip.rounds.is_empty() {
+                    None
+                } else {
+                    Some(&shaped)
+                };
                 for g in glyphs {
                     let (Ok(ox), Ok(oy)) = (
                         i32::try_from(snap(g.x.0 as i64)),
@@ -686,7 +689,9 @@ pub fn rasterize_with(
                         continue;
                     };
                     if let Some(mask) = cache.get(source, *font, size64, g.glyph_id) {
-                        glyph::composite_mask_shaped(&mut cv, mask, ox, oy, *color, clip_t, shape_fn);
+                        glyph::composite_mask_shaped(
+                            &mut cv, mask, ox, oy, *color, clip_t, shape_fn,
+                        );
                     }
                 }
             }

@@ -450,7 +450,7 @@ fn border_widths(style: &PaintStyle) -> [Au; 4] {
 }
 
 fn resolve_radius(r: RadiusLen, basis: Au) -> Au {
-    let pct = (i64::from(r.pct) * i64::from(basis.0.max(0))) >> 16;
+    let pct = (i64::from(r.pct) * i64::from(basis.0.max(0)) + (1 << 19)) >> 20;
     let total = i64::from(r.abs.0).saturating_add(pct);
     Au(i32::try_from(total).unwrap_or(i32::MAX))
 }
@@ -471,7 +471,11 @@ fn corner(c: &PaintCorner, rect: Rect) -> Corner {
 /// or `None` when no corner is rounded, so that an unrounded box emits exactly
 /// the items it always did. A piece of an inline box that does not own an edge
 /// (`box-decoration-break: slice`) has square corners on that edge.
-fn border_shape(rect: Rect, style: &PaintStyle, (left, right): (bool, bool)) -> Option<RoundedRect> {
+fn border_shape(
+    rect: Rect,
+    style: &PaintStyle,
+    (left, right): (bool, bool),
+) -> Option<RoundedRect> {
     let mut corners = style.corners.map(|c| corner(&c, rect));
     for (i, owned) in [(0, left), (1, right), (2, right), (3, left)] {
         if !owned {

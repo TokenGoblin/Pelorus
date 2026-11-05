@@ -56,7 +56,7 @@ pub struct PaintBorder {
 pub struct RadiusLen {
     /// The length part.
     pub abs: Au,
-    /// The percentage part in 1/65536: `basis * pct / 65536` Au.
+    /// The percentage part in 1/2^20: `basis * pct / 2^20` Au.
     pub pct: i32,
 }
 
@@ -125,11 +125,11 @@ fn radius_len(lp: &style::values::computed::NonNegativeLengthPercentage) -> Radi
     use style::values::computed::Length;
     let lp = &lp.0;
     let abs = lp.resolve(Length::new(0.0)).to_i32_au();
-    // Au per 2^20 Au of basis, then reduced to 1/65536.
+    // Au per 2^20 Au of basis, which is the percentage in 1/2^20.
     let slope = i64::from(lp.resolve(Length::from(Au(1 << 20))).to_i32_au()) - i64::from(abs);
     RadiusLen {
         abs: Au(abs.max(0)),
-        pct: i32::try_from((slope >> 4).clamp(0, 1 << 24)).unwrap_or(0),
+        pct: i32::try_from(slope.clamp(0, 1 << 28)).unwrap_or(0),
     }
 }
 

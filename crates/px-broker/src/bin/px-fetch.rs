@@ -550,6 +550,10 @@ fn inline_stylesheets(arena: &px_dom::Arena) -> Vec<String> {
 
 /// Enough of a user-agent stylesheet that a real page lays out at all.
 ///
+/// Soft corners by default (`docs/brand/ui-direction.md`): what the engine draws
+/// for form controls is a squircle unless the page says otherwise. The sheet is
+/// added before any page stylesheet, so authored CSS wins.
+///
 /// The same one the reftest harness uses, and the same caveat: not the real UA
 /// sheet, which is Phase 8's and mostly about paint. Without it every element
 /// computes `display: inline` and the page has no block structure whatsoever.
@@ -561,4 +565,5 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      h1 { margin: 0.67em 0; font-size: 2em } \
      h2 { margin: 0.83em 0; font-size: 1.5em } \
      h3 { margin: 1em 0; font-size: 1.17em } \
+     input, button, select, textarea, meter, progress { border-radius: 10px; corner-shape: squircle } \
      head, style, script, title, meta, link, base { display: none }";

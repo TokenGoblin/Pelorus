@@ -449,6 +449,20 @@ mod tests {
             style: BorderStyle::Solid,
             color,
         };
+        let corner = |rx: i32, shape| Corner {
+            rx: px(rx),
+            ry: au(7 * rx),
+            shape,
+        };
+        let shape = RoundedRect {
+            rect,
+            corners: [
+                corner(1, CornerShape::ROUND),
+                corner(2, CornerShape::SQUIRCLE),
+                corner(3, CornerShape::SCOOP),
+                corner(4, CornerShape::NOTCH),
+            ],
+        };
         let items = [
             Item::FillRect { rect, color },
             Item::Border {
@@ -466,6 +480,12 @@ mod tests {
             Item::TextRun { rect, color },
             Item::PushClip { rect },
             Item::PopClip,
+            Item::FillRoundedRect { shape, color },
+            Item::RoundedBorder {
+                shape,
+                sides: [side; 4],
+            },
+            Item::PushRoundedClip { shape },
             Item::GlyphRun {
                 font: FontId(u32::MAX),
                 size: px(16),
@@ -483,6 +503,28 @@ mod tests {
             y: au(7),
         };
         assert_eq!(glyph_from_wire(&glyph_to_wire(&glyph)), Ok(glyph));
+    }
+
+    #[test]
+    fn a_corner_radius_outside_layouts_range_is_refused() {
+        let wire_corner = WireCorner {
+            rx: i32::MAX,
+            ry: 0,
+            concave: false,
+            n16: 32,
+        };
+        let item = WireItem::PushRoundedClip {
+            shape: WireRoundedRect {
+                rect: WireRect {
+                    x: 0,
+                    y: 0,
+                    width: 60,
+                    height: 60,
+                },
+                corners: [wire_corner; 4],
+            },
+        };
+        assert_eq!(item_from_wire(&item), Err(BadCoordinate));
     }
 
     #[test]
