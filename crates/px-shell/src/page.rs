@@ -5,6 +5,7 @@
 //! a stylesheet `href` with a scheme or a host is skipped, never fetched.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use px_layout::block::layout_document;
@@ -29,7 +30,7 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      h3 { margin: 1em 0; font-size: 1.17em } \
      ul, ol { margin: 1em 0; padding-left: 40px } \
      a { color: #0b57d0 } \
-     head, style, script, title, meta, link { display: none }";
+     head, style, script, noscript, template, title, meta, link { display: none }";
 
 /// A clickable region of the document, in CSS pixels from its top-left.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,7 +75,61 @@ fn resolve_css(page: &Path, href: &str) -> Option<PathBuf> {
     Some(page.parent()?.join(href))
 }
 
-fn stylesheets(page: Option<&Path>, arena: &px_dom::Arena) -> Vec<String> {
+/// What a page's subresources resolved to, fetched before layout.
+///
+/// A local page has `file` (relative stylesheets are read next to it). A web
+/// page has `base` (its final URL) and `fetched`, the stylesheets the network
+/// loader returned keyed by absolute URL; nothing is fetched during layout.
+/// `blocked_inline` holds the text of inline `<style>` elements the page's
+/// Content-Security-Policy refuses.
+#[derive(Clone, Debug, Default)]
+pub struct Resources {
+    pub file: Option<PathBuf>,
+    pub base: Option<String>,
+    pub fetched: HashMap<String, String>,
+    pub blocked_inline: HashSet<String>,
+}
+
+/// A `<link rel=stylesheet>` the engine should apply: not `alternate`, not
+/// print-only. Returns its `href`.
+fn stylesheet_href(node: &px_dom::Node) -> Option<&str> {
+    let rel = attr(node, "rel").unwrap_or("").to_ascii_lowercase();
+    let mut words = rel.split_ascii_whitespace();
+    if !words.clone().any(|w| w == "stylesheet") || words.any(|w| w == "alternate") {
+        return None;
+    }
+    if attr(node, "media").is_some_and(|m| m.trim().eq_ignore_ascii_case("print")) {
+        return None;
+    }
+    if attr(node, "disabled").is_some() {
+        return None;
+    }
+    attr(node, "href")
+}
+
+/// The stylesheet links and inline style texts of a source, in document order:
+/// what the network loader must fetch and what the CSP must vet.
+#[must_use]
+pub fn subresource_plan(source: &str) -> (Vec<String>, Vec<String>) {
+    let dom = px_dom::parse(source);
+    let arena = dom.arena;
+    let (mut links, mut styles) = (Vec::new(), Vec::new());
+    for id in arena.descendants(arena.document()) {
+        let Some(node) = arena.get(id) else { continue };
+        match node.element_name().map(|n| n.local.as_ref()) {
+            Some("style") => styles.push(px_layout::inline::collect_text(&arena, id)),
+            Some("link") => {
+                if let Some(h) = stylesheet_href(node) {
+                    links.push(h.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    (links, styles)
+}
+
+fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<String> {
     let mut out = Vec::new();
     for id in arena.descendants(arena.document()) {
         let Some(node) = arena.get(id) else { continue };
@@ -82,18 +137,25 @@ fn stylesheets(page: Option<&Path>, arena: &px_dom::Arena) -> Vec<String> {
             continue;
         };
         match name.local.as_ref() {
-            "style" => out.push(px_layout::inline::collect_text(arena, id)),
+            "style" => {
+                let text = px_layout::inline::collect_text(arena, id);
+                if !res.blocked_inline.contains(&text) {
+                    out.push(text);
+                }
+            }
             "link" => {
-                let rel = attr(node, "rel").unwrap_or("").to_ascii_lowercase();
-                if !rel.split_ascii_whitespace().any(|w| w == "stylesheet") {
+                let Some(href) = stylesheet_href(node) else {
                     continue;
-                }
-                if let Some(css) = page
-                    .and_then(|p| resolve_css(p, attr(node, "href").unwrap_or("")))
-                    .and_then(|p| std::fs::read_to_string(p).ok())
-                {
-                    out.push(css);
-                }
+                };
+                let css = if let Some(base) = &res.base {
+                    px_net::browse::resolve(base, href).and_then(|u| res.fetched.get(&u).cloned())
+                } else {
+                    res.file
+                        .as_deref()
+                        .and_then(|p| resolve_css(p, href))
+                        .and_then(|p| std::fs::read_to_string(p).ok())
+                };
+                out.extend(css);
             }
             _ => {}
         }
@@ -139,7 +201,7 @@ fn ceil_px(a: Au) -> i32 {
 /// Run the pipeline. `page` is the file the source came from (for relative
 /// stylesheets); `None` for a built-in page. Never panics: an engine panic is
 /// reported as an error.
-pub fn layout(source: &str, page: Option<&Path>, width: u32, height: u32) -> Result<Laid, String> {
+pub fn layout(source: &str, page: &Resources, width: u32, height: u32) -> Result<Laid, String> {
     catch_unwind(AssertUnwindSafe(|| {
         layout_inner(source, page, width, height)
     }))
@@ -148,7 +210,7 @@ pub fn layout(source: &str, page: Option<&Path>, width: u32, height: u32) -> Res
 
 fn layout_inner(
     source: &str,
-    page: Option<&Path>,
+    page: &Resources,
     width: u32,
     height: u32,
 ) -> Result<Laid, String> {
@@ -297,7 +359,7 @@ mod tests {
 
     #[test]
     fn title_height_and_links() {
-        let l = layout(PAGE, None, 400, 300).unwrap();
+        let l = layout(PAGE, &Resources::default(), 400, 300).unwrap();
         assert_eq!(l.title, "Hi there");
         assert_eq!(l.height, 2040);
         assert_eq!(l.width, 400);
@@ -312,7 +374,7 @@ mod tests {
         let src = "<!doctype html><body style='margin:0'>\
             <div style='height:100px;background:#f00'></div>\
             <div style='height:100px;background:#00f'></div>";
-        let l = layout(src, None, 50, 100).unwrap();
+        let l = layout(src, &Resources::default(), 50, 100).unwrap();
         let top = l.render(0, 50, 100).unwrap();
         assert_eq!(top.pixel(10, 10), Some([255, 0, 0, 255]));
         let down = l.render(100, 50, 100).unwrap();
@@ -323,8 +385,8 @@ mod tests {
     fn a_width_change_relayouts() {
         let src = "<!doctype html><body style='margin:0'><p style='margin:0'>\
             word word word word word word word word word word word word word word</p>";
-        let wide = layout(src, None, 900, 300).unwrap();
-        let narrow = layout(src, None, 120, 300).unwrap();
+        let wide = layout(src, &Resources::default(), 900, 300).unwrap();
+        let narrow = layout(src, &Resources::default(), 120, 300).unwrap();
         assert!(narrow.height > wide.height);
     }
 

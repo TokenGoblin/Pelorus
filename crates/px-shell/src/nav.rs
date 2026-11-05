@@ -1,9 +1,13 @@
 //! Locations: what a tab can be showing, how a link or typed text resolves to one,
-//! and how one is loaded. Local only: files and the built-in `about:` pages.
+//! and how one is loaded: local files, the built-in `about:` pages, and `http(s)`
+//! pages fetched through `px-net` (see [`crate::web`]).
 
 use std::path::{Path, PathBuf};
 
 use px_ui::address::UrlDisplay;
+
+use crate::page::Resources;
+use crate::web::Net;
 
 /// Pages compiled into the binary.
 pub const BUILTIN: &[(&str, &str)] = &[
@@ -19,15 +23,19 @@ const MAX_FILE: u64 = 8 << 20;
 pub enum Location {
     File(PathBuf),
     About(String),
+    /// An absolute `http(s)` URL, fetched through `px-net`.
+    Web(String),
 }
 
 /// What loading a location produced. A failure is a page too (the error page),
 /// so a tab always has something to show.
 pub struct Loaded {
     pub source: String,
-    /// The file the source came from, for relative stylesheets.
-    pub file: Option<PathBuf>,
+    /// Where relative stylesheets come from (a file, or a fetched set).
+    pub res: Resources,
     pub failed: bool,
+    /// For a web page: the URL after redirects, which becomes the tab's address.
+    pub final_url: Option<String>,
 }
 
 impl Location {
@@ -47,9 +55,15 @@ impl Location {
         if let Some(rest) = t.strip_prefix("file://") {
             return Ok(Location::File(PathBuf::from(rest)));
         }
+        let lower = t.to_ascii_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            return px_net::browse::address_from_text(t)
+                .map(Location::Web)
+                .ok_or_else(|| "that web address could not be understood".to_string());
+        }
         if has_scheme(t) {
             return Err(format!(
-                "{} pages are not available: this build opens local files only",
+                "{} pages are not available: this build opens web (http, https) and local pages only",
                 t.split(':').next().unwrap_or("network")
             ));
         }
@@ -59,6 +73,15 @@ impl Location {
     /// Resolve a link `href` found on a page at `self`. `None` means "do
     /// nothing": a same-page fragment, or a target that is not local.
     pub fn resolve(&self, href: &str) -> Option<Location> {
+        if let Location::Web(base) = self {
+            let h = href.trim();
+            if h.is_empty() || h.starts_with('#') {
+                return None;
+            }
+            let target = px_net::browse::resolve(base, h)?;
+            let target = target.split('#').next().unwrap_or("").to_string();
+            return Some(Location::Web(target));
+        }
         let h = href.trim();
         let h = h.split(['#', '?']).next().unwrap_or("");
         if h.is_empty() {
@@ -75,7 +98,7 @@ impl Location {
         }
         let base: PathBuf = match self {
             Location::File(p) => p.parent().map(Path::to_path_buf).unwrap_or_default(),
-            Location::About(_) => PathBuf::new(),
+            Location::About(_) | Location::Web(_) => PathBuf::new(),
         };
         Some(Location::File(base.join(h)))
     }
@@ -84,6 +107,16 @@ impl Location {
     pub fn display(&self) -> UrlDisplay {
         match self {
             Location::About(n) => UrlDisplay::from_parts("about:", "", n, ""),
+            Location::Web(u) => {
+                // The whole host is emphasised and nothing is muted as a
+                // "subdomain": the registrable-domain split needs the public
+                // suffix list, and a wrong split would highlight the wrong part.
+                let (scheme, rest) = u.split_once("://").unwrap_or(("https", u.as_str()));
+                let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+                let (host, tail) = rest.split_at(end);
+                let tail = if tail == "/" { "" } else { tail };
+                UrlDisplay::from_parts(&format!("{scheme}://"), "", host, tail)
+            }
             Location::File(p) => {
                 let abs = std::path::absolute(p).unwrap_or_else(|_| p.clone());
                 let name = abs
@@ -108,6 +141,13 @@ impl Location {
     pub fn fallback_title(&self) -> String {
         match self {
             Location::About(n) => n.clone(),
+            Location::Web(u) => u
+                .split_once("://")
+                .map_or(u.as_str(), |(_, r)| r)
+                .split(['/', '?', '#'])
+                .next()
+                .unwrap_or("")
+                .to_string(),
             Location::File(p) => p
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -115,7 +155,7 @@ impl Location {
         }
     }
 
-    pub fn load(&self) -> Loaded {
+    pub fn load(&self, net: &mut Net) -> Loaded {
         let result = match self {
             Location::About(n) => BUILTIN
                 .iter()
@@ -123,17 +163,23 @@ impl Location {
                 .map(|(_, src)| ((*src).to_string(), None))
                 .ok_or_else(|| format!("there is no built-in page called about:{n}")),
             Location::File(p) => read_file(p).map(|s| (s, Some(p.clone()))),
+            Location::Web(u) => return net.load(u),
         };
         match result {
             Ok((source, file)) => Loaded {
                 source,
-                file,
+                res: Resources {
+                    file,
+                    ..Resources::default()
+                },
                 failed: false,
+                final_url: None,
             },
             Err(msg) => Loaded {
                 source: error_page(&msg),
-                file: None,
+                res: Resources::default(),
                 failed: true,
+                final_url: None,
             },
         }
     }

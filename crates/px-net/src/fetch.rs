@@ -192,7 +192,10 @@ pub fn fetch_request(
     #[cfg(feature = "testing")]
     let stream = match spec.connect_to {
         Some(addr) => TcpStream::connect(addr),
-        None => TcpStream::connect(&address),
+        None => match crate::testing_proxy::connect(origin.host(), origin.port()) {
+            Some(tunnel) => tunnel,
+            None => TcpStream::connect(&address),
+        },
     }
     .map_err(FetchError::Connect)?;
     #[cfg(not(feature = "testing"))]
@@ -205,7 +208,15 @@ pub fn fetch_request(
         .map_err(FetchError::Io)?;
 
     if origin.is_secure() {
-        let mut session = tls::connect(origin.host(), stream)?;
+        #[cfg(feature = "testing")]
+        let config = if spec.connect_to.is_none() && crate::testing_proxy::active() {
+            crate::testing_proxy::config()?
+        } else {
+            tls::client_config()?
+        };
+        #[cfg(not(feature = "testing"))]
+        let config = tls::client_config()?;
+        let mut session = tls::connect_with(origin.host(), stream, config)?;
         exchange(&mut session, &request)
     } else {
         // Plaintext is reachable only for an `http` origin, which

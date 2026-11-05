@@ -31,3 +31,7 @@ pub mod redirect;
 pub mod resolver;
 pub mod secure;
 pub mod tls;
+
+pub mod browse;
+#[cfg(feature = "testing")]
+pub mod testing_proxy;

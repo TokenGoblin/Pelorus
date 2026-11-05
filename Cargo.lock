@@ -1532,6 +1532,8 @@ dependencies = [
  "px-display",
  "px-dom",
  "px-layout",
+ "px-net",
+ "px-pages",
  "px-paint",
  "px-text",
  "px-ui",

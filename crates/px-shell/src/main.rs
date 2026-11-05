@@ -90,6 +90,9 @@ fn main() {
 }
 
 fn real_main(args: Args) -> Result<(), String> {
+    // Real pages name families the bundled set does not have; draw them in the
+    // bundled Noto Sans rather than the conformance fallback (Ahem squares).
+    px_layout::text::set_web_fallback(true);
     let theme = if args.light {
         Theme::Light
     } else {
