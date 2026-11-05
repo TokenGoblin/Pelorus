@@ -27,24 +27,24 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 3  Network core            █████████████████░░░  85%
 4  DOM                     ██████████████████░░  90%
 5  Style                   ████████████████░░░░  80%
-6  Block/inline layout     ██████████████░░░░░░  70%
-7  Flex & grid             █████████░░░░░░░░░░░  45%
+6  Block/inline layout     ████████████████░░░░  78%
+7  Flex & grid             ██████████░░░░░░░░░░  50%
 8  Paint & compositing     ██████████████░░░░░░  70%
 9  Text & input            ██████████░░░░░░░░░░  50%
 10 Script host (Boa)       ████████████░░░░░░░░  60%
 11 Bindings                ██████████░░░░░░░░░░  50%
-12 Web security            ███████████████░░░░░  75%
+12 Web security            ████████████████░░░░  80%
 13 Navigation & storage    █████████░░░░░░░░░░░  45%
-14 Out-of-process iframes  █████░░░░░░░░░░░░░░░  25%
-15 Media                   ████░░░░░░░░░░░░░░░░  20%
+14 Out-of-process iframes  ██████░░░░░░░░░░░░░░  30%
+15 Media                   ████████░░░░░░░░░░░░  40%
 16 Accessibility           ██████░░░░░░░░░░░░░░  30%
-17 Sandbox hardening       ███████████░░░░░░░░░  55%
-18 Chrome                  ████████░░░░░░░░░░░░  40%
+17 Sandbox hardening       ████████████░░░░░░░░  60%
+18 Chrome                  ████████████░░░░░░░░  60%
 19 Privacy                 ███░░░░░░░░░░░░░░░░░  15%
 20 Release engineering     ███░░░░░░░░░░░░░░░░░  15%
 21 MCP                     ██████░░░░░░░░░░░░░░  30%
 22 Extensions              █░░░░░░░░░░░░░░░░░░░   5%
-OVERALL                    53%
+OVERALL                    56%
 ```
 Estimates by the maintainers, not measurements; a phase is only closed when its gate passes in CI on Windows and Linux.
 <!-- progress:end -->
