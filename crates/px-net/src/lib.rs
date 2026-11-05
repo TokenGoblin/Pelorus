@@ -29,4 +29,5 @@ pub mod pool;
 pub mod psl;
 pub mod redirect;
 pub mod resolver;
+pub mod secure;
 pub mod tls;

@@ -29,7 +29,10 @@ fn mark(name: &'static str) {
 }
 #[cfg(not(test))]
 #[inline(always)]
-fn mark(_name: &'static str) {}
+fn mark(_name: &'static str) {
+    #[cfg(feature = "trace")]
+    crate::origin::trace::hit(_name);
+}
 
 /// What kind of enforcement point this is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
