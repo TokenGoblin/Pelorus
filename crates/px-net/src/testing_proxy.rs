@@ -40,8 +40,22 @@ pub fn active() -> bool {
     proxy_address().is_some()
 }
 
-/// Open a tunnel to `host:port` through the proxy, or `None` if none is set.
+/// Loopback names are never proxied (the local test servers).
+fn is_local(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "::1")
+}
+
+/// Whether a connection to `host` goes through the proxy.
+pub fn applies_to(host: &str) -> bool {
+    !is_local(host) && active()
+}
+
+/// Open a tunnel to `host:port` through the proxy, or `None` if none is set
+/// or `host` is loopback.
 pub fn connect(host: &str, port: u16) -> Option<std::io::Result<TcpStream>> {
+    if is_local(host) {
+        return None;
+    }
     let proxy = proxy_address()?;
     Some(tunnel(&proxy, host, port))
 }

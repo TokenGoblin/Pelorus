@@ -209,7 +209,8 @@ pub fn fetch_request(
 
     if origin.is_secure() {
         #[cfg(feature = "testing")]
-        let config = if spec.connect_to.is_none() && crate::testing_proxy::active() {
+        let config = if spec.connect_to.is_none() && crate::testing_proxy::applies_to(origin.host())
+        {
             crate::testing_proxy::config()?
         } else {
             tls::client_config()?
