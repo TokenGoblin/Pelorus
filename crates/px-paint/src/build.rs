@@ -81,6 +81,7 @@ use px_dom::{Arena, NodeId};
 use px_layout::fragment::{FragmentId, FragmentKind, FragmentTree};
 use px_layout::geom::Au;
 
+use crate::imgpaint::{self, ImageSet};
 use crate::display_list::{
     BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, Item,
     PositionedGlyph, Rect, RoundedRect,
@@ -336,7 +337,7 @@ fn emit(
     facts: &Facts,
     mut units: Vec<Unit>,
     propagated: Option<NodeId>,
-    styles: &Styles<'_>,
+    styles: &Styles<'_, '_>,
 ) {
     let mut jobs = vec![Job::Unit(0)];
     while let Some(job) = jobs.pop() {
@@ -384,7 +385,7 @@ fn emit_ops(
     facts: &Facts,
     ops: &[Op],
     propagated: Option<NodeId>,
-    styles: &Styles<'_>,
+    styles: &Styles<'_, '_>,
 ) {
     let mut open: Vec<FragmentId> = Vec::new();
     for op in ops {
@@ -426,7 +427,9 @@ fn emit_ops(
                         FragmentKind::Inline { left, right } => (left, right),
                         _ => (true, true),
                     };
-                    paint_box(list, rect, &style, skip_bg, (left, right));
+                    let extras = image_items(list, fragment, rect, &style, skip_bg, styles);
+                    paint_box(list, rect, &style, skip_bg, (left, right), &extras.0);
+                    list.items.extend(extras.1);
                 }
             }
         }
@@ -504,6 +507,29 @@ pub fn build_with_viewport(
     viewport_width: Au,
     viewport_height: Au,
 ) -> DisplayList {
+    build_with_images(
+        arena,
+        style_root,
+        tree,
+        viewport_width,
+        viewport_height,
+        &ImageSet::default(),
+    )
+}
+
+/// As [`build_with_viewport`], with the decoded pictures of the page: each
+/// `<img>` that has one paints it (see [`crate::imgpaint`]) and every
+/// `background-image: url(...)` whose URL is in `images` paints its layer. An
+/// empty set builds exactly what [`build_with_viewport`] builds.
+#[must_use]
+pub fn build_with_images(
+    arena: &Arena,
+    style_root: &StyleRoot,
+    tree: &FragmentTree,
+    viewport_width: Au,
+    viewport_height: Au,
+    images: &ImageSet,
+) -> DisplayList {
     let mut list = DisplayList::new();
     let Some(root) = tree.root() else {
         return list;
@@ -531,14 +557,62 @@ pub fn build_with_viewport(
                 color: color(bg),
             });
         }
+        // The propagated element's image layers cover the whole canvas.
+        let canvas_images = if images.urls.is_empty() {
+            None
+        } else {
+            canvas_image_source(arena, |n| px_css::image_style::background_layers(dom, n))
+        };
+        if let Some((_, layers)) = &canvas_images {
+            let items = imgpaint::canvas_items(&mut list, canvas, layers, images);
+            list.items.extend(items);
+        }
 
         let facts = gather(tree, root, |n| paint_style(dom, n));
         let units = build_units(tree, &facts, root);
         let style_of = |n| paint_style(dom, n);
-        let styles = Styles::new(&style_of);
+        let styles = Styles::new(
+            &style_of,
+            dom,
+            images,
+            canvas_images.as_ref().map(|(n, _)| *n),
+        );
         emit(&mut list, tree, &facts, units, propagated, &styles);
     });
     list
+}
+
+/// The element whose `background-image` layers paint against the canvas, and its
+/// layers: the root element's when it has any, else the `<body>`'s when the root
+/// is `html` (the same rule as the colour, CSS Backgrounds 3 section 2.11.2).
+fn canvas_image_source(
+    arena: &Arena,
+    layers_of: impl Fn(NodeId) -> Vec<px_css::image_style::BgLayer>,
+) -> Option<(NodeId, Vec<px_css::image_style::BgLayer>)> {
+    let name_is = |id: NodeId, name: &str| {
+        arena
+            .get(id)
+            .and_then(|n| n.element_name())
+            .is_some_and(|q| q.local.as_ref() == name)
+    };
+    let is_element = |id: NodeId| arena.get(id).is_some_and(|n| n.element_name().is_some());
+    let root = arena
+        .children(arena.document())
+        .and_then(|k| k.into_iter().find(|k| is_element(*k)))?;
+    let l = layers_of(root);
+    if !l.is_empty() {
+        return Some((root, l));
+    }
+    if name_is(root, "html") {
+        let body = arena
+            .children(root)
+            .and_then(|k| k.into_iter().find(|k| name_is(*k, "body")))?;
+        let l = layers_of(body);
+        if !l.is_empty() {
+            return Some((body, l));
+        }
+    }
+    None
 }
 
 /// Which colour fills the canvas, and which node it was taken from (so that node
@@ -582,6 +656,7 @@ fn paint_box(
     style: &PaintStyle,
     skip_background: bool,
     (left, right): (bool, bool),
+    background_images: &[Item],
 ) {
     let shape = border_shape(rect, style, (left, right));
     if !skip_background && style.background[3] > 0 {
@@ -606,6 +681,7 @@ fn paint_box(
             }),
         }
     }
+    list.items.extend_from_slice(background_images);
     let drawn = |i: usize| {
         style.borders[i].drawn
             && style.borders[i].width > Au(0)
@@ -637,6 +713,44 @@ fn paint_box(
     }
 }
 
+/// The image items of a box: `(background layers, element content)`. The layers
+/// go between the background colour and the border, the content after the border.
+fn image_items(
+    list: &mut DisplayList,
+    fragment: &px_layout::fragment::Fragment,
+    rect: Rect,
+    style: &PaintStyle,
+    skip_background: bool,
+    styles: &Styles<'_, '_>,
+) -> (Vec<Item>, Vec<Item>) {
+    let images = styles.images;
+    let Some(node) = fragment.node.filter(|_| !images.is_empty()) else {
+        return (Vec::new(), Vec::new());
+    };
+    let owns_edges = !matches!(fragment.kind, FragmentKind::Inline { .. });
+    let shape = border_shape(rect, style, (true, true)).filter(|_| owns_edges);
+    let borders = border_widths(style);
+    let layers = if skip_background
+        || images.urls.is_empty()
+        || styles.canvas_images == Some(node)
+    {
+        Vec::new()
+    } else {
+        let l = px_css::image_style::background_layers(styles.dom, node);
+        imgpaint::background_items(list, rect, shape, borders, &l, images)
+    };
+    let content = match images.elements.get(&node) {
+        Some(img) if fragment.kind == FragmentKind::Block => {
+            match px_css::image_style::replaced_style(styles.dom, node) {
+                Some(rs) => imgpaint::content_items(list, rect, shape, borders, &rs, img),
+                None => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    };
+    (layers, content)
+}
+
 /// The border box less its borders, never negative.
 fn padding_box(rect: Rect, style: &PaintStyle) -> Rect {
     let [top, right, bottom, left] = style.borders.map(|b| b.width);
@@ -650,14 +764,26 @@ fn padding_box(rect: Rect, style: &PaintStyle) -> Rect {
 
 /// Computed paint styles by DOM node, memoised: a run names the element whose
 /// `color` paints it, and many runs share one element.
-struct Styles<'a> {
+struct Styles<'a, 'd> {
+    dom: px_css::view::Dom<'d>,
+    images: &'a ImageSet,
+    /// The element whose image layers were painted against the canvas.
+    canvas_images: Option<NodeId>,
     of: &'a dyn Fn(NodeId) -> Option<PaintStyle>,
     memo: std::cell::RefCell<std::collections::BTreeMap<NodeId, Option<PaintStyle>>>,
 }
 
-impl<'a> Styles<'a> {
-    fn new(of: &'a dyn Fn(NodeId) -> Option<PaintStyle>) -> Self {
+impl<'a, 'd> Styles<'a, 'd> {
+    fn new(
+        of: &'a dyn Fn(NodeId) -> Option<PaintStyle>,
+        dom: px_css::view::Dom<'d>,
+        images: &'a ImageSet,
+        canvas_images: Option<NodeId>,
+    ) -> Self {
         Self {
+            dom,
+            images,
+            canvas_images,
             of,
             memo: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         }
@@ -690,7 +816,7 @@ fn emit_line(
     tree: &FragmentTree,
     facts: &Facts,
     line: FragmentId,
-    styles: &Styles<'_>,
+    styles: &Styles<'_, '_>,
 ) {
     let Some(fragment) = tree.get(line) else {
         return;
