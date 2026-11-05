@@ -97,6 +97,8 @@ pub struct BgLayer {
     pub repeat_y: Repeat,
     pub origin: RefBox,
     pub clip: RefBox,
+    /// `image-rendering` asks for no smoothing (`pixelated`, `crisp-edges`).
+    pub nearest: bool,
 }
 
 /// `object-fit`.
@@ -118,6 +120,16 @@ pub struct ReplacedStyle {
     /// Padding `[top, right, bottom, left]`; percentages are against the
     /// containing block's width, which paint does not know, so they count as 0.
     pub padding: [Au; 4],
+    /// `image-rendering` asks for no smoothing (`pixelated`, `crisp-edges`).
+    pub nearest: bool,
+}
+
+fn nearest_of(style: &ComputedValues) -> bool {
+    use style::values::computed::ImageRendering;
+    !matches!(
+        style.get_inherited_box().clone_image_rendering(),
+        ImageRendering::Auto
+    )
 }
 
 fn url_of(u: &style::values::computed::url::ComputedUrl) -> String {
@@ -210,6 +222,7 @@ pub fn background_layers_of(style: &ComputedValues) -> Vec<BgLayer> {
             repeat_y: ry,
             origin,
             clip,
+            nearest: nearest_of(style),
         });
     }
     out
@@ -242,6 +255,7 @@ pub fn replaced_style_of(style: &ComputedValues) -> ReplacedStyle {
             abs(&p.padding_bottom),
             abs(&p.padding_left),
         ],
+        nearest: nearest_of(style),
     }
 }
 

@@ -11,11 +11,13 @@ pub mod build;
 pub mod display_list;
 pub mod glyph;
 pub mod image;
+pub mod imgpaint;
 pub mod png;
 pub mod raster;
 pub mod round;
 
-pub use build::{build, build_with_viewport};
+pub use build::{build, build_with_images, build_with_viewport};
+pub use imgpaint::ImageSet;
 pub use display_list::{
     BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, ImageData,
     ImageFilter, Item, ListError, PositionedGlyph, Rect, RoundedRect,
