@@ -192,7 +192,10 @@ pub enum AppRequest {
     CloseTab(TabId),
     ActivateTab(TabId),
     /// The strip already shows the new order; the browser should record it.
-    MoveTab { tab: TabId, to: usize },
+    MoveTab {
+        tab: TabId,
+        to: usize,
+    },
     /// Open the overflow menu, anchored at this rectangle.
     OpenMenu(Rect),
 }

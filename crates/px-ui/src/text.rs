@@ -74,7 +74,9 @@ pub const MAX_TITLE_CHARS: usize = 256;
 /// controls, and the bidirectional overrides and isolates that let text lie
 /// about its own order (U+202A..202E, U+2066..2069).
 pub fn is_unsafe_char(c: char) -> bool {
-    c.is_control() || ('\u{202A}'..='\u{202E}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c)
+    c.is_control()
+        || ('\u{202A}'..='\u{202E}').contains(&c)
+        || ('\u{2066}'..='\u{2069}').contains(&c)
 }
 
 /// Page-controlled text made safe to draw: unsafe characters removed, capped at
@@ -197,9 +199,8 @@ mod tests {
         assert!(out.ends_with(px_brand::ui::ELLIPSIS), "{out}");
         assert!(m.shape(&out, 10).width <= 50 * AU_PER_PX, "{out}");
         // One more character would not have fit.
-        let more = out.trim_end_matches(px_brand::ui::ELLIPSIS).to_string()
-            + "x"
-            + px_brand::ui::ELLIPSIS;
+        let more =
+            out.trim_end_matches(px_brand::ui::ELLIPSIS).to_string() + "x" + px_brand::ui::ELLIPSIS;
         assert!(m.shape(&more, 10).width > 50 * AU_PER_PX);
         // Nothing fits: just the ellipsis, never a panic.
         assert_eq!(fit(&m, "abcdef", 10, 1), px_brand::ui::ELLIPSIS);

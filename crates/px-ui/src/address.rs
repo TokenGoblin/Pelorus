@@ -11,9 +11,7 @@
 //! not by grapheme cluster, and ignores bidi order: both need segmentation and
 //! reordering tables that this crate does not carry (see the report).
 
-use crate::input::{
-    AppRequest, Effect, Key, KeyEvent, PlatformEffect, Preedit, PrimaryModifier,
-};
+use crate::input::{AppRequest, Effect, Key, KeyEvent, PlatformEffect, Preedit, PrimaryModifier};
 use crate::text;
 
 /// Longest address text accepted, in characters. Input past it is cut.
@@ -48,11 +46,26 @@ impl UrlDisplay {
     /// `hidden_prefix` (for example a scheme) is in the edit text but not drawn;
     /// `subdomains` and `rest` are muted; `registrable` is the one emphasised
     /// part. Unsafe characters are removed from every part.
-    pub fn from_parts(hidden_prefix: &str, subdomains: &str, registrable: &str, rest: &str) -> Self {
-        let clean = |s: &str| -> String { s.chars().filter(|c| !text::is_unsafe_char(*c)).collect() };
-        let (p, s, g, r) = (clean(hidden_prefix), clean(subdomains), clean(registrable), clean(rest));
+    pub fn from_parts(
+        hidden_prefix: &str,
+        subdomains: &str,
+        registrable: &str,
+        rest: &str,
+    ) -> Self {
+        let clean =
+            |s: &str| -> String { s.chars().filter(|c| !text::is_unsafe_char(*c)).collect() };
+        let (p, s, g, r) = (
+            clean(hidden_prefix),
+            clean(subdomains),
+            clean(registrable),
+            clean(rest),
+        );
         let mut segments = Vec::new();
-        for (t, e) in [(&s, Emphasis::Muted), (&g, Emphasis::Strong), (&r, Emphasis::Muted)] {
+        for (t, e) in [
+            (&s, Emphasis::Muted),
+            (&g, Emphasis::Strong),
+            (&r, Emphasis::Muted),
+        ] {
             if !t.is_empty() {
                 segments.push(Segment {
                     text: t.clone(),
@@ -220,7 +233,10 @@ impl AddressBar {
     }
 
     fn prev_word(&self, i: usize) -> usize {
-        let head: Vec<(usize, char)> = self.text.get(..i).map_or_else(Vec::new, |s| s.char_indices().collect());
+        let head: Vec<(usize, char)> = self
+            .text
+            .get(..i)
+            .map_or_else(Vec::new, |s| s.char_indices().collect());
         let mut k = head.len();
         while k > 0 && head.get(k - 1).is_some_and(|(_, c)| !is_word(*c)) {
             k -= 1;
@@ -233,7 +249,10 @@ impl AddressBar {
     }
 
     fn next_word(&self, i: usize) -> usize {
-        let tail: Vec<(usize, char)> = self.text.get(i..).map_or_else(Vec::new, |s| s.char_indices().collect());
+        let tail: Vec<(usize, char)> = self
+            .text
+            .get(i..)
+            .map_or_else(Vec::new, |s| s.char_indices().collect());
         let mut k = 0;
         while tail.get(k).is_some_and(|(_, c)| is_word(*c)) {
             k += 1;
@@ -298,7 +317,12 @@ impl AddressBar {
             return;
         }
         self.preedit = p
-            .map(|p| p.text.chars().filter(|c| !text::is_unsafe_char(*c)).collect::<String>())
+            .map(|p| {
+                p.text
+                    .chars()
+                    .filter(|c| !text::is_unsafe_char(*c))
+                    .collect::<String>()
+            })
             .filter(|t| !t.is_empty());
     }
 
@@ -343,13 +367,21 @@ impl AddressBar {
             Key::Tab => return self.blur(),
             Key::Backspace => {
                 if !self.delete_selection() {
-                    let to = if word { self.prev_word(self.cursor) } else { self.prev_char(self.cursor) };
+                    let to = if word {
+                        self.prev_word(self.cursor)
+                    } else {
+                        self.prev_char(self.cursor)
+                    };
                     self.delete_range(to, self.cursor);
                 }
             }
             Key::Delete => {
                 if !self.delete_selection() {
-                    let to = if word { self.next_word(self.cursor) } else { self.next_char(self.cursor) };
+                    let to = if word {
+                        self.next_word(self.cursor)
+                    } else {
+                        self.next_char(self.cursor)
+                    };
                     self.delete_range(self.cursor, to);
                 }
             }
@@ -357,7 +389,11 @@ impl AddressBar {
                 if let (Some((a, _)), false, false) = (self.selection(), m.shift, word) {
                     self.move_to(a, false);
                 } else {
-                    let to = if word { self.prev_word(self.cursor) } else { self.prev_char(self.cursor) };
+                    let to = if word {
+                        self.prev_word(self.cursor)
+                    } else {
+                        self.prev_char(self.cursor)
+                    };
                     self.move_to(to, m.shift);
                 }
             }
@@ -365,7 +401,11 @@ impl AddressBar {
                 if let (Some((_, b)), false, false) = (self.selection(), m.shift, word) {
                     self.move_to(b, false);
                 } else {
-                    let to = if word { self.next_word(self.cursor) } else { self.next_char(self.cursor) };
+                    let to = if word {
+                        self.next_word(self.cursor)
+                    } else {
+                        self.next_char(self.cursor)
+                    };
                     self.move_to(to, m.shift);
                 }
             }
@@ -390,7 +430,9 @@ impl AddressBar {
 
     fn copy(&self) -> Vec<Effect> {
         match self.selected_text() {
-            Some(t) => vec![Effect::Platform(PlatformEffect::ClipboardWrite(t.to_string()))],
+            Some(t) => vec![Effect::Platform(PlatformEffect::ClipboardWrite(
+                t.to_string(),
+            ))],
             None => Vec::new(),
         }
     }
@@ -405,7 +447,12 @@ mod tests {
 
     fn bar(url: &str) -> AddressBar {
         let mut b = AddressBar::new();
-        b.set_display(UrlDisplay::from_parts("https://", "www.", "example.com", url));
+        b.set_display(UrlDisplay::from_parts(
+            "https://",
+            "www.",
+            "example.com",
+            url,
+        ));
         b
     }
 
@@ -446,7 +493,11 @@ mod tests {
     fn display_marks_the_registrable_domain_and_hides_the_prefix() {
         let d = UrlDisplay::from_parts("https://", "www.", "example.com", "/a");
         assert_eq!(d.edit_text, "https://www.example.com/a");
-        let kinds: Vec<_> = d.segments.iter().map(|s| (s.text.as_str(), s.emphasis)).collect();
+        let kinds: Vec<_> = d
+            .segments
+            .iter()
+            .map(|s| (s.text.as_str(), s.emphasis))
+            .collect();
         assert_eq!(
             kinds,
             vec![
@@ -466,7 +517,10 @@ mod tests {
         let mut b = bar("/path");
         assert!(!b.is_editing());
         let e = b.focus();
-        assert_eq!(e, vec![Effect::Platform(PlatformEffect::SetImeAllowed(true))]);
+        assert_eq!(
+            e,
+            vec![Effect::Platform(PlatformEffect::SetImeAllowed(true))]
+        );
         assert_eq!(b.selected_text(), Some("https://www.example.com/path"));
         b.insert_text("rust");
         assert_eq!(b.text(), "rust");
@@ -516,7 +570,11 @@ mod tests {
         b.key(shift(Key::Right), P);
         assert_eq!(b.selected_text(), Some("ab"));
         b.key(k(Key::Right), P);
-        assert_eq!((b.cursor(), b.selection()), (2, None), "collapses to the right edge");
+        assert_eq!(
+            (b.cursor(), b.selection()),
+            (2, None),
+            "collapses to the right edge"
+        );
         b.key(shift(Key::End), P);
         assert_eq!(b.selected_text(), Some("c def"));
         b.key(k(Key::Left), P);
@@ -574,19 +632,36 @@ mod tests {
         let mut b = bar("");
         b.focus();
         b.insert_text("hello");
-        assert!(b.key(ctrl('c'), P).is_empty(), "no selection, nothing to copy");
+        assert!(
+            b.key(ctrl('c'), P).is_empty(),
+            "no selection, nothing to copy"
+        );
         b.key(ctrl('a'), P);
         let e = b.key(ctrl('c'), P);
-        assert_eq!(e, vec![Effect::Platform(PlatformEffect::ClipboardWrite("hello".into()))]);
+        assert_eq!(
+            e,
+            vec![Effect::Platform(PlatformEffect::ClipboardWrite(
+                "hello".into()
+            ))]
+        );
         assert_eq!(b.text(), "hello");
         let e = b.key(ctrl('x'), P);
-        assert_eq!(e, vec![Effect::Platform(PlatformEffect::ClipboardWrite("hello".into()))]);
+        assert_eq!(
+            e,
+            vec![Effect::Platform(PlatformEffect::ClipboardWrite(
+                "hello".into()
+            ))]
+        );
         assert_eq!(b.text(), "");
         let e = b.key(ctrl('v'), P);
         assert_eq!(e, vec![Effect::Platform(PlatformEffect::ClipboardRead)]);
         // The platform answers with insert_text.
         b.insert_text("a\r\nb\u{202E}c");
-        assert_eq!(b.text(), "abc", "newlines and overrides are stripped from a paste");
+        assert_eq!(
+            b.text(),
+            "abc",
+            "newlines and overrides are stripped from a paste"
+        );
     }
 
     #[test]
@@ -632,7 +707,9 @@ mod tests {
         b.insert_text("\u{4F60}");
         assert_eq!(b.text(), "a\u{4F60}b");
         assert_eq!(b.preedit_range(), None);
-        b.set_preedit(Some(Preedit { text: String::new() }));
+        b.set_preedit(Some(Preedit {
+            text: String::new(),
+        }));
         assert_eq!(b.preedit_range(), None);
     }
 
@@ -662,7 +739,10 @@ mod tests {
         let mut b = bar("");
         b.focus();
         let e = b.key(k(Key::Tab), P);
-        assert_eq!(e, vec![Effect::Platform(PlatformEffect::SetImeAllowed(false))]);
+        assert_eq!(
+            e,
+            vec![Effect::Platform(PlatformEffect::SetImeAllowed(false))]
+        );
         assert!(!b.is_editing());
     }
 }

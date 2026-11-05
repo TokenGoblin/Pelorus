@@ -137,8 +137,14 @@ mod tests {
 
     fn click(t: &mut Toolbar, l: &Layout, r: crate::geom::Rect) -> Vec<Effect> {
         let c = r.center();
-        t.pointer(&PointerEvent::new(c.x, c.y, PointerKind::Down(Button::Primary)), l);
-        t.pointer(&PointerEvent::new(c.x, c.y, PointerKind::Up(Button::Primary)), l)
+        t.pointer(
+            &PointerEvent::new(c.x, c.y, PointerKind::Down(Button::Primary)),
+            l,
+        );
+        t.pointer(
+            &PointerEvent::new(c.x, c.y, PointerKind::Up(Button::Primary)),
+            l,
+        )
     }
 
     #[test]
@@ -147,9 +153,15 @@ mod tests {
         let mut t = Toolbar::new();
         assert!(click(&mut t, &l, l.back).is_empty());
         t.set_nav_state(true, false, false);
-        assert_eq!(click(&mut t, &l, l.back), vec![Effect::App(AppRequest::Back)]);
+        assert_eq!(
+            click(&mut t, &l, l.back),
+            vec![Effect::App(AppRequest::Back)]
+        );
         assert!(click(&mut t, &l, l.forward).is_empty());
-        assert_eq!(click(&mut t, &l, l.reload), vec![Effect::App(AppRequest::Reload)]);
+        assert_eq!(
+            click(&mut t, &l, l.reload),
+            vec![Effect::App(AppRequest::Reload)]
+        );
         assert_eq!(
             click(&mut t, &l, l.overflow),
             vec![Effect::App(AppRequest::OpenMenu(l.overflow))]
@@ -162,7 +174,10 @@ mod tests {
         let mut t = Toolbar::new();
         t.set_nav_state(false, false, true);
         assert_eq!(t.label(ToolButton::Reload), px_brand::ui::STOP);
-        assert_eq!(click(&mut t, &l, l.reload), vec![Effect::App(AppRequest::Stop)]);
+        assert_eq!(
+            click(&mut t, &l, l.reload),
+            vec![Effect::App(AppRequest::Stop)]
+        );
     }
 
     #[test]
@@ -171,10 +186,16 @@ mod tests {
         let mut t = Toolbar::new();
         t.set_nav_state(true, true, false);
         let c = l.back.center();
-        t.pointer(&PointerEvent::new(c.x, c.y, PointerKind::Down(Button::Primary)), &l);
+        t.pointer(
+            &PointerEvent::new(c.x, c.y, PointerKind::Down(Button::Primary)),
+            &l,
+        );
         assert_eq!(t.pressed(), Some(ToolButton::Back));
         let f = l.forward.center();
-        let e = t.pointer(&PointerEvent::new(f.x, f.y, PointerKind::Up(Button::Primary)), &l);
+        let e = t.pointer(
+            &PointerEvent::new(f.x, f.y, PointerKind::Up(Button::Primary)),
+            &l,
+        );
         assert!(e.is_empty());
         assert_eq!(t.pressed(), None);
     }

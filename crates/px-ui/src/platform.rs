@@ -11,9 +11,7 @@ use px_paint::Canvas;
 
 use crate::chrome::{Chrome, PlatformConfig};
 use crate::geom::{Rect, Size};
-use crate::input::{
-    AppRequest, CursorShape, Effect, Event, Outcome, PlatformEffect, WindowAction,
-};
+use crate::input::{AppRequest, CursorShape, Effect, Event, Outcome, PlatformEffect, WindowAction};
 use crate::paint;
 use crate::text::TextShaper;
 use crate::theme::Theme;
@@ -83,7 +81,13 @@ pub fn render_frame(
     theme: Theme,
 ) -> Result<Canvas, px_paint::raster::RasterError> {
     let mut list = px_paint::DisplayList::new();
-    paint::paint(chrome, shaper, theme, crate::geom::Point::default(), &mut list);
+    paint::paint(
+        chrome,
+        shaper,
+        theme,
+        crate::geom::Point::default(),
+        &mut list,
+    );
     let s = chrome.size();
     px_paint::raster::rasterize_with(&list, s.w.max(0) as u32, s.h.max(0) as u32, &NoGlyphs)
 }
@@ -172,10 +176,20 @@ mod tests {
         pump(&mut w, &mut chrome, &m, ctrl(Key::Char('v')));
         assert!(w.calls.contains(&"clip-read".to_string()));
         pump(&mut w, &mut chrome, &m, Event::Clipboard("x\ny".into()));
-        let (app, _) = pump(&mut w, &mut chrome, &m, Event::Key(KeyEvent::new(Key::Enter)));
+        let (app, _) = pump(
+            &mut w,
+            &mut chrome,
+            &m,
+            Event::Key(KeyEvent::new(Key::Enter)),
+        );
         assert_eq!(app, vec![AppRequest::Navigate("xy".into())]);
         // An unconsumed key is reported as the page's.
-        let (_, page) = pump(&mut w, &mut chrome, &m, Event::Key(KeyEvent::new(Key::Char('z'))));
+        let (_, page) = pump(
+            &mut w,
+            &mut chrome,
+            &m,
+            Event::Key(KeyEvent::new(Key::Char('z'))),
+        );
         assert!(page);
     }
 
@@ -186,6 +200,13 @@ mod tests {
         let b = render_frame(&chrome, &Mono, Theme::Dark).unwrap();
         assert_eq!((a.width, a.height), (320, 200));
         assert_eq!(a, b);
-        assert!(render_frame(&Chrome::new(PlatformConfig::desktop(), Size::new(0, 0)), &Mono, Theme::Dark).is_err());
+        assert!(
+            render_frame(
+                &Chrome::new(PlatformConfig::desktop(), Size::new(0, 0)),
+                &Mono,
+                Theme::Dark
+            )
+            .is_err()
+        );
     }
 }

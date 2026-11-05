@@ -10,7 +10,7 @@
 use crate::address::{AddressBar, UrlDisplay};
 use crate::geom::{Point, Rect, Size};
 use crate::input::{
-    AppRequest, Button, CursorShape, Effect, Event, KeyEvent, Key, Outcome, PlatformEffect,
+    AppRequest, Button, CursorShape, Effect, Event, Key, KeyEvent, Outcome, PlatformEffect,
     PointerEvent, PointerKind, PrimaryModifier, WindowAction,
 };
 use crate::layout::{self, ControlsPlacement, Layout, LayoutInput, Region};
@@ -191,9 +191,10 @@ impl Chrome {
         };
         if out.consumed {
             if self.address.is_editing() {
-                out.effects.push(Effect::Platform(PlatformEffect::SetImeCursorArea(
-                    self.caret_rect(shaper),
-                )));
+                out.effects
+                    .push(Effect::Platform(PlatformEffect::SetImeCursorArea(
+                        self.caret_rect(shaper),
+                    )));
             }
             out.effects.push(Effect::Platform(PlatformEffect::Redraw));
         }
@@ -438,8 +439,13 @@ mod tests {
 
     fn click(c: &mut Chrome, p: Point) -> Vec<Effect> {
         let m = Mono;
-        let mut e = c.event(ptr(p.x, p.y, PointerKind::Down(Button::Primary)), &m).effects;
-        e.extend(c.event(ptr(p.x, p.y, PointerKind::Up(Button::Primary)), &m).effects);
+        let mut e = c
+            .event(ptr(p.x, p.y, PointerKind::Down(Button::Primary)), &m)
+            .effects;
+        e.extend(
+            c.event(ptr(p.x, p.y, PointerKind::Up(Button::Primary)), &m)
+                .effects,
+        );
         e
     }
 
@@ -477,9 +483,15 @@ mod tests {
         c.event(ctrl(Key::Char('l')), &m);
         c.event(Event::Text("rust lang".into()), &m);
         let o = c.event(Event::Key(KeyEvent::new(Key::Enter)), &m);
-        assert_eq!(apps(&o.effects), vec![AppRequest::Navigate("rust lang".into())]);
+        assert_eq!(
+            apps(&o.effects),
+            vec![AppRequest::Navigate("rust lang".into())]
+        );
         assert!(!c.address().is_editing());
-        assert!(o.effects.contains(&Effect::Platform(PlatformEffect::Redraw)));
+        assert!(
+            o.effects
+                .contains(&Effect::Platform(PlatformEffect::Redraw))
+        );
     }
 
     #[test]
@@ -510,9 +522,15 @@ mod tests {
         let esc = Event::Key(KeyEvent::new(Key::Escape));
         assert!(!c.event(esc.clone(), &m).consumed, "idle: the page's");
         c.set_nav_state(false, false, true);
-        assert_eq!(apps(&c.event(esc.clone(), &m).effects), vec![AppRequest::Stop]);
+        assert_eq!(
+            apps(&c.event(esc.clone(), &m).effects),
+            vec![AppRequest::Stop]
+        );
         c.event(ctrl(Key::Char('l')), &m);
-        assert!(apps(&c.event(esc, &m).effects).is_empty(), "leaves the field instead");
+        assert!(
+            apps(&c.event(esc, &m).effects).is_empty(),
+            "leaves the field instead"
+        );
         assert!(!c.address().is_editing());
     }
 
@@ -524,7 +542,10 @@ mod tests {
         let o = c.event(ptr(400, 300, PointerKind::Down(Button::Primary)), &m);
         assert!(!o.consumed, "the page gets the click");
         assert!(!c.address().is_editing(), "but the field let go first");
-        assert!(o.effects.contains(&Effect::Platform(PlatformEffect::SetImeAllowed(false))));
+        assert!(
+            o.effects
+                .contains(&Effect::Platform(PlatformEffect::SetImeAllowed(false)))
+        );
         assert!(c.is_page_point(Point { x: 400, y: 300 }));
         assert!(!c.is_page_point(Point { x: 400, y: 50 }));
     }
@@ -563,10 +584,19 @@ mod tests {
             vec![AppRequest::ActivateTab(TabId(2))]
         );
         let l = c.layout();
-        assert_eq!(apps(&click(&mut c, l.back.center())), vec![AppRequest::Back]);
-        assert_eq!(apps(&click(&mut c, l.new_tab.center())), vec![AppRequest::NewTab]);
+        assert_eq!(
+            apps(&click(&mut c, l.back.center())),
+            vec![AppRequest::Back]
+        );
+        assert_eq!(
+            apps(&click(&mut c, l.new_tab.center())),
+            vec![AppRequest::NewTab]
+        );
         let close = l.tabs[1].close.center();
-        assert_eq!(apps(&click(&mut c, close)), vec![AppRequest::CloseTab(TabId(2))]);
+        assert_eq!(
+            apps(&click(&mut c, close)),
+            vec![AppRequest::CloseTab(TabId(2))]
+        );
     }
 
     #[test]
@@ -574,9 +604,13 @@ mod tests {
         let mut c = chrome();
         let l = c.layout();
         let e = click(&mut c, l.controls[0].center());
-        assert!(e.contains(&Effect::Platform(PlatformEffect::Window(WindowAction::Close))));
+        assert!(e.contains(&Effect::Platform(PlatformEffect::Window(
+            WindowAction::Close
+        ))));
         let e = click(&mut c, l.controls[2].center());
-        assert!(e.contains(&Effect::Platform(PlatformEffect::Window(WindowAction::Maximize))));
+        assert!(e.contains(&Effect::Platform(PlatformEffect::Window(
+            WindowAction::Maximize
+        ))));
     }
 
     #[test]
@@ -585,9 +619,18 @@ mod tests {
         let m = Mono;
         let f = c.layout().field.center();
         let o = c.event(ptr(f.x, f.y, PointerKind::Move), &m);
-        assert!(o.effects.contains(&Effect::Platform(PlatformEffect::SetCursor(CursorShape::Text))));
+        assert!(
+            o.effects
+                .contains(&Effect::Platform(PlatformEffect::SetCursor(
+                    CursorShape::Text
+                )))
+        );
         let o = c.event(ptr(f.x + 1, f.y, PointerKind::Move), &m);
-        assert!(!o.effects.iter().any(|e| matches!(e, Effect::Platform(PlatformEffect::SetCursor(_)))));
+        assert!(
+            !o.effects
+                .iter()
+                .any(|e| matches!(e, Effect::Platform(PlatformEffect::SetCursor(_))))
+        );
     }
 
     #[test]
@@ -604,7 +647,11 @@ mod tests {
         let mut c = chrome();
         let m = Mono;
         let o = c.event(ctrl(Key::Char('l')), &m);
-        assert!(o.effects.iter().any(|e| matches!(e, Effect::Platform(PlatformEffect::SetImeCursorArea(_)))));
+        assert!(
+            o.effects
+                .iter()
+                .any(|e| matches!(e, Effect::Platform(PlatformEffect::SetImeCursorArea(_))))
+        );
         c.event(Event::Text("abcd".into()), &m);
         let r = c.caret_rect(&m);
         assert_eq!(r.x, c.layout().text_x + 33); // 4 x 8.4 px
@@ -620,6 +667,10 @@ mod tests {
         c.event(ptr(p.x, p.y, PointerKind::Down(Button::Primary)), &m);
         c.event(Event::WindowFocus(false), &m);
         let o = c.event(ptr(p.x, p.y, PointerKind::Up(Button::Primary)), &m);
-        assert!(!o.effects.iter().any(|e| matches!(e, Effect::Platform(PlatformEffect::Window(_)))));
+        assert!(
+            !o.effects
+                .iter()
+                .any(|e| matches!(e, Effect::Platform(PlatformEffect::Window(_))))
+        );
     }
 }

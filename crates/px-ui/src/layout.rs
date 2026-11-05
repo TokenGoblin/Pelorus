@@ -119,7 +119,9 @@ pub fn compute(input: &LayoutInput) -> Layout {
         }
         ControlsPlacement::Right => {
             for (i, c) in controls.iter_mut().enumerate() {
-                let x = w - CONTROLS_MARGIN - CONTROL_DOT
+                let x = w
+                    - CONTROLS_MARGIN
+                    - CONTROL_DOT
                     - (2 - i as i32) * (CONTROL_DOT + CONTROLS_GAP);
                 *c = Rect::new(x, dot_y, CONTROL_DOT, CONTROL_DOT);
             }

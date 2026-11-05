@@ -63,11 +63,7 @@ impl Painter<'_> {
     }
 
     fn circle(&mut self, cx8: i32, cy8: i32, r8: i32, col: Color) {
-        let c = Circle::disc(
-            cx8 + self.origin.x * SUB,
-            cy8 + self.origin.y * SUB,
-            r8,
-        );
+        let c = Circle::disc(cx8 + self.origin.x * SUB, cy8 + self.origin.y * SUB, r8);
         fill(self.list, &c, col);
     }
 
@@ -141,7 +137,13 @@ const UNIT: [(i32, i32); 12] = [
 ];
 
 /// Paint the window's contents. See the module docs.
-pub fn paint(chrome: &Chrome, shaper: &dyn TextShaper, theme: Theme, origin: Point, list: &mut DisplayList) {
+pub fn paint(
+    chrome: &Chrome,
+    shaper: &dyn TextShaper,
+    theme: Theme,
+    origin: Point,
+    list: &mut DisplayList,
+) {
     let layout = chrome.layout();
     let mut p = Painter {
         list,
@@ -178,7 +180,12 @@ pub fn paint(chrome: &Chrome, shaper: &dyn TextShaper, theme: Theme, origin: Poi
 /// returned canvas size is `size + 2 * margin` wide and `size + margin +
 /// margin_top` tall; with the mockups' 40/36 margins and a 920 x 568 window this
 /// is their 1000 x 640.
-pub fn paint_preview(chrome: &Chrome, shaper: &dyn TextShaper, theme: Theme, margin: Point) -> (DisplayList, crate::geom::Size) {
+pub fn paint_preview(
+    chrome: &Chrome,
+    shaper: &dyn TextShaper,
+    theme: Theme,
+    margin: Point,
+) -> (DisplayList, crate::geom::Size) {
     let size = chrome.size();
     let canvas = crate::geom::Size::new(size.w + 2 * margin.x, size.h + 2 * margin.y);
     let mut list = DisplayList::new();
@@ -239,8 +246,15 @@ fn paint_tabs(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
             p.squircle(slot.rect, lay::TAB_RADIUS, rgb(c.surfaces.raised, 150));
         }
         // The favicon slot: the chrome's own dot, a ring while loading.
-        let (cx, cy) = ((slot.rect.x + 16) * SUB, (slot.rect.y + lay::TAB_H / 2) * SUB);
-        let dot = if active { rgb(c.teal, 255) } else { rgb(c.muted, 128) };
+        let (cx, cy) = (
+            (slot.rect.x + 16) * SUB,
+            (slot.rect.y + lay::TAB_H / 2) * SUB,
+        );
+        let dot = if active {
+            rgb(c.teal, 255)
+        } else {
+            rgb(c.muted, 128)
+        };
         if tab.loading {
             p.ring(cx, cy, 36, 13, dot);
         } else {
@@ -248,7 +262,11 @@ fn paint_tabs(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         }
         // Title.
         let show_close = !slot.close.is_empty() && (active || hovered);
-        let right = if show_close { slot.close.x - 4 } else { slot.rect.right() - 12 };
+        let right = if show_close {
+            slot.close.x - 4
+        } else {
+            slot.rect.right() - 12
+        };
         let tx = slot.rect.x + 30;
         let room = right - tx;
         if room >= 8 {
@@ -263,7 +281,7 @@ fn paint_tabs(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
             }
             let m = slot.close.center();
             let (cx, cy) = (m.x * SUB, m.y * SUB);
-            let d = 4 * SUB / 1; // arm length
+            let d = 4 * SUB; // arm length
             let col = rgb(if close_hover { c.text } else { c.muted }, 255);
             p.path(cx, cy, &[(-d, -d), (d, d)], 7, col);
             p.path(cx, cy, &[(-d, d), (d, -d)], 7, col);
@@ -276,7 +294,14 @@ fn paint_tabs(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
     }
     let m = nt.center();
     let (cx, cy) = (m.x * SUB, m.y * SUB);
-    let col = rgb(if strip.hover() == Hover::NewTab { c.text } else { c.muted }, 255);
+    let col = rgb(
+        if strip.hover() == Hover::NewTab {
+            c.text
+        } else {
+            c.muted
+        },
+        255,
+    );
     p.path(cx, cy, &[(-5 * SUB, 0), (5 * SUB, 0)], 8, col);
     p.path(cx, cy, &[(0, -5 * SUB), (0, 5 * SUB)], 8, col);
 }
@@ -298,9 +323,7 @@ fn paint_toolbar(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         }
         let col = if !enabled {
             rgb(c.muted, 90)
-        } else if tb.hover() == Some(b) {
-            rgb(c.text, 255)
-        } else if b == ToolButton::Back || b == ToolButton::Forward || b == ToolButton::Reload {
+        } else if tb.hover() == Some(b) || b != ToolButton::Overflow {
             rgb(c.text, 255)
         } else {
             rgb(c.muted, 255)
@@ -309,8 +332,20 @@ fn paint_toolbar(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         let (cx, cy) = (m.x * SUB, m.y * SUB);
         let u = SUB;
         match b {
-            ToolButton::Back => p.path(cx, cy, &[(3 * u, -6 * u), (-3 * u, 0), (3 * u, 6 * u)], 8, col),
-            ToolButton::Forward => p.path(cx, cy, &[(-3 * u, -6 * u), (3 * u, 0), (-3 * u, 6 * u)], 8, col),
+            ToolButton::Back => p.path(
+                cx,
+                cy,
+                &[(3 * u, -6 * u), (-3 * u, 0), (3 * u, 6 * u)],
+                8,
+                col,
+            ),
+            ToolButton::Forward => p.path(
+                cx,
+                cy,
+                &[(-3 * u, -6 * u), (3 * u, 0), (-3 * u, 6 * u)],
+                8,
+                col,
+            ),
             ToolButton::Reload if tb.is_loading() => {
                 let d = 5 * u;
                 p.path(cx, cy, &[(-d, -d), (d, d)], 8, col);
@@ -363,9 +398,20 @@ fn paint_address(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         let (cx, cy) = ((ch.x + 15) * SUB, (ch.y + ch.h / 2) * SUB);
         p.ring(cx, cy, 34, 13, rgb(c.teal, 255));
         p.circle(cx, cy, 12, rgb(c.teal, 255));
-        p.text(px_brand::ui::ISOLATED, lay::TEXT_CHIP, ch.x + 27, ch, rgb(c.teal, 255));
+        p.text(
+            px_brand::ui::ISOLATED,
+            lay::TEXT_CHIP,
+            ch.x + 27,
+            ch,
+            rgb(c.teal, 255),
+        );
     }
-    let band = Rect::new(layout.text_x, f.y, (layout.text_right - layout.text_x).max(0), f.h);
+    let band = Rect::new(
+        layout.text_x,
+        f.y,
+        (layout.text_right - layout.text_x).max(0),
+        f.h,
+    );
     if band.is_empty() {
         return;
     }
@@ -380,19 +426,40 @@ fn paint_address(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
             p.rect(Rect::new(x0, inner.y, x1 - x0, inner.h), rgb(c.blue, 90));
         }
         if visible.is_empty() {
-            p.text(px_brand::ui::ADDRESS_PLACEHOLDER, lay::TEXT_ADDRESS, layout.text_x, f, rgb(c.muted, 255));
+            p.text(
+                px_brand::ui::ADDRESS_PLACEHOLDER,
+                lay::TEXT_ADDRESS,
+                layout.text_x,
+                f,
+                rgb(c.muted, 255),
+            );
         } else {
-            p.text(&visible, lay::TEXT_ADDRESS, layout.text_x, f, rgb(c.text, 255));
+            p.text(
+                &visible,
+                lay::TEXT_ADDRESS,
+                layout.text_x,
+                f,
+                rgb(c.text, 255),
+            );
         }
         if let Some((a0, a1)) = a.preedit_range() {
             let (x0, x1) = (x_of(a0), x_of(a1));
             p.rect(Rect::new(x0, f.y + f.h - 9, x1 - x0, 1), rgb(c.text, 255));
         }
         if chrome.window_focused() {
-            p.rect(Rect::new(x_of(caret), inner.y, 1, inner.h), rgb(c.text, 255));
+            p.rect(
+                Rect::new(x_of(caret), inner.y, 1, inner.h),
+                rgb(c.text, 255),
+            );
         }
     } else if a.display().is_empty() {
-        p.text(px_brand::ui::ADDRESS_PLACEHOLDER, lay::TEXT_ADDRESS, layout.text_x, f, rgb(c.muted, 255));
+        p.text(
+            px_brand::ui::ADDRESS_PLACEHOLDER,
+            lay::TEXT_ADDRESS,
+            layout.text_x,
+            f,
+            rgb(c.muted, 255),
+        );
     } else {
         let mut x = layout.text_x;
         for seg in &a.display().segments {

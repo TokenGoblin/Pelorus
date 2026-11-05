@@ -61,7 +61,11 @@ pub enum Hover {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pressed {
-    Tab { index: usize, start_x: i32, dragging: bool },
+    Tab {
+        index: usize,
+        start_x: i32,
+        dragging: bool,
+    },
     MiddleTab(usize),
     Close(usize),
     NewTab,
@@ -235,12 +239,11 @@ impl TabStrip {
             PointerKind::Up(button) => {
                 let pressed = self.pressed.take();
                 match (button, pressed, region) {
-                    (Button::Primary, Some(Pressed::Close(i)), Region::Close(j)) if i == j => {
-                        self.tabs
-                            .get(i)
-                            .map(|t| vec![Effect::App(AppRequest::CloseTab(t.id))])
-                            .unwrap_or_default()
-                    }
+                    (Button::Primary, Some(Pressed::Close(i)), Region::Close(j)) if i == j => self
+                        .tabs
+                        .get(i)
+                        .map(|t| vec![Effect::App(AppRequest::CloseTab(t.id))])
+                        .unwrap_or_default(),
                     (Button::Primary, Some(Pressed::NewTab), Region::NewTab) => {
                         vec![Effect::App(AppRequest::NewTab)]
                     }
@@ -413,7 +416,10 @@ mod tests {
         let mut s = strip(3, 1);
         let l = lay(&s);
         let p = l.tabs[1].rect.center();
-        assert!(s.pointer(&ev(p, PointerKind::Down(Button::Middle)), &l).is_empty());
+        assert!(
+            s.pointer(&ev(p, PointerKind::Down(Button::Middle)), &l)
+                .is_empty()
+        );
         let e = s.pointer(&ev(p, PointerKind::Up(Button::Middle)), &l);
         assert_eq!(app(&e), vec![&AppRequest::CloseTab(TabId(2))]);
     }
@@ -436,7 +442,16 @@ mod tests {
         let start = l.tabs[0].rect.center();
         s.pointer(&ev(start, PointerKind::Down(Button::Primary)), &l);
         // A small wobble is not a drag.
-        let e = s.pointer(&ev(Point { x: start.x + 2, y: start.y }, PointerKind::Move), &l);
+        let e = s.pointer(
+            &ev(
+                Point {
+                    x: start.x + 2,
+                    y: start.y,
+                },
+                PointerKind::Move,
+            ),
+            &l,
+        );
         assert!(e.is_empty() && !s.is_dragging());
         // Drag over the third tab.
         let l = lay(&s);
@@ -459,7 +474,10 @@ mod tests {
         assert_eq!(app(&e).len(), 1);
         assert_eq!(s.tabs()[0].id, TabId(1));
         // Release ends the drag with no extra request.
-        let e = s.pointer(&ev(Point { x: 0, y: 20 }, PointerKind::Up(Button::Primary)), &l);
+        let e = s.pointer(
+            &ev(Point { x: 0, y: 20 }, PointerKind::Up(Button::Primary)),
+            &l,
+        );
         assert!(e.is_empty() && !s.is_dragging());
     }
 
@@ -477,9 +495,18 @@ mod tests {
         assert_eq!(app(&e), vec![&AppRequest::ActivateTab(TabId(3))]);
         assert!(s.move_active(1).is_empty(), "no wrap at the end");
         let e = s.move_active(-1);
-        assert_eq!(app(&e), vec![&AppRequest::MoveTab { tab: TabId(3), to: 1 }]);
+        assert_eq!(
+            app(&e),
+            vec![&AppRequest::MoveTab {
+                tab: TabId(3),
+                to: 1
+            }]
+        );
         assert_eq!(s.active_index(), Some(1));
-        assert_eq!(app(&s.close_active()), vec![&AppRequest::CloseTab(TabId(3))]);
+        assert_eq!(
+            app(&s.close_active()),
+            vec![&AppRequest::CloseTab(TabId(3))]
+        );
     }
 
     #[test]
