@@ -2,8 +2,8 @@
 
 //! Fuzz a whole *stream*, not one frame.
 //!
-//! `decode_frame` reads one frame from a slice and discards the rest, so a
-//! target built on it cannot express "two frames" — and framing desync, the
+//! `decode_frame` accepts exactly one frame from a slice (a tail is Malformed),
+//! so a target built on it cannot express "two frames" — and framing desync, the
 //! failure where one bad message misaligns every message after it, only exists
 //! between frames. An adversarial review pointed out that the original targets
 //! could never reach that state.

@@ -336,10 +336,22 @@ impl<R: Read, W: Write> Channel<R, W> {
 /// The exact path a hostile peer drives, exposed for the fuzz targets so they
 /// attack framing, tagging and payload decoding together rather than one at a
 /// time.
+///
+/// `bytes` must be exactly one frame: anything after the frame the length
+/// prefix declares is [`IpcError::Malformed`]. Without that, many distinct
+/// inputs (a frame plus any tail) would decode to one message and the mapping
+/// from bytes to messages would not be injective. A caller that reads a
+/// stream uses [`Channel::recv`], which consumes one frame at a time.
 pub fn decode_frame<T: Message>(bytes: &[u8]) -> Result<T, IpcError> {
     let mut cursor = std::io::Cursor::new(bytes);
-    let mut channel = Channel::new(&mut cursor, std::io::sink());
-    channel.recv()
+    let message = {
+        let mut channel = Channel::new(&mut cursor, std::io::sink());
+        channel.recv()?
+    };
+    if usize::try_from(cursor.position()).ok() != Some(bytes.len()) {
+        return Err(IpcError::Malformed);
+    }
+    Ok(message)
 }
 
 /// Encode one complete frame, prefix included.
