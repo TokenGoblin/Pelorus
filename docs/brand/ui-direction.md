@@ -16,6 +16,16 @@ corners. Where an OS cannot give a shaped window, the shape is drawn by us with
 per-pixel alpha, anti-aliased, and the fallback is recorded in `docs/backlog.md`
 rather than silently accepted.
 
+**Extension (user directive): no hard-edged boxes anywhere in the app.** Every
+surface we author has soft corners: window frames, chrome controls, focus rings,
+selection highlights, scrollbars and their thumbs, tooltips, menus, internal
+`about:` pages, the page viewport's own edges, and the user-agent defaults for form
+controls and focus outlines. Corners use the squircle shape, never a plain
+right angle. The one exemption is web content as its author wrote it: a site's
+own `border-radius: 0` or unstyled boxes are rendered as specified, because
+overriding them would break pages. Anything we add on top of a page (overlays,
+find bars, scroll indicators, selection) is soft.
+
 - Squircles (superellipse corners, exponent about 4.6), not plain rounded
   rectangles: window 22, address field 13, tab 11, buttons 10, search field 18.
 - Window controls are neutral squircle dots with no OS-specific glyphs, so the
