@@ -38,6 +38,10 @@ px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
 # System font discovery (Phase 9 unit 8): the scan is pure and lives in px-text;
 # the std::fs reader lives here. A workspace path, no third-party crate.
 px-text = { path = "../px-text", version = "0.0.0" }
+# Phase 14 (ADR 045): origins, sites and the SiteResolver trait for the process
+# key. Std-only and a workspace crate; deliberately NOT px-net, which would pull
+# rustls into every broker build (tests/oopif_frames.rs asserts it stays out).
+px-websec = { path = "../px-websec", version = "0.0.0" }
 # The engine, for the px-fetch diagnostic only. Optional, so a default build of
 # the product links none of it and the release scan has nothing to find.
 px-net = { path = "../px-net", version = "0.0.0", optional = true }

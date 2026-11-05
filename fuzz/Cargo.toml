@@ -177,3 +177,24 @@ path = "fuzz_targets/update_manifest.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "frame_vocab_request"
+path = "fuzz_targets/frame_vocab_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_vocab_response"
+path = "fuzz_targets/frame_vocab_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_vocab_event"
+path = "fuzz_targets/frame_vocab_event.rs"
+test = false
+doc = false
+bench = false

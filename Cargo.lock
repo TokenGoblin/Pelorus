@@ -1387,6 +1387,7 @@ dependencies = [
  "px-net",
  "px-sandbox",
  "px-text",
+ "px-websec",
  "stylo",
  "url",
 ]
