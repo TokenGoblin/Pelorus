@@ -1164,11 +1164,32 @@ follows.
 - **Why deferred:** nothing implements it, and counting it would shrink the graded
   fraction for no signal.
 
-## Inline layout still flattens inline elements; `hyphens` is not a property
+## Inline layout: what is left after inline elements got boxes; `hyphens` is not a property
 
+- **Update (Phase 9, `phase9/inline-elements`):** the flattening below is gone. A run keeps
+  its inline elements (`crate::inline`): each element's text is shaped with its own font and
+  size and painted in its own `color`/`visibility`, line boxes follow CSS 2.1 10.8.1 (strut,
+  every inline box, atomics), a bordered or backgrounded inline box has one fragment per line
+  (`FragmentKind::Inline`), `<br>` is a forced break, and `inline-block`, `inline-flex` and
+  `inline-grid` are atomic inlines. **Still open:** `text-decoration`; `letter-spacing`,
+  `word-spacing`, `text-transform`; `vertical-align: middle | text-top | text-bottom` (read as
+  `baseline`) and top/bottom alignment of *text* boxes (atomics only); `unicode-bidi: embed |
+  override` and `dir` on a span; a span's own `white-space` for breaking (its text collapses
+  by it, the breaks use the block's); percentage margin/border/padding on an inline box
+  (resolved against zero); the float band for a line is asked for with the strut's height;
+  the box of a span inside mixed-direction text is one fragment over its extent, and its edges
+  follow the run's direction rather than the box's; an absolutely positioned child inside a
+  line has its static position at the block's start, not after the text before it
+  (`positioning/abspos-negative-margin-001`); `position: relative` shifts an inline box's
+  *fragment* but not its text (text has no fragment of its own); a flex container's baseline
+  is its last line's, not its first item's; an inline-block's intrinsic width in a
+  shrink-to-fit container counts as a block (the widest), not summed along the line. The
+  geometry oracle (ADR 029) cannot see that a line box around an atomic inline is the box
+  plus the strut's descent: pairs comparing an `inline-flex`/`inline-grid` with a block lose
+  on that, and the floor comments say which.
 - **Found in:** phase 9 unit 3 (real text in layout)
-- **Belongs to:** unassigned (needs inline boxes; before any gate that compares real pages)
-- **What:** text is shaped and broken per block container, not per inline element. A
+- **Belongs to:** unassigned (before any gate that compares real pages)
+- **What (before the update above):** text is shaped and broken per block container, not per inline element. A
   `<span>` with its own font, size, `color`, padding or `vertical-align` contributes its
   text with the *block's* style, and inline-blocks do not sit on a line. The style engine this
   build links has no `hyphens` longhand, so `hyphens: none` cannot turn soft hyphens off
