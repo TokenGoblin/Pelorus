@@ -1,0 +1,28 @@
+# Phase progress, source of truth for the README bar chart.
+# Format: phase number | percent (0-100) | name
+# These are maintainers' estimates, not measurements. Update in the same
+# commit that moves a phase; `cargo xtask progress --write` regenerates the
+# README block, and `cargo xtask progress` fails CI if the README is stale.
+0|95|Skeleton & policy
+1|90|Process & IPC
+2|90|Sandbox skeleton
+3|85|Network core
+4|90|DOM
+5|80|Style
+6|70|Block/inline layout
+7|45|Flex & grid
+8|70|Paint & compositing
+9|50|Text & input
+10|60|Script host (Boa)
+11|50|Bindings
+12|75|Web security
+13|45|Navigation & storage
+14|25|Out-of-process iframes
+15|20|Media
+16|30|Accessibility
+17|55|Sandbox hardening
+18|40|Chrome
+19|15|Privacy
+20|15|Release engineering
+21|30|MCP
+22|5|Extensions

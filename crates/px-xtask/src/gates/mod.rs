@@ -18,6 +18,7 @@ pub mod make_fetch_corpus;
 pub mod miri;
 pub mod network;
 pub mod not_serializable;
+pub mod progress;
 pub mod render;
 pub mod sandbox;
 pub mod sanitizers;
@@ -139,6 +140,11 @@ pub static GATES: &[GateSpec] = &[
         name: "not-serializable",
         about: "TOOL: assert a type is not serialisable: not-serializable <TypeName> <file>... (invariant 9)",
         run: not_serializable::run,
+    },
+    GateSpec {
+        name: "progress",
+        about: "fail if the README progress chart is stale against docs/progress.txt (--write regenerates it)",
+        run: progress::run,
     },
     GateSpec {
         name: "render",

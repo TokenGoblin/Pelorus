@@ -32,6 +32,7 @@ pub const CHECKS: &[&str] = &[
     "supply-chain",
     "unsafe-headers",
     "brand-leak",
+    "progress",
     "structure",
     "compat-list",
     "ipc",
