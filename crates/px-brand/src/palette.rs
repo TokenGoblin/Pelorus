@@ -91,9 +91,90 @@ pub const LIGHT: OnLight = OnLight {
     red: Rgb(0xB9, 0x1C, 0x1C),
 };
 
+/// Surfaces of the browser chrome (`docs/brand/ui-direction.md`, the two
+/// `ui-mockup-*.svg` files). The foregrounds are [`DARK`] / [`LIGHT`]; these are
+/// what they sit on. Chrome layout is frozen by screenshot diff (invariant 3),
+/// so a value here changing is a UI change and needs the same review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromeSurfaces {
+    /// Behind the window; the shadow falls on it.
+    pub backdrop: Rgb,
+    /// The window body and the toolbar-to-page seam.
+    pub window: Rgb,
+    /// The tab strip and toolbar band.
+    pub bar: Rgb,
+    /// Raised fields: the active tab, the address field, a hovered button.
+    pub raised: Rgb,
+    /// The one 1 px hairline.
+    pub hairline: Rgb,
+    /// Page area while nothing is loaded.
+    pub page: Rgb,
+    /// Peak alpha of the window shadow, 0..=255.
+    pub shadow_alpha: u8,
+}
+
+/// Chrome surfaces for the dark theme: foregrounds are [`DARK`].
+pub const CHROME_DARK: ChromeSurfaces = ChromeSurfaces {
+    backdrop: NAVY,
+    window: Rgb(0x10, 0x1A, 0x33),
+    bar: Rgb(0x0D, 0x16, 0x30),
+    raised: Rgb(0x18, 0x25, 0x4A),
+    hairline: Rgb(0x24, 0x33, 0x57),
+    page: NAVY,
+    shadow_alpha: 140,
+};
+
+/// Chrome surfaces for the light theme: foregrounds are [`LIGHT`].
+pub const CHROME_LIGHT: ChromeSurfaces = ChromeSurfaces {
+    backdrop: Rgb(0xE8, 0xED, 0xF5),
+    window: WHITE,
+    bar: SURFACE_LIGHT,
+    raised: Rgb(0xE9, 0xEE, 0xF6),
+    hairline: Rgb(0xD5, 0xDC, 0xE8),
+    page: WHITE,
+    shadow_alpha: 46,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const AA_TEXT: f64 = 4.5;
+
+    #[test]
+    fn chrome_text_meets_aa_on_every_surface_it_is_drawn_on() {
+        for s in [CHROME_DARK.bar, CHROME_DARK.raised, CHROME_DARK.window] {
+            for (name, c) in [
+                ("text", DARK.text),
+                ("muted", DARK.muted),
+                ("teal", DARK.teal),
+            ] {
+                let r = contrast_ratio(c, s);
+                assert!(r >= AA_TEXT, "dark {name} on {} is {r:.2}:1", s.hex());
+            }
+        }
+        for s in [CHROME_LIGHT.bar, CHROME_LIGHT.raised, CHROME_LIGHT.window] {
+            for (name, c) in [
+                ("ink", LIGHT.ink),
+                ("muted", LIGHT.muted),
+                ("teal", LIGHT.teal),
+            ] {
+                let r = contrast_ratio(c, s);
+                assert!(r >= AA_TEXT, "light {name} on {} is {r:.2}:1", s.hex());
+            }
+        }
+    }
+
+    #[test]
+    fn the_hairline_is_visible_against_the_surfaces_it_separates() {
+        // Not text, so not 4.5: WCAG 1.4.11 asks 3:1 for a control boundary, but
+        // this hairline is decoration (the fields are also set apart by fill).
+        // The floor here only stops it vanishing.
+        for (name, c) in [("dark", CHROME_DARK), ("light", CHROME_LIGHT)] {
+            assert!(contrast_ratio(c.hairline, c.bar) > 1.05, "{name}");
+            assert_ne!(c.raised, c.bar, "{name}: a field must differ from its bar");
+        }
+    }
 
     /// WCAG AA for normal text.
     const AA: f64 = 4.5;
