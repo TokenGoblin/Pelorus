@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-size:16px;line-height:20px}
+.a{width:100%;padding:10px 20px;border:2px solid #333;background:#cde;margin-bottom:8px}
+.b{width:fit-content;background:#fcd;margin-bottom:8px}
+.c{width:max-content;background:#dfc;margin-bottom:8px}
+.d{width:min-content;background:#ffc;margin-bottom:8px}
+.e{width:calc(100% - 100px);height:20px;background:#c9c;margin-bottom:8px}
+.f{aspect-ratio:2/1;width:200px;background:#9cf;margin-bottom:8px}
+.g{padding-top:25%;width:50%;background:#fc9;margin-bottom:8px}
+.h{display:flex;gap:10px;margin-bottom:8px}
+.h>div{flex:1;background:#ccc;padding:8px}
+.i{display:inline-block;padding:4px 12px;background:#acf;margin:0 4px 4px 0}
+.j{height:40px;line-height:40px;text-align:center;background:#eee;margin-bottom:8px}
+.k{min-height:100vh;background:#f5f5ff}
+</style>
+<div class="a">full</div>
+<div class="b">fit content here</div>
+<div class="c">max content here is long</div>
+<div class="d">min content here</div>
+<div class="e"></div>
+<div class="f"></div>
+<div class="g"></div>
+<div class="h"><div>one two three</div><div>four five six seven eight nine ten eleven</div></div>
+<div><span class="i">Home</span><span class="i">About us</span><span class="i">Contact</span></div>
+<div class="j">centered</div>
+<div class="k"></div>

@@ -223,7 +223,6 @@ id = "corner-shape"
 source = "tests/render/pages/corner-shape.html"
 
 [[page]]
-<<<<<<< HEAD
 id = "table-basic"
 source = "tests/render/pages/table-basic.html"
 
@@ -254,7 +253,8 @@ source = "tests/render/pages/table-spacing-empty.html"
 [[page]]
 id = "table-legacy"
 source = "tests/render/pages/table-legacy.html"
-=======
+
+[[page]]
 id = "site-nav-flex"
 source = "tests/render/pages/site-nav-flex.html"
 
@@ -277,4 +277,11 @@ source = "tests/render/pages/site-flex-patterns.html"
 [[page]]
 id = "site-positioning"
 source = "tests/render/pages/site-positioning.html"
->>>>>>> c0326389 (px-layout: honour box-sizing on blocks, centre max-width boxes, solve abspos top+bottom height, resolve percentage heights)
+
+[[page]]
+id = "site-sizing"
+source = "tests/render/pages/site-sizing.html"
+
+[[page]]
+id = "site-centering"
+source = "tests/render/pages/site-centering.html"
