@@ -53,6 +53,9 @@ pub struct PaintStyle {
     pub visible: bool,
     /// The computed `color`: the text colour.
     pub color: Rgba,
+    /// `text-decoration-color`, `currentcolor` resolved: what an underline,
+    /// overline or line-through this element declares is drawn in.
+    pub decoration_color: Rgba,
     /// `background-color`, `currentcolor` resolved.
     pub background: Rgba,
     /// The clip of the last background layer, which is the one the colour layer
@@ -122,6 +125,9 @@ pub fn paint_style_of(style: &ComputedValues) -> PaintStyle {
     PaintStyle {
         visible: style.get_inherited_box().clone_visibility() == Visibility::Visible,
         color: rgba(style.get_inherited_text().clone_color()),
+        decoration_color: rgba(
+            style.resolve_color(&style.get_text().clone_text_decoration_color()),
+        ),
         background: rgba(style.resolve_color(&style.get_background().clone_background_color())),
         background_clip: clip,
         borders: [

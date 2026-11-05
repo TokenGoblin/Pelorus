@@ -644,7 +644,30 @@ fn emit_line(
         if glyphs.is_empty() {
             continue;
         }
+        // Underline and overline go under the glyphs, line-through over them
+        // (CSS Text Decoration 3, section 3.2). A line is a rectangle as wide as
+        // the run, in its declaring element's `text-decoration-color`.
+        let line = |list: &mut DisplayList, node: Option<NodeId>, top: Au| {
+            let Some(c) = node.and_then(|n| styles.get(n)).map(|s| s.decoration_color) else {
+                return;
+            };
+            if c[3] == 0 || run.deco.thickness <= Au(0) {
+                return;
+            }
+            list.push(Item::FillRect {
+                rect: Rect {
+                    x: origin_x,
+                    y: add(origin_y, top),
+                    width: run.width,
+                    height: run.deco.thickness,
+                },
+                color: color(c),
+            });
+        };
+        line(list, run.deco.under, run.deco.under_top);
+        line(list, run.deco.over, run.deco.over_top);
         // A run beyond the list's bounds is dropped, not truncated.
         let _ = list.push_glyph_run(FontId(run.font.0), run.font_size, color(rgba), &glyphs);
+        line(list, run.deco.through, run.deco.through_top);
     }
 }

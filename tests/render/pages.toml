@@ -149,3 +149,7 @@ source = "tests/render/pages/text-script-arabic.html"
 [[page]]
 id = "text-script-devanagari"
 source = "tests/render/pages/text-script-devanagari.html"
+
+[[page]]
+id = "inline-decoration"
+source = "tests/render/pages/inline-decoration.html"

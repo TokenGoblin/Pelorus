@@ -180,6 +180,8 @@ pub struct TextRun {
     pub baseline: Au,
     /// The run's total advance.
     pub width: Au,
+    /// The `text-decoration` lines drawn across it.
+    pub deco: RunDeco,
     glyph_start: u32,
     glyph_len: u32,
 }
@@ -204,9 +206,50 @@ impl TextRun {
             inline_offset,
             baseline,
             width,
+            deco: RunDeco::default(),
             glyph_start: 0,
             glyph_len: 0,
         }
+    }
+
+    /// The same run with `deco` drawn across it.
+    #[must_use]
+    pub fn with_deco(mut self, deco: RunDeco) -> Self {
+        self.deco = deco;
+        self
+    }
+}
+
+/// The `text-decoration` lines of one text run, resolved to geometry.
+///
+/// Each line spans the run's `width` from its start. A line's `*_top` is the
+/// top edge of its rectangle measured **down from the run's baseline** (negative
+/// is above it); every line is `thickness` tall. The node of a line is the
+/// element whose `text-decoration-color` colours it. Only solid lines are
+/// drawn, whatever `text-decoration-style` says.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunDeco {
+    /// `underline`.
+    pub under: Option<px_dom::NodeId>,
+    /// `overline`.
+    pub over: Option<px_dom::NodeId>,
+    /// `line-through`.
+    pub through: Option<px_dom::NodeId>,
+    /// Height of each line.
+    pub thickness: Au,
+    /// Underline's top, from the baseline.
+    pub under_top: Au,
+    /// Overline's top, from the baseline.
+    pub over_top: Au,
+    /// Line-through's top, from the baseline.
+    pub through_top: Au,
+}
+
+impl RunDeco {
+    /// Whether any line is drawn.
+    #[must_use]
+    pub fn is_some(&self) -> bool {
+        self.under.is_some() || self.over.is_some() || self.through.is_some()
     }
 }
 

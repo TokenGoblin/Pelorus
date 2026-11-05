@@ -1626,11 +1626,13 @@ fn place_run(
             }
         })
         .collect();
-    let content =
-        (!run.run.boxes.is_empty() || !infos.is_empty()).then_some(crate::inline::RunContent {
-            run: &run.run,
-            atomics: &infos,
-        });
+    let content = (!run.run.boxes.is_empty()
+        || !infos.is_empty()
+        || run.run.ranges.iter().any(|r| !r.deco.is_none()))
+    .then_some(crate::inline::RunContent {
+        run: &run.run,
+        atomics: &infos,
+    });
     let context = crate::inline::InlineContext {
         text: &run.run.text,
         style: run.style,
@@ -2051,6 +2053,7 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
         run: crate::inline::InlineRunData::default(),
         open: Vec::new(),
         base,
+        base_deco: propagated_decoration(dom, arena, node),
         container: node,
         white_space,
     };
@@ -2155,35 +2158,79 @@ struct RunBuilder {
     open: Vec<usize>,
     /// The container's own text style, for text with no element in between.
     base: crate::text::TextStyle,
+    /// The `text-decoration` lines the container's own text has: its own and those
+    /// propagated down to it.
+    base_deco: crate::text::Deco,
     container: NodeId,
     white_space: crate::text::WhiteSpace,
+}
+
+/// The `text-decoration` lines that apply to the text directly in `node`'s block
+/// container: `node`'s own, and those of each ancestor it is an in-flow block
+/// descendant of (CSS Text Decoration 3, section 2). The walk stops after an
+/// ancestor that is out of flow, floated, or an atomic inline: decorations do not
+/// propagate into those.
+fn propagated_decoration(
+    dom: px_css::view::Dom<'_>,
+    arena: &Arena,
+    node: NodeId,
+) -> crate::text::Deco {
+    let mut found = crate::text::Deco::default();
+    let mut at = Some(node);
+    while let Some(id) = at {
+        let Some(style) = computed_style(dom, id) else {
+            break;
+        };
+        // The innermost declaration wins, so an outer one only fills what is empty.
+        let outer = crate::text::Deco::default().with(&style, id);
+        found = crate::text::Deco {
+            under: found.under.or(outer.under),
+            over: found.over.or(outer.over),
+            through: found.through.or(outer.through),
+        };
+        if is_absolutely_positioned(&style)
+            || float_side(&style).is_some()
+            || is_inline_block(&style)
+        {
+            break;
+        }
+        at = arena.get(id).and_then(px_dom::Node::parent);
+    }
+    found
 }
 
 impl RunBuilder {
     /// The text style, colour node and `vertical-align` raise of the innermost
     /// element.
-    fn current(&self) -> (crate::text::TextStyle, NodeId, Au) {
+    fn current(&self) -> (crate::text::TextStyle, NodeId, Au, crate::text::Deco) {
         match self.open.last().and_then(|i| self.run.boxes.get(*i)) {
-            Some(b) => (b.text, b.node, b.raise),
-            None => (self.base, self.container, Au(0)),
+            Some(b) => (b.text, b.node, b.raise, b.deco),
+            None => (self.base, self.container, Au(0), self.base_deco),
         }
     }
 
     fn text(&mut self, raw: &str) {
-        let (style, node, raise) = self.current();
+        let (style, node, raise, deco) = self.current();
         let ws = style.breaking.white_space;
-        self.run.push_text(raw, ws, style, Some(node), raise);
+        self.run.push_text(raw, ws, style, Some(node), raise, deco);
     }
 
     fn line_break(&mut self) {
-        let (style, node, raise) = self.current();
+        let (style, node, raise, deco) = self.current();
         self.run
-            .push_char(crate::inline::LINE_BREAK, style, Some(node), raise);
+            .push_char(crate::inline::LINE_BREAK, style, Some(node), raise, deco);
     }
 
     fn atomic(&mut self, node: NodeId) {
-        let (style, owner, raise) = self.current();
-        self.run.push_atomic(node, style, Some(owner), raise);
+        let (style, owner, raise, _) = self.current();
+        // An atomic inline's own text is not decorated by the line around it.
+        self.run.push_atomic(
+            node,
+            style,
+            Some(owner),
+            raise,
+            crate::text::Deco::default(),
+        );
     }
 
     /// Open the inline box of `element`. False when it has no style (and so no
@@ -2217,10 +2264,12 @@ impl RunBuilder {
             crate::inline::VAlign::Top | crate::inline::VAlign::Bottom => Au(0),
         };
         let raise = self.current().2 + own;
+        let deco = self.current().3.with(style, element);
         let index = self.run.open(crate::inline::InlineBox {
             node: element,
             text,
             raise,
+            deco,
             edges,
             decorated,
             no_start: false,

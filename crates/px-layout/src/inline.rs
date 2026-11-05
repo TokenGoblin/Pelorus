@@ -73,9 +73,11 @@ use px_dom::{Arena, NodeId};
 use style::properties::ComputedValues;
 
 use crate::block::Edges;
-use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree, TextRun};
+use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree, RunDeco, TextRun};
 use crate::geom::{LogicalEdges, LogicalSize};
-use crate::text::{self, Align, Atomic, Edge, OBJECT, Prepared, StyleRange, TextStyle, WhiteSpace};
+use crate::text::{
+    self, Align, Atomic, Deco, Edge, OBJECT, Prepared, StyleRange, TextStyle, WhiteSpace,
+};
 
 /// The forced break `<br>` stands for in a run's text.
 pub const LINE_BREAK: char = '\u{2028}';
@@ -99,6 +101,9 @@ pub(crate) struct InlineBox {
     /// How far `vertical-align` raises it (and so its text) above the baseline
     /// of the line, including its ancestors' shifts.
     pub raise: Au,
+    /// The `text-decoration` lines on its text: its own and those propagated
+    /// from its ancestors.
+    pub deco: Deco,
     /// First byte of its content in the run's text.
     pub start: usize,
     /// One past its last byte.
@@ -167,13 +172,25 @@ impl InlineRunData {
         }
     }
 
-    fn extend_range(&mut self, start: usize, style: TextStyle, node: Option<NodeId>, raise: Au) {
+    fn extend_range(
+        &mut self,
+        start: usize,
+        style: TextStyle,
+        node: Option<NodeId>,
+        raise: Au,
+        deco: Deco,
+    ) {
         let end = self.text.len();
         if end <= start {
             return;
         }
         match self.ranges.last_mut() {
-            Some(last) if last.node == node && last.end == start && last.raise == raise => {
+            Some(last)
+                if last.node == node
+                    && last.end == start
+                    && last.raise == raise
+                    && last.deco == deco =>
+            {
                 last.end = end;
             }
             _ => self.ranges.push(StyleRange {
@@ -182,6 +199,7 @@ impl InlineRunData {
                 style,
                 node,
                 raise,
+                deco,
             }),
         }
     }
@@ -195,8 +213,16 @@ impl InlineRunData {
         style: TextStyle,
         node: Option<NodeId>,
         raise: Au,
+        deco: Deco,
     ) {
         let start = self.text.len();
+        let mapped;
+        let raw = if style.transform == text::Transform::None {
+            raw
+        } else {
+            mapped = style.transform.apply(raw, self.text.chars().next_back());
+            mapped.as_str()
+        };
         match white_space {
             WhiteSpace::Normal | WhiteSpace::Nowrap => {
                 // CSS Text 3 phase I: a collapsible space after another, or at
@@ -220,14 +246,21 @@ impl InlineRunData {
             }
             other => self.text.push_str(&collapse_for(raw, other)),
         }
-        self.extend_range(start, style, node, raise);
+        self.extend_range(start, style, node, raise, deco);
     }
 
     /// Append a single structural character (`U+2028` or `U+FFFC`).
-    pub fn push_char(&mut self, ch: char, style: TextStyle, node: Option<NodeId>, raise: Au) {
+    pub fn push_char(
+        &mut self,
+        ch: char,
+        style: TextStyle,
+        node: Option<NodeId>,
+        raise: Au,
+        deco: Deco,
+    ) {
         let start = self.text.len();
         self.text.push(ch);
-        self.extend_range(start, style, node, raise);
+        self.extend_range(start, style, node, raise, deco);
     }
 
     /// Start a box at the current end of the text; returns its index.
@@ -264,9 +297,10 @@ impl InlineRunData {
         style: TextStyle,
         range_node: Option<NodeId>,
         raise: Au,
+        deco: Deco,
     ) {
         let offset = self.text.len();
-        self.push_char(OBJECT, style, range_node, raise);
+        self.push_char(OBJECT, style, range_node, raise, deco);
         self.atomics.push(AtomicSpec { node, offset });
     }
 
@@ -433,6 +467,7 @@ fn ranges_of(
             style,
             node,
             raise: Au(0),
+            deco: Deco::default(),
         }],
     }
 }
@@ -679,7 +714,8 @@ pub(crate) fn layout_lines(
                 r.inline_offset,
                 baseline - range.raise,
                 r.width,
-            );
+            )
+            .with_deco(run_deco(&range.style, range.deco));
             tree.add_text_run(fragment, record, &r.glyphs);
         }
 
@@ -765,6 +801,31 @@ pub(crate) fn layout_lines(
     }
 
     (lines, block_cursor - context.block_origin)
+}
+
+/// The decoration lines of text in `style`, as geometry from the baseline.
+///
+/// The thickness is a sixteenth of the font size, rounded to whole pixels and at
+/// least one. An underline sits half way down the descent, an overline at the
+/// top of the ascent and a line-through a little over a quarter of the ascent
+/// above the baseline. Integer app-unit arithmetic throughout.
+pub(crate) fn run_deco(style: &TextStyle, deco: Deco) -> RunDeco {
+    if deco.is_none() {
+        return RunDeco::default();
+    }
+    const PX: i32 = 60;
+    let m = style.metrics();
+    let thickness = Au(((style.size.0 / 16 + PX / 2) / PX).max(1) * PX);
+    let snap = |v: Au| Au((v.0 + PX / 2).div_euclid(PX) * PX);
+    RunDeco {
+        under: deco.under,
+        over: deco.over,
+        through: deco.through,
+        thickness,
+        under_top: snap((m.descent / 2 - thickness / 2).max(thickness)),
+        over_top: Au(0) - m.ascent,
+        through_top: snap(Au(0) - m.ascent * 3 / 10 - thickness / 2),
+    }
 }
 
 /// The preferred minimum and maximum inline sizes of a run (CSS 2.1 §10.3.5):
