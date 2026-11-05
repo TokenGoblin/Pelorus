@@ -68,6 +68,17 @@ pub enum FragmentKind {
     AnonymousBlock,
     /// A line box inside an inline formatting context.
     Line,
+    /// The part of an inline box (a `<span>` with a border or a background)
+    /// that sits on one line: a child of that line fragment. One per line the
+    /// box occupies; `left` and `right` say whether this piece owns the box's
+    /// left and right edge (margin, border and padding), which only the first
+    /// and last piece do (`box-decoration-break: slice`).
+    Inline {
+        /// The box's left edge is on this piece.
+        left: bool,
+        /// The box's right edge is on this piece.
+        right: bool,
+    },
 }
 
 /// One laid-out box.
@@ -92,6 +103,9 @@ pub struct Fragment {
     /// `Option<NodeId>` and `NodeId` is `Copy`, so `Fragment` stays `Copy` and
     /// `Drop` still cannot recurse. Layout itself never reads it.
     pub node: Option<px_dom::NodeId>,
+    /// For a line fragment: the baseline, from its block start edge. Zero for
+    /// every other kind. An inline-block's own baseline is found from this.
+    pub baseline: Au,
     /// This fragment's children, as a range into the tree's flat storage.
     first_child: u32,
     child_count: u32,
@@ -111,6 +125,7 @@ impl Fragment {
             block_offset: Au(0),
             size,
             node: None,
+            baseline: Au(0),
             first_child: 0,
             child_count: 0,
             first_text_run: 0,

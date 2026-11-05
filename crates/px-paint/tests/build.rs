@@ -312,8 +312,7 @@ fn px_paint_text_colour_comes_from_the_run_element() {
         "<style>div { color: #ff0000 } .g { color: #00ff00 }</style>\
          <div>a<div class=g>b</div></div>",
     );
-    // Layout records one element per run (inline boxes are not split yet), so
-    // the colour is tested per block.
+    // Each run names its own element; per-span colours are in `inline.rs`.
     let colors: Vec<Color> = runs(&list).iter().map(|r| r.2).collect();
     assert_eq!(colors, [rgb(255, 0, 0), rgb(0, 255, 0)], "{:?}", list.items);
 }

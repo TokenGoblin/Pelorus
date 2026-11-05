@@ -71,12 +71,21 @@ fn at_depth(tree: &FragmentTree, depth: usize) -> Vec<FragmentId> {
         .collect()
 }
 
-/// The grid container (the only fragment at depth 3: ICB, html, body, container)
-/// and its children's rectangles, in the order the tree lists them.
+/// The grid container (the first block fragment below `<body>`: depth 3, or 4
+/// when it is an `inline-grid` sitting on a line) and its children's rectangles,
+/// in the order the tree lists them.
 fn grid(tree: &FragmentTree) -> (Rect, Vec<Rect>) {
-    let container = *at_depth(tree, 3)
-        .first()
-        .expect("a grid container at depth 3");
+    let container = tree
+        .in_layout_order()
+        .into_iter()
+        .find(|(d, id)| {
+            *d >= 3
+                && tree
+                    .get(*id)
+                    .is_some_and(|f| f.kind == px_layout::fragment::FragmentKind::Block)
+        })
+        .map(|(_, id)| id)
+        .expect("a grid container below body");
     let kids = tree
         .children(container)
         .iter()
@@ -1008,8 +1017,30 @@ fn layout_grid_inline_grid_shrinks_to_fit() {
         "#g { display: inline-grid; grid-template-columns: 100px 100px }",
     );
     let (container, items) = grid(&tree);
-    assert_eq!(container, r(0, 0, 200, 10));
-    assert_eq!(items, vec![r(0, 0, 100, 10), r(100, 0, 100, 10)]);
+    // An inline-grid sits on a line's baseline, so its block offset is wherever
+    // the strut puts it; the inline geometry is what shrink-to-fit decides.
+    let (x, y, w, h) = (container.0, container.1, container.2, container.3);
+    assert_eq!(
+        (x, w, h),
+        (r(0, 0, 200, 10).0, r(0, 0, 200, 10).2, r(0, 0, 200, 10).3)
+    );
+    assert_eq!(
+        items,
+        vec![
+            (
+                r(0, 0, 100, 10).0,
+                y,
+                r(0, 0, 100, 10).2,
+                r(0, 0, 100, 10).3
+            ),
+            (
+                r(100, 0, 100, 10).0,
+                y,
+                r(0, 0, 100, 10).2,
+                r(0, 0, 100, 10).3
+            ),
+        ]
+    );
 }
 
 /// A grid inside a grid: the inner container is stretched to its 600px area and

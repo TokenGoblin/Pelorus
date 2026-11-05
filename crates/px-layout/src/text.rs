@@ -38,9 +38,24 @@
 //! `text-indent`, `tab-size` (a tab is eight spaces), font features and
 //! `font-variant`, `hyphens: auto`, script itemisation finer than a bidi run
 //! (one script per run, taken from its first strong character), per-character
-//! font fallback, and shaping across an inline element boundary (the content of
-//! a block's inline elements is flattened into one run measured with the block's
-//! own style, as it was in Phase 6).
+//! font fallback, and shaping across an inline element boundary (a paragraph is
+//! shaped one piece per element and directional run, so a ligature or a kern
+//! pair across a `<span>` is not formed; with Ahem nothing is lost).
+//!
+//! # Paragraphs of several elements
+//!
+//! [`Prepared::paragraph`] takes the whole inline run of a block: the text, a
+//! [`StyleRange`] per element's stretch of it, the [`Edge`]s inline boxes add (their
+//! margin, border and padding), and the [`Atomic`]s (inline-blocks, one `U+FFFC`
+//! each whose advance is the margin box). The measure is a prefix sum over the
+//! glyph advances plus those edges, so breaking works across element boundaries
+//! and a line's width includes the boxes that open and close on it.
+//! [`Prepared::line_runs`] returns, besides the glyph runs, where each edge and
+//! each glyph's room fell, which is what `crate::inline` builds the inline-box
+//! fragments from. Edges follow the *run's* direction: a left-to-right span
+//! around right-to-left text has its start edge at the visual right of that run.
+//! `font-weight`, `font-style` and `font-family` select between faces, and there
+//! is one face (Ahem), so a bold or italic span is the same shapes as plain text.
 //!
 //! # Integer arithmetic, deliberately
 //!
@@ -52,6 +67,7 @@
 use std::sync::OnceLock;
 
 use app_units::Au;
+use px_dom::NodeId;
 use px_text::bidi::{self, BaseDirection};
 use px_text::linebreak::{self, Kind, Opportunity, Options};
 use px_text::shaper::{Direction, HarfrustShaper, ShapeInput, Shaper, font_units_to_au};
@@ -309,22 +325,83 @@ impl Metrics {
     }
 }
 
+/// A stretch of a paragraph's text drawn with one element's style.
+///
+/// The ranges handed to [`Prepared::paragraph`] tile the text in order; each one
+/// is shaped on its own, with its own font and size, and its `node` is the
+/// element whose `color` paints the glyphs.
+#[derive(Clone, Copy, Debug)]
+pub struct StyleRange {
+    /// First byte.
+    pub start: usize,
+    /// One past the last byte.
+    pub end: usize,
+    /// The text style of the element the text belongs to.
+    pub style: TextStyle,
+    /// That element.
+    pub node: Option<NodeId>,
+    /// How far the text is raised above the line's baseline by `vertical-align`
+    /// (`sub`, `super`, a length or percentage), the sum over its inline
+    /// ancestors. Negative lowers.
+    pub raise: Au,
+}
+
+/// The start or end edge of an inline box: its margin, border and padding on
+/// that side, which take room on the line.
+///
+/// Edges are given in document order (so at one offset, ends of inner boxes come
+/// before ends of outer ones, and starts of outer boxes before inner ones). An
+/// open edge sits immediately before the character at `offset`, a close edge
+/// immediately after the character before it.
+#[derive(Clone, Copy, Debug)]
+pub struct Edge {
+    /// The byte offset in the paragraph text.
+    pub offset: usize,
+    /// A start edge (`true`) or an end edge.
+    pub open: bool,
+    /// Margin plus border plus padding on this side.
+    pub width: Au,
+    /// The margin alone: the part outside the border box.
+    pub outer: Au,
+    /// Which inline box this belongs to, for the caller.
+    pub owner: usize,
+}
+
+/// An atomic inline (an `inline-block`): one object character in the text whose
+/// advance is the margin box's width.
+#[derive(Clone, Copy, Debug)]
+pub struct Atomic {
+    /// The byte offset of its `U+FFFC` in the paragraph text.
+    pub offset: usize,
+    /// The margin box's inline size.
+    pub width: Au,
+}
+
+/// The character that stands for an atomic inline in a paragraph's text.
+pub const OBJECT: char = '\u{fffc}';
+
 /// One shaped glyph, with the advance already in app units.
 #[derive(Clone, Copy, Debug)]
 struct Glyph {
     id: u32,
     /// Byte offset in the whole text of the glyph's cluster.
     cluster: usize,
+    /// One past the cluster's last byte.
+    end: usize,
     advance: Au,
     x_offset: Au,
     y_offset: Au,
+    /// The glyph stands for an atomic inline: advance, draw nothing.
+    atomic: bool,
 }
 
-/// One bidi run, shaped.
+/// One bidi run, cut at style boundaries, shaped.
 #[derive(Debug)]
 struct ShapedRun {
     range: std::ops::Range<usize>,
     rtl: bool,
+    /// Index into the paragraph's style ranges.
+    style: usize,
     /// Visual order, left to right, as the shaper returns them.
     glyphs: Vec<Glyph>,
 }
@@ -336,11 +413,16 @@ const SOFT_HYPHEN: char = '\u{ad}';
 pub struct Prepared<'a> {
     text: &'a str,
     style: TextStyle,
+    ranges: Vec<StyleRange>,
+    edges: Vec<Edge>,
     runs: Vec<ShapedRun>,
     bidi: Option<bidi::Runs<'a>>,
     /// `prefix[i]` is the sum of the advances of glyphs whose cluster starts
-    /// before byte `i`. Length is `text.len() + 1`.
+    /// before byte `i`, plus the open edges before it. Length is `text.len() + 1`.
     prefix: Vec<Au>,
+    /// `close_prefix[i]` is the sum of the close edges at offsets up to and
+    /// including `i`.
+    close_prefix: Vec<Au>,
     opps: Vec<Opportunity>,
     hyphen: Option<(u32, Au)>,
 }
@@ -369,17 +451,111 @@ fn script_of(text: &str) -> px_text::shaper::Script {
     Script::COMMON
 }
 
+/// Shape the bytes `piece` of `text` as one directional run in `style`'s font.
+fn shape_piece(
+    text: &str,
+    piece: std::ops::Range<usize>,
+    rtl: bool,
+    style: &TextStyle,
+    atomics: &[Atomic],
+) -> Option<(std::ops::Range<usize>, Vec<Glyph>)> {
+    let f = fonts();
+    let font = f.registry.get(style.font)?;
+    let shaper = f
+        .shapers
+        .get(usize::try_from(style.font.0).unwrap_or(usize::MAX))
+        .and_then(Option::as_ref)?;
+    let upem = font.units_per_em();
+    let size = style.size.0;
+    let slice = text.get(piece.clone())?;
+    let shaped_text: std::borrow::Cow<'_, str> = if rtl {
+        // L4: mirrored characters of right-to-left runs. Only a same-length
+        // substitute is taken, so cluster offsets keep meaning byte offsets into
+        // `text`.
+        std::borrow::Cow::Owned(
+            slice
+                .chars()
+                .map(|c| {
+                    bidi::mirror(c)
+                        .filter(|m| m.len_utf8() == c.len_utf8())
+                        .unwrap_or(c)
+                })
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(slice)
+    };
+    let input = ShapeInput {
+        text: &shaped_text,
+        script: script_of(slice),
+        language: None,
+        direction: if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        },
+        features: &[],
+    };
+    let out = shaper.shape(&input).ok()?;
+    let mut glyphs: Vec<Glyph> = out
+        .glyphs
+        .iter()
+        .map(|g| {
+            let cluster = piece.start + usize::try_from(g.cluster).unwrap_or(0);
+            let atomic = atomics.binary_search_by_key(&cluster, |a| a.offset).ok();
+            Glyph {
+                id: g.glyph_id,
+                cluster,
+                end: piece.end,
+                advance: match atomic.and_then(|i| atomics.get(i)) {
+                    Some(a) => a.width,
+                    None => au(font_units_to_au(g.x_advance, upem, size)),
+                },
+                x_offset: au(font_units_to_au(g.x_offset, upem, size)),
+                y_offset: au(font_units_to_au(g.y_offset, upem, size)),
+                atomic: atomic.is_some(),
+            }
+        })
+        .collect();
+    // A cluster ends where the next one (in logical order) begins.
+    let mut starts: Vec<usize> = glyphs.iter().map(|g| g.cluster).collect();
+    starts.sort_unstable();
+    starts.dedup();
+    for g in &mut glyphs {
+        let i = starts.partition_point(|s| *s <= g.cluster);
+        g.end = starts.get(i).copied().unwrap_or(piece.end);
+    }
+    Some((piece, glyphs))
+}
+
 impl<'a> Prepared<'a> {
-    /// Shape `text` (already white-space processed) and find its break
-    /// opportunities.
+    /// Shape `text` (already white-space processed) in one style and find its
+    /// break opportunities.
     #[must_use]
     pub fn new(text: &'a str, style: TextStyle) -> Self {
+        Self::paragraph(text, style, &[], &[], &[])
+    }
+
+    /// Shape a paragraph of several styles.
+    ///
+    /// `ranges` tile `text` (empty means all of it in `style`); `style` is the
+    /// block container's, and decides the paragraph direction, `white-space` and
+    /// the breaking options for the whole paragraph. Bidi is resolved over the
+    /// whole text and each directional run is then cut at style boundaries, so a
+    /// span in the middle of a Hebrew phrase does not split the paragraph's
+    /// reordering. Line breaking sees the concatenated text, so a break may fall
+    /// at a span boundary. `edges` and `atomics` (sorted by offset) add
+    /// inline-box edge widths and object advances to the measure.
+    #[must_use]
+    pub fn paragraph(
+        text: &'a str,
+        style: TextStyle,
+        ranges: &[StyleRange],
+        edges: &[Edge],
+        atomics: &[Atomic],
+    ) -> Self {
         let f = fonts();
         let font = f.registry.get(style.font);
-        let shaper = f
-            .shapers
-            .get(usize::try_from(style.font.0).unwrap_or(usize::MAX))
-            .and_then(Option::as_ref);
 
         let needs_bidi = style.rtl || style.plaintext || !text.is_ascii();
         let analysis = needs_bidi.then(|| {
@@ -401,61 +577,41 @@ impl<'a> Prepared<'a> {
                 level: 0,
             }],
         };
+        let ranges: Vec<StyleRange> = if ranges.is_empty() {
+            vec![StyleRange {
+                start: 0,
+                end: text.len(),
+                style,
+                node: None,
+                raise: Au(0),
+            }]
+        } else {
+            ranges.to_vec()
+        };
 
         let mut runs = Vec::with_capacity(logical.len());
-        if let (Some(font), Some(shaper)) = (font, shaper) {
-            let upem = font.units_per_em();
-            let size = style.size.0;
-            for run in logical {
-                let Some(slice) = text.get(run.range.clone()) else {
+        for run in logical {
+            let rtl = run.is_rtl();
+            // The style ranges this directional run crosses, found by binary
+            // search so a paragraph of many spans costs its length, not its
+            // length times its span count.
+            let first = ranges.partition_point(|r| r.end <= run.range.start);
+            for (k, sr) in ranges.iter().enumerate().skip(first) {
+                if sr.start >= run.range.end {
+                    break;
+                }
+                let piece = sr.start.max(run.range.start)..sr.end.min(run.range.end);
+                if piece.start >= piece.end {
+                    continue;
+                }
+                let Some((range, glyphs)) = shape_piece(text, piece, rtl, &sr.style, atomics)
+                else {
                     continue;
                 };
-                let rtl = run.is_rtl();
-                let shaped_text: std::borrow::Cow<'_, str> = if rtl {
-                    // L4: mirrored characters of right-to-left runs. Only a
-                    // same-length substitute is taken, so cluster offsets keep
-                    // meaning byte offsets into `text`.
-                    std::borrow::Cow::Owned(
-                        slice
-                            .chars()
-                            .map(|c| {
-                                bidi::mirror(c)
-                                    .filter(|m| m.len_utf8() == c.len_utf8())
-                                    .unwrap_or(c)
-                            })
-                            .collect(),
-                    )
-                } else {
-                    std::borrow::Cow::Borrowed(slice)
-                };
-                let input = ShapeInput {
-                    text: &shaped_text,
-                    script: script_of(slice),
-                    language: None,
-                    direction: if rtl {
-                        Direction::RightToLeft
-                    } else {
-                        Direction::LeftToRight
-                    },
-                    features: &[],
-                };
-                let Ok(out) = shaper.shape(&input) else {
-                    continue;
-                };
-                let glyphs = out
-                    .glyphs
-                    .iter()
-                    .map(|g| Glyph {
-                        id: g.glyph_id,
-                        cluster: run.range.start + usize::try_from(g.cluster).unwrap_or(0),
-                        advance: au(font_units_to_au(g.x_advance, upem, size)),
-                        x_offset: au(font_units_to_au(g.x_offset, upem, size)),
-                        y_offset: au(font_units_to_au(g.y_offset, upem, size)),
-                    })
-                    .collect();
                 runs.push(ShapedRun {
-                    range: run.range,
+                    range,
                     rtl,
+                    style: k,
                     glyphs,
                 });
             }
@@ -476,12 +632,25 @@ impl<'a> Prepared<'a> {
                 }
             }
         }
+        let mut closes = vec![Au(0); text.len() + 1];
+        for e in edges {
+            let slot = if e.open { &mut at } else { &mut closes };
+            if let Some(s) = slot.get_mut(e.offset) {
+                *s += e.width;
+            }
+        }
         let mut prefix = Vec::with_capacity(text.len() + 1);
         let mut sum = Au(0);
         prefix.push(sum);
         for slot in at.iter().take(text.len()) {
             sum += *slot;
             prefix.push(sum);
+        }
+        let mut close_prefix = Vec::with_capacity(text.len() + 1);
+        let mut sum = Au(0);
+        for slot in &closes {
+            sum += *slot;
+            close_prefix.push(sum);
         }
 
         let hyphen = font.and_then(|font| {
@@ -494,23 +663,58 @@ impl<'a> Prepared<'a> {
             ))
         });
 
+        let mut opps = linebreak::opportunities(text, &style.breaking);
+        if !atomics.is_empty()
+            && !matches!(
+                style.breaking.white_space,
+                WhiteSpace::Nowrap | WhiteSpace::Pre
+            )
+        {
+            // CSS Inline 3: an atomic inline is a wrap opportunity on both
+            // sides, whatever UAX #14 says of U+FFFC.
+            for a in atomics {
+                for offset in [a.offset, a.offset + OBJECT.len_utf8()] {
+                    if offset > 0 && offset < text.len() {
+                        opps.push(Opportunity {
+                            offset,
+                            kind: Kind::Soft,
+                            hyphen: false,
+                        });
+                    }
+                }
+            }
+            // Stable, so an existing (possibly stronger) entry wins the dedup.
+            opps.sort_by_key(|o| o.offset);
+            opps.dedup_by_key(|o| o.offset);
+        }
+
+        let mut edges = edges.to_vec();
+        edges.sort_by_key(|e| e.offset);
         Prepared {
             text,
             style,
+            ranges,
+            edges,
             runs,
             bidi: analysis,
             prefix,
-            opps: linebreak::opportunities(text, &style.breaking),
+            close_prefix,
+            opps,
             hyphen,
         }
     }
 
-    /// The measure of the byte range `a..b` (on cluster boundaries).
+    /// The measure of the byte range `a..b` (on cluster boundaries): glyph
+    /// advances, the start edges of boxes opening in `a..b` and the end edges of
+    /// boxes closing in `a+1..=b`.
     fn width(&self, a: usize, b: usize) -> Au {
         let (Some(lo), Some(hi)) = (self.prefix.get(a), self.prefix.get(b)) else {
             return Au(0);
         };
-        *hi - *lo
+        let (Some(clo), Some(chi)) = (self.close_prefix.get(a), self.close_prefix.get(b)) else {
+            return Au(0);
+        };
+        (*hi - *lo) + (*chi - *clo)
     }
 
     fn hyphen_advance(&self) -> Au {
@@ -657,11 +861,11 @@ impl<'a> Prepared<'a> {
         })
     }
 
-    /// The glyph runs of one line, in visual order, left to right, positioned
-    /// from the line's start edge. `extra_space` is added to every space
+    /// The content of one line, in visual order, left to right, positioned from
+    /// the line's start edge. `extra_space` is added to every space
     /// (justification).
     #[must_use]
-    pub fn line_runs(&self, line: &LineBreak, extra_space: Au) -> Vec<LineRun> {
+    pub fn line_runs(&self, line: &LineBreak, extra_space: Au) -> LineContent {
         let (a, e) = (line.start, line.content_end);
         let visual: Vec<bidi::Run> = match &self.bidi {
             Some(analysis) => analysis.reorder_line(a..e).unwrap_or_else(|| {
@@ -675,24 +879,27 @@ impl<'a> Prepared<'a> {
                 level: 0,
             }],
         };
-        let mut out = Vec::with_capacity(visual.len());
+        let mut content = LineContent::default();
         let mut pen = Au(0);
         for vr in visual {
             let rtl = vr.is_rtl();
-            let mut glyphs: Vec<GlyphPos> = Vec::new();
-            let start_pen = pen;
             // The shaped runs that this visual run overlaps, in the order they
             // are drawn: logical order for left to right, reversed for right to
             // left.
+            let first = self.runs.partition_point(|r| r.range.end <= vr.range.start);
             let mut sources: Vec<&ShapedRun> = self
                 .runs
                 .iter()
-                .filter(|r| r.range.start < vr.range.end && vr.range.start < r.range.end)
+                .skip(first)
+                .take_while(|r| r.range.start < vr.range.end)
+                .filter(|r| vr.range.start < r.range.end)
                 .collect();
             if rtl {
                 sources.reverse();
             }
             for src in sources {
+                let start_pen = pen;
+                let mut glyphs: Vec<GlyphPos> = Vec::new();
                 let mut picked: Vec<&Glyph> = src
                     .glyphs
                     .iter()
@@ -702,46 +909,108 @@ impl<'a> Prepared<'a> {
                     picked.reverse();
                 }
                 for g in picked {
-                    let ch = self.text.get(g.cluster..).and_then(|s| s.chars().next());
-                    let (id, mut advance) = (g.id, g.advance);
-                    let (id, advance_final) = if ch == Some(SOFT_HYPHEN) {
-                        // Only the soft hyphen that ends the line is drawn.
-                        if line.hyphen
-                            && g.cluster + SOFT_HYPHEN.len_utf8() == line.content_end
-                            && let Some((hid, hadv)) = self.hyphen
-                        {
-                            (hid, hadv)
-                        } else {
-                            continue;
+                    // What this glyph carries with it, in logical order: the
+                    // start edges of boxes opening in its cluster, the glyph,
+                    // the end edges of boxes closing after it. Mirrored for a
+                    // right-to-left run, where logical order runs leftward.
+                    let lo = self.edges.partition_point(|x| x.offset < g.cluster);
+                    let hi = self.edges.partition_point(|x| x.offset <= g.end);
+                    let mut items: Vec<Item> = Vec::new();
+                    for (i, x) in self.edges.iter().enumerate().take(hi).skip(lo) {
+                        if x.open && x.offset < g.end {
+                            items.push(Item::Edge(i));
                         }
-                    } else {
-                        if ch == Some(' ') {
-                            advance += extra_space;
+                    }
+                    items.push(Item::Glyph);
+                    for (i, x) in self.edges.iter().enumerate().take(hi).skip(lo) {
+                        if !x.open && x.offset > g.cluster {
+                            items.push(Item::Edge(i));
                         }
-                        (id, advance)
-                    };
-                    glyphs.push(GlyphPos {
-                        glyph_id: id,
-                        x: pen + g.x_offset,
-                        // Positive y_offset is up; layout y grows down.
-                        y: Au(0) - g.y_offset,
-                        advance: advance_final,
-                    });
-                    pen += advance_final;
+                    }
+                    if rtl {
+                        items.reverse();
+                    }
+                    for item in items {
+                        match item {
+                            Item::Edge(i) => {
+                                let Some(x) = self.edges.get(i) else { continue };
+                                let outside_left = x.open != rtl;
+                                let (x0, x1) = if outside_left {
+                                    (pen + x.outer, pen + x.width)
+                                } else {
+                                    (pen, pen + x.width - x.outer)
+                                };
+                                content.edges.push(EdgeOut {
+                                    edge: i,
+                                    owner: x.owner,
+                                    open: x.open,
+                                    left: outside_left,
+                                    x0,
+                                    x1,
+                                });
+                                pen += x.width;
+                            }
+                            Item::Glyph => {
+                                let ch = self.text.get(g.cluster..).and_then(|s| s.chars().next());
+                                let mut advance = g.advance;
+                                if ch == Some(SOFT_HYPHEN) {
+                                    // Only the soft hyphen that ends the line is
+                                    // drawn.
+                                    if line.hyphen
+                                        && g.cluster + SOFT_HYPHEN.len_utf8() == line.content_end
+                                        && let Some((hid, hadv)) = self.hyphen
+                                    {
+                                        glyphs.push(GlyphPos {
+                                            glyph_id: hid,
+                                            x: pen + g.x_offset - start_pen,
+                                            y: Au(0) - g.y_offset,
+                                            advance: hadv,
+                                        });
+                                        pen += hadv;
+                                    }
+                                    continue;
+                                }
+                                if ch == Some(' ') {
+                                    advance += extra_space;
+                                }
+                                if !g.atomic {
+                                    glyphs.push(GlyphPos {
+                                        glyph_id: g.id,
+                                        // Relative to the run, not the line.
+                                        x: pen + g.x_offset - start_pen,
+                                        // Positive y_offset is up; layout y grows
+                                        // down.
+                                        y: Au(0) - g.y_offset,
+                                        advance,
+                                    });
+                                }
+                                content.slots.push(Slot {
+                                    cluster: g.cluster,
+                                    x0: pen,
+                                    x1: pen + advance,
+                                    atomic: g.atomic,
+                                });
+                                pen += advance;
+                            }
+                        }
+                    }
                 }
+                content.runs.push(LineRun {
+                    rtl,
+                    inline_offset: start_pen,
+                    width: pen - start_pen,
+                    glyphs,
+                    style: src.style,
+                });
             }
-            // Positions are relative to the run, not the line.
-            for g in &mut glyphs {
-                g.x -= start_pen;
-            }
-            out.push(LineRun {
-                rtl,
-                inline_offset: start_pen,
-                width: pen - start_pen,
-                glyphs,
-            });
         }
-        out
+        content
+    }
+
+    /// The style ranges the paragraph was prepared with.
+    #[must_use]
+    pub fn ranges(&self) -> &[StyleRange] {
+        &self.ranges
     }
 
     /// The text style this was prepared with.
@@ -782,6 +1051,56 @@ pub struct LineRun {
     pub width: Au,
     /// Glyphs left to right; `x` is from the run's own start.
     pub glyphs: Vec<GlyphPos>,
+    /// The index of the style range the run's text belongs to.
+    pub style: usize,
+}
+
+/// An inline box edge as placed on a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EdgeOut {
+    /// The index in the paragraph's (offset-sorted) edge list.
+    pub edge: usize,
+    /// The `owner` the edge was given.
+    pub owner: usize,
+    /// A start edge.
+    pub open: bool,
+    /// The edge is on the left of the box's contents.
+    pub left: bool,
+    /// The part of the edge inside the border box, from the line's start edge.
+    pub x0: Au,
+    /// The far side of that part.
+    pub x1: Au,
+}
+
+/// One glyph's room on a line, edges excluded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Slot {
+    /// The glyph's cluster, as a byte offset in the paragraph text.
+    pub cluster: usize,
+    /// Left side, from the line's start edge.
+    pub x0: Au,
+    /// Right side.
+    pub x1: Au,
+    /// The slot is an atomic inline's, not a glyph.
+    pub atomic: bool,
+}
+
+/// What a line holds, in visual order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LineContent {
+    /// The glyph runs, one per (directional run, style range).
+    pub runs: Vec<LineRun>,
+    /// Inline box edges.
+    pub edges: Vec<EdgeOut>,
+    /// One slot per glyph, atomic inlines included.
+    pub slots: Vec<Slot>,
+}
+
+/// One thing placed on a line, before it is positioned.
+#[derive(Clone, Copy)]
+enum Item {
+    Edge(usize),
+    Glyph,
 }
 
 /// The preferred minimum and maximum inline sizes of `text` under `style`.

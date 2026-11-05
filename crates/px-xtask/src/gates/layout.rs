@@ -105,6 +105,13 @@ pub const SUITES: &[Suite] = &[
         "layout_crashtest_",
         "crates/px-layout/tests/crashtest.rs",
     ),
+    // Phase 9: inline boxes, `<br>` and atomic inlines, and the same deep-nesting
+    // property for a hundred thousand inline elements.
+    (
+        "inline-elements",
+        "layout_inline_",
+        "crates/px-layout/tests/inline.rs",
+    ),
 ];
 
 /// The reftest corpus is committed and cannot quietly shrink. ADR 019's

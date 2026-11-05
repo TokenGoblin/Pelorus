@@ -97,8 +97,13 @@ enum Step {
 /// before it existed.
 #[derive(Debug)]
 pub(crate) enum Content {
-    /// A run of inline-level content: text, and the text of inline descendants.
-    InlineRun(String),
+    /// A run of inline-level content: text, the text of inline descendants, and
+    /// the inline boxes and inline-blocks the text came from.
+    InlineRun(crate::inline::InlineRunData),
+    /// An `inline-block` (§9.4.2, §10.3.9): a box laid out like a float that
+    /// shrinks to fit and then sits on a line of the run it appears in as one
+    /// character. Its text is an object character in the run.
+    InlineBlock(NodeId),
     /// A block-level child, which becomes a box of its own.
     Block(NodeId),
     /// An absolutely positioned child (§9.6), which is removed from the flow
@@ -210,6 +215,11 @@ struct Tables {
     inline_runs: Vec<Option<PendingRun>>,
     /// Resolved margins, borders and padding.
     edges: Vec<Edges>,
+    /// `Some((clips, align))` for an `inline-block`, which a line places rather
+    /// than its container stacking; `clips` is whether its `overflow` is not
+    /// `visible` (which puts its baseline at the bottom margin edge, §10.8.1) and
+    /// `align` its `vertical-align`.
+    atomic: Vec<Option<(bool, crate::inline::VAlign)>>,
 }
 
 impl Tables {
@@ -232,6 +242,7 @@ impl Tables {
             float_sides: vec![None],
             inline_runs: vec![None],
             edges: vec![Edges::ZERO],
+            atomic: vec![None],
         }
     }
 
@@ -252,6 +263,7 @@ impl Tables {
             self.float_sides.push(None);
             self.inline_runs.push(None);
             self.edges.push(Edges::ZERO);
+            self.atomic.push(None);
         }
     }
 }
@@ -272,7 +284,7 @@ impl Tables {
 /// on its own, with the reftest count held fixed, so that the float work after it
 /// could not hide a regression inside a restructure.
 struct PendingRun {
-    text: String,
+    run: crate::inline::InlineRunData,
     /// The text style the run is measured and broken with.
     style: crate::text::TextStyle,
     /// The element whose computed colour paints the run.
@@ -457,7 +469,8 @@ pub fn layout_document(
                     // fragment, because laying it out as a block would be
                     // confidently wrong geometry rather than none. Its slot stays
                     // empty and `Exit` drops it.
-                    if !is_block_level(&style) {
+                    let inline_block = is_inline_block(&style);
+                    if !is_block_level(&style) && !inline_block {
                         continue;
                     }
 
@@ -508,7 +521,7 @@ pub fn layout_document(
                             let intrinsic = intrinsic_inline_size(dom, arena, node);
                             absolute_inline_size(&style, containing, &resolved, intrinsic)
                         }
-                        _ if (side.is_some() || is_inline_grid(&style))
+                        _ if (side.is_some() || is_inline_grid(&style) || inline_block)
                             && definite_inline_size(&style).is_none() =>
                         {
                             let available = containing - resolved.inline_surround();
@@ -550,7 +563,7 @@ pub fn layout_document(
                     // for the leftover space to be shared between. An absolutely
                     // positioned box's auto margins are resolved by §10.3.7's own
                     // equation, which `absolute_inline_size` has already done.
-                    if side.is_none() && !absolute && !flex.is_item(node) {
+                    if side.is_none() && !absolute && !inline_block && !flex.is_item(node) {
                         centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
                     }
                     let content_inline = match grid_item {
@@ -578,6 +591,19 @@ pub fn layout_document(
                     tables.grow_to(fragment.index());
                     tables.inline_sizes[fragment.index()] = content_inline;
                     tables.float_sides[fragment.index()] = side;
+                    tables.atomic[fragment.index()] = (inline_block && !absolute && side.is_none())
+                        .then(|| {
+                            (
+                                style.clone_overflow_x()
+                                    != style::values::computed::Overflow::Visible
+                                    || style.clone_overflow_y()
+                                        != style::values::computed::Overflow::Visible,
+                                crate::inline::vertical_align_of(
+                                    &style,
+                                    crate::text::TextStyle::of(&style),
+                                ),
+                            )
+                        });
                     tables.absolute[fragment.index()] = absolute.then(|| AbsolutePlacement {
                         containing_block,
                         inline_start: inline_inset(&style.clone_left(), containing),
@@ -585,7 +611,7 @@ pub fn layout_document(
                         block_start: block_inset(&style.clone_top()),
                         block_end: block_inset(&style.clone_bottom()),
                     });
-                    let inherited = if absolute || side.is_some() {
+                    let inherited = if absolute || side.is_some() || inline_block {
                         (Au(0), Au(0))
                     } else {
                         inline_relative_shift(arena, dom, node, containing)
@@ -614,6 +640,7 @@ pub fn layout_document(
                     tables.clear_sides[fragment.index()] = clear_side(&style);
                     tables.formatting_context_roots[fragment.index()] =
                         establishes_formatting_context(&style)
+                            || inline_block
                             || flex.is_item(node)
                             || grid_item.is_some();
                     // A flex item's block size is the flex algorithm's to decide.
@@ -728,7 +755,9 @@ pub fn layout_document(
 
                     for (slot, item) in items.into_iter().enumerate() {
                         match item {
-                            Content::Block(child) | Content::Float(child) => {
+                            Content::Block(child)
+                            | Content::Float(child)
+                            | Content::InlineBlock(child) => {
                                 stack.push(Step::Enter {
                                     node: child,
                                     parent: fragment,
@@ -755,20 +784,20 @@ pub fn layout_document(
                                     containing_block,
                                 });
                             }
-                            Content::InlineRun(text) if !has_block => {
+                            Content::InlineRun(run) if !has_block => {
                                 // §9.2.1.1: inline content with no in-flow
                                 // block-level sibling is not wrapped. The lines
                                 // hang directly off this container, and the slot
                                 // stays empty -- `PendingRun::slot` is what tells
                                 // `Exit` where in the sequence to build them.
                                 tables.inline_runs[fragment.index()] = Some(PendingRun {
-                                    text,
+                                    run,
                                     style: text_style,
                                     node: Some(node),
                                     slot,
                                 });
                             }
-                            Content::InlineRun(text) => {
+                            Content::InlineRun(run) => {
                                 let anonymous = tree.push(Fragment::new(
                                     FragmentKind::AnonymousBlock,
                                     LogicalSize::new(available, Au(0)),
@@ -783,7 +812,7 @@ pub fn layout_document(
                                     *reserved = Some(anonymous);
                                 }
                                 tables.inline_runs[anonymous.index()] = Some(PendingRun {
-                                    text,
+                                    run,
                                     style: text_style,
                                     node: Some(node),
                                     slot,
@@ -828,6 +857,8 @@ pub fn layout_document(
                                 Au(0),
                                 Au(0),
                                 Au(0),
+                                &tables,
+                                &std::collections::BTreeMap::new(),
                             );
                             tree.set_children(kid, &wrapped);
                             if let Some(anonymous) = tree.get_mut(kid) {
@@ -875,6 +906,10 @@ pub fn layout_document(
                         .get(fragment.index())
                         .cloned()
                         .unwrap_or_default();
+
+                    // Inline-blocks of this container, by element, for the lines that
+                    // place them.
+                    let lookup = atomic_lookup(&tree, &tables, &slots);
 
                     let available = tables
                         .inline_sizes
@@ -993,6 +1028,8 @@ pub fn layout_document(
                                 cursor,
                                 content_inline_start,
                                 content_block_start,
+                                &tables,
+                                &lookup,
                             );
                             cursor += height;
                         }
@@ -1000,6 +1037,12 @@ pub fn layout_document(
                         let Some(Some(kid)) = slots.get(slot).copied() else {
                             continue;
                         };
+
+                        // An inline-block is placed by the line of the run it
+                        // sits in, not stacked by its container.
+                        if tables.atomic.get(kid.index()).copied().flatten().is_some() {
+                            continue;
+                        }
 
                         // An absolutely positioned box takes no part in this
                         // pass (§9.6): it does not move the cursor, does not
@@ -1096,6 +1139,8 @@ pub fn layout_document(
                                 Au(0),
                                 Au(0),
                                 Au(0),
+                                &tables,
+                                &lookup,
                             );
                             tree.set_children(kid, &wrapped);
                             if let Some(anonymous) = tree.get_mut(kid) {
@@ -1530,7 +1575,7 @@ fn first_element(arena: &Arena) -> Option<NodeId> {
 #[expect(
     clippy::too_many_arguments,
     reason = "every argument is a distinct piece of the container's geometry; \
-              bundling them into a struct used at exactly two call sites would \
+              bundling them into a struct used at exactly three call sites would \
               name the same values twice"
 )]
 fn place_run(
@@ -1542,9 +1587,52 @@ fn place_run(
     block_origin: Au,
     content_inline_start: Au,
     content_block_start: Au,
+    tables: &Tables,
+    lookup: &std::collections::BTreeMap<NodeId, FragmentId>,
 ) -> Au {
+    let infos: Vec<crate::inline::AtomicInfo> = run
+        .run
+        .atomics
+        .iter()
+        .map(|a| {
+            // A missing box cannot happen (an inline-block is scheduled with the
+            // run it is in); an empty placeholder keeps the object character
+            // from taking another box's place if it ever did.
+            let fragment = lookup.get(&a.node).copied().unwrap_or_else(|| {
+                tree.push(Fragment::new(FragmentKind::Block, LogicalSize::ZERO))
+            });
+            let (clips, align) = tables
+                .atomic
+                .get(fragment.index())
+                .copied()
+                .flatten()
+                .unwrap_or((true, crate::inline::VAlign::Raise(Au(0))));
+            crate::inline::AtomicInfo {
+                fragment,
+                align,
+                margin: tables
+                    .edges
+                    .get(fragment.index())
+                    .map_or(LogicalEdges::ZERO, |e| e.margin),
+                size: tree.get(fragment).map_or(LogicalSize::ZERO, |f| f.size),
+                // No line box (or a clipped box): the bottom margin edge.
+                baseline: atomic_baseline(tree, fragment, clips).unwrap_or_else(|| {
+                    tree.get(fragment).map_or(Au(0), |f| f.size.block)
+                        + tables
+                            .edges
+                            .get(fragment.index())
+                            .map_or(Au(0), |e| e.margin.block_end)
+                }),
+            }
+        })
+        .collect();
+    let content =
+        (!run.run.boxes.is_empty() || !infos.is_empty()).then_some(crate::inline::RunContent {
+            run: &run.run,
+            atomics: &infos,
+        });
     let context = crate::inline::InlineContext {
-        text: &run.text,
+        text: &run.run.text,
         style: run.style,
         node: run.node,
         available,
@@ -1554,6 +1642,7 @@ fn place_run(
             Some(floats)
         },
         block_origin,
+        content,
     };
     let (lines, height) = crate::inline::layout_lines(tree, &context);
 
@@ -1570,6 +1659,55 @@ fn place_run(
     }
     into.extend_from_slice(&lines);
     height
+}
+
+/// The inline-blocks among a container's content slots, by element.
+fn atomic_lookup(
+    tree: &FragmentTree,
+    tables: &Tables,
+    slots: &[Option<FragmentId>],
+) -> std::collections::BTreeMap<NodeId, FragmentId> {
+    let mut out = std::collections::BTreeMap::new();
+    for kid in slots.iter().flatten() {
+        if tables.atomic.get(kid.index()).copied().flatten().is_some()
+            && let Some(node) = tree.get(*kid).and_then(|f| f.node)
+        {
+            out.insert(node, *kid);
+        }
+    }
+    out
+}
+
+/// The baseline of an inline-block, from the top of its border box (CSS 2.1
+/// §10.8.1): that of its last in-flow line box, or `None` (the bottom margin
+/// edge, which the caller knows) when it has none or its `overflow` is not
+/// `visible`. Iterative; does not descend into
+/// the children of a line (the inline-blocks sitting on it have lines of their
+/// own, which are not this box's).
+fn atomic_baseline(tree: &FragmentTree, root: FragmentId, clips: bool) -> Option<Au> {
+    if clips {
+        return None;
+    }
+    let mut last: Option<Au> = None;
+    let mut stack = vec![(root, Au(0))];
+    while let Some((id, top)) = stack.pop() {
+        let Some(f) = tree.get(id) else { continue };
+        let here = if id == root {
+            top
+        } else {
+            top + f.block_offset
+        };
+        match f.kind {
+            FragmentKind::Line => last = Some(here + f.baseline),
+            FragmentKind::Block | FragmentKind::AnonymousBlock => {
+                for kid in tree.children(id).iter().rev() {
+                    stack.push((*kid, here));
+                }
+            }
+            FragmentKind::Inline { .. } => {}
+        }
+    }
+    last
 }
 
 /// Finish a grid container: lay its anonymous items out, then hand the rest to the
@@ -1641,6 +1779,8 @@ fn exit_grid(
                 Au(0),
                 Au(0),
                 Au(0),
+                &*tables,
+                &std::collections::BTreeMap::new(),
             );
             tree.set_children(kid, &wrapped);
             if let Some(f) = tree.get_mut(kid) {
@@ -1887,18 +2027,47 @@ fn float_side(style: &ComputedValues) -> Option<crate::float::FloatSide> {
 /// the run it sits in, and a block-level element *inside* that span ends the run
 /// and becomes an item of its own. That is the block-in-inline case, and it is
 /// where most of the vendored CSS2 reftests that exercise anonymous boxes live.
+/// Flattened does not mean forgotten: the run keeps each inline element as an
+/// [`crate::inline::InlineBox`] and tags every piece of text with the element it
+/// is in, so the lines can be coloured, sized and decorated per element. A span a
+/// block interrupts is closed in the run before the block and reopened (without
+/// its start edge) in the run after it.
 ///
 /// Iterative, and a pre-order walk so the items come out in document order.
 fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> Vec<Content> {
+    enum Visit {
+        Node(NodeId),
+        /// The end of the element whose box was opened last.
+        Close,
+    }
     let mut out = Vec::new();
-    let mut run = String::new();
     // Inline content is white-space processed with its container's `white-space`
-    // (flattened through inline elements, as the text style is).
+    // (and each element's own, for its own text).
     let (white_space, drop_blank) = container_white_space(dom, node);
-    let mut stack: Vec<NodeId> = children_in_order(arena, node);
-    stack.reverse();
+    let base = computed_style(dom, node).map_or_else(crate::text::TextStyle::initial, |s| {
+        crate::text::TextStyle::of(&s)
+    });
+    let mut builder = RunBuilder {
+        run: crate::inline::InlineRunData::default(),
+        open: Vec::new(),
+        base,
+        container: node,
+        white_space,
+    };
+    let mut stack: Vec<Visit> = children_in_order(arena, node)
+        .into_iter()
+        .rev()
+        .map(Visit::Node)
+        .collect();
 
-    while let Some(id) = stack.pop() {
+    while let Some(visit) = stack.pop() {
+        let id = match visit {
+            Visit::Node(id) => id,
+            Visit::Close => {
+                builder.close_top();
+                continue;
+            }
+        };
         let Some(current) = arena.get(id) else {
             continue;
         };
@@ -1931,51 +2100,188 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
                 out.push(Content::Float(id));
                 continue;
             }
-            if style.is_some_and(|s| is_block_level(&s)) {
-                flush_run(&mut run, &mut out, white_space, drop_blank);
+            if style.as_ref().is_some_and(|s| is_block_level(s)) {
+                builder.flush(&mut out, drop_blank);
                 out.push(Content::Block(id));
-            } else {
-                let mut kids = children_in_order(arena, id);
-                kids.reverse();
-                stack.extend(kids);
+                continue;
+            }
+            // `<br>`: a forced line break (§9.4.2), whatever its `display`.
+            if current
+                .element_name()
+                .is_some_and(|q| q.local.as_ref() == "br")
+            {
+                builder.line_break();
+                continue;
+            }
+            if style.as_ref().is_some_and(|s| is_inline_block(s)) {
+                builder.atomic(id);
+                out.push(Content::InlineBlock(id));
+                continue;
+            }
+            let opened = builder.open_element(id, style.as_deref());
+            if opened {
+                stack.push(Visit::Close);
+            }
+            for kid in children_in_order(arena, id).into_iter().rev() {
+                stack.push(Visit::Node(kid));
             }
             continue;
         }
 
         if let Some(text) = current.text() {
-            run.push_str(text);
+            builder.text(text);
         }
     }
-    flush_run(&mut run, &mut out, white_space, drop_blank);
+    builder.flush(&mut out, drop_blank);
     out
 }
 
-/// End the run being accumulated, dropping it if it collapses to nothing.
-///
-/// Whitespace is collapsed here rather than at the point of use so that a run of
-/// only whitespace between two block boxes -- the newline in
-/// `<div><p>a</p>\n<p>b</p></div>`, which every hand-written document has -- does
-/// not generate an empty anonymous block between them. §9.2.1.1 says as much:
-/// white space that would collapse away generates no anonymous box.
-///
-/// `drop_blank` is set for flex and grid containers, whose whitespace-only text
-/// is never rendered "even in the presence of `white-space: pre`"
-/// (css-flexbox-1 section 4; css-grid-1 section 6).
-fn flush_run(
-    run: &mut String,
-    out: &mut Vec<Content>,
+/// Whether this box is an `inline-block`: a block container that sits on a line
+/// as one atomic inline (CSS 2.1 §9.2.2, §10.3.9).
+pub(crate) fn is_inline_block(style: &ComputedValues) -> bool {
+    use style::values::specified::box_::{DisplayInside, DisplayOutside};
+    let display = style.clone_display();
+    matches!(display.outside(), DisplayOutside::Inline)
+        && matches!(
+            display.inside(),
+            DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid
+        )
+}
+
+/// The run being accumulated by [`partition_content`].
+struct RunBuilder {
+    run: crate::inline::InlineRunData,
+    /// Indices into `run.boxes` of the inline elements open right now.
+    open: Vec<usize>,
+    /// The container's own text style, for text with no element in between.
+    base: crate::text::TextStyle,
+    container: NodeId,
     white_space: crate::text::WhiteSpace,
-    drop_blank: bool,
-) {
-    let collapsed = crate::inline::collapse_for(run, white_space);
-    run.clear();
-    let blank = if drop_blank {
-        collapsed.trim().is_empty()
-    } else {
-        crate::inline::is_blank(&collapsed, white_space)
-    };
-    if !blank {
-        out.push(Content::InlineRun(collapsed));
+}
+
+impl RunBuilder {
+    /// The text style, colour node and `vertical-align` raise of the innermost
+    /// element.
+    fn current(&self) -> (crate::text::TextStyle, NodeId, Au) {
+        match self.open.last().and_then(|i| self.run.boxes.get(*i)) {
+            Some(b) => (b.text, b.node, b.raise),
+            None => (self.base, self.container, Au(0)),
+        }
+    }
+
+    fn text(&mut self, raw: &str) {
+        let (style, node, raise) = self.current();
+        let ws = style.breaking.white_space;
+        self.run.push_text(raw, ws, style, Some(node), raise);
+    }
+
+    fn line_break(&mut self) {
+        let (style, node, raise) = self.current();
+        self.run
+            .push_char(crate::inline::LINE_BREAK, style, Some(node), raise);
+    }
+
+    fn atomic(&mut self, node: NodeId) {
+        let (style, owner, raise) = self.current();
+        self.run.push_atomic(node, style, Some(owner), raise);
+    }
+
+    /// Open the inline box of `element`. False when it has no style (and so no
+    /// box).
+    fn open_element(&mut self, element: NodeId, style: Option<&ComputedValues>) -> bool {
+        let Some(style) = style else {
+            return false;
+        };
+        let contents = matches!(
+            style.clone_display().inside(),
+            style::values::specified::box_::DisplayInside::Contents
+        );
+        let edges = if contents {
+            Edges::ZERO
+        } else {
+            resolve_edges(style, Au(0))
+        };
+        let b = edges.border;
+        let decorated = !contents
+            && (b.block_start > Au(0)
+                || b.inline_end > Au(0)
+                || b.block_end > Au(0)
+                || b.inline_start > Au(0)
+                || px_css::paint::paint_style_of(style).background[3] > 0);
+        let text = crate::text::TextStyle::of(style);
+        // `top` and `bottom` align a whole subtree to the line box, which is not
+        // done for text: those, and `middle`, are `baseline` here. The shifts
+        // (`sub`, `super`, lengths) add up down the tree.
+        let own = match crate::inline::vertical_align_of(style, text) {
+            crate::inline::VAlign::Raise(r) => r,
+            crate::inline::VAlign::Top | crate::inline::VAlign::Bottom => Au(0),
+        };
+        let raise = self.current().2 + own;
+        let index = self.run.open(crate::inline::InlineBox {
+            node: element,
+            text,
+            raise,
+            edges,
+            decorated,
+            no_start: false,
+            no_end: false,
+            start: 0,
+            end: 0,
+        });
+        self.open.push(index);
+        true
+    }
+
+    fn close_top(&mut self) {
+        if let Some(i) = self.open.pop() {
+            self.run.close(i);
+        }
+    }
+
+    /// End the run being accumulated, dropping it if it collapses to nothing.
+    ///
+    /// Whitespace is collapsed as the run is built so that a run of only
+    /// whitespace between two block boxes -- the newline in
+    /// `<div><p>a</p>\n<p>b</p></div>`, which every hand-written document has --
+    /// does not generate an empty anonymous block between them. §9.2.1.1 says as
+    /// much: white space that would collapse away generates no anonymous box.
+    ///
+    /// `drop_blank` is set for flex and grid containers, whose whitespace-only
+    /// text is never rendered "even in the presence of `white-space: pre`"
+    /// (css-flexbox-1 section 4; css-grid-1 section 6).
+    ///
+    /// Elements still open are closed in the finished run and reopened, without
+    /// their start edge, in the next: the block that ended the run interrupts
+    /// them (§9.2.1.1).
+    fn flush(&mut self, out: &mut Vec<Content>, drop_blank: bool) {
+        let templates: Vec<crate::inline::InlineBox> = self
+            .open
+            .iter()
+            .filter_map(|i| self.run.boxes.get(*i).cloned())
+            .collect();
+        for i in self.open.clone().into_iter().rev() {
+            self.run.close(i);
+            if let Some(b) = self.run.boxes.get_mut(i) {
+                b.no_end = true;
+            }
+        }
+        let mut done = std::mem::take(&mut self.run);
+        done.finish(self.white_space);
+        let blank = if drop_blank {
+            done.atomics.is_empty() && done.text.trim().is_empty()
+        } else {
+            done.is_blank(self.white_space)
+        };
+        if !blank {
+            out.push(Content::InlineRun(done));
+        }
+        self.open.clear();
+        for mut t in templates {
+            t.no_start = true;
+            t.no_end = false;
+            let index = self.run.open(t);
+            self.open.push(index);
+        }
     }
 }
 
@@ -2242,14 +2548,16 @@ pub(crate) fn intrinsic_inline_size_with(
                         // Both are approximated by the block rule here, which
                         // overstates the preferred width of a container whose only
                         // wide thing is a float.
-                        Content::Block(child) | Content::Float(child) => blocks.push(child),
+                        Content::Block(child)
+                        | Content::Float(child)
+                        | Content::InlineBlock(child) => blocks.push(child),
                         // An absolutely positioned box is out of flow and
                         // contributes nothing to its container's intrinsic sizes
                         // (§10.3.7 is solved against the containing block, not
                         // against the content around it).
                         Content::Absolute(_) => {}
-                        Content::InlineRun(text) => {
-                            let (min, max) = crate::text::intrinsic_widths(&text, text_style);
+                        Content::InlineRun(run) => {
+                            let (min, max) = crate::inline::run_intrinsic(&run, text_style);
                             frame.add(min, max);
                         }
                     }
@@ -2411,9 +2719,8 @@ pub(crate) fn is_display_none(style: &ComputedValues) -> bool {
 pub(crate) fn is_block_level(style: &ComputedValues) -> bool {
     use style::values::specified::box_::{DisplayInside, DisplayOutside};
     let display = style.clone_display();
-    // `inline-flex` is treated as block-level too: this engine has no atomic
-    // inlines, so it breaks the line rather than sitting in it (see flex.rs).
-    // `inline-grid` likewise (see `is_inline_grid`).
+    // `inline-flex` and `inline-grid` are not block-level: they are atomic
+    // inlines like `inline-block` (see `is_inline_block`).
     (matches!(display.outside(), DisplayOutside::Block)
         && matches!(
             display.inside(),
@@ -2422,9 +2729,6 @@ pub(crate) fn is_block_level(style: &ComputedValues) -> bool {
                 | DisplayInside::Flex
                 | DisplayInside::Grid
         ))
-        || (matches!(display.outside(), DisplayOutside::Inline)
-            && matches!(display.inside(), DisplayInside::Flex))
-        || is_inline_grid(style)
 }
 
 /// Whether this box establishes a block formatting context (§9.4.1).

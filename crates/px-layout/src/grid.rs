@@ -444,19 +444,22 @@ impl Container {
         let mut slot_item = vec![None; children.len()];
         for (slot, content) in children.iter().enumerate() {
             let (st, computed, text) = match content {
-                Content::Block(node) | Content::Float(node) => {
+                Content::Block(node) | Content::Float(node) | Content::InlineBlock(node) => {
                     let Some(computed) = computed_style(inp.dom, *node) else {
                         continue;
                     };
                     (ItemStyle::new(&computed, &cs), Some(computed), None)
                 }
-                Content::InlineRun(text) => (ItemStyle::anonymous(&cs), None, Some(text.as_str())),
+                Content::InlineRun(run) => {
+                    (ItemStyle::anonymous(&cs), None, Some(run.text.as_str()))
+                }
                 Content::Absolute(_) => continue,
             };
             let measure = match (&computed, content) {
-                (Some(c), Content::Block(node) | Content::Float(node)) => {
-                    measure_element(&mut || raw(*node), c, &st)
-                }
+                (
+                    Some(c),
+                    Content::Block(node) | Content::Float(node) | Content::InlineBlock(node),
+                ) => measure_element(&mut || raw(*node), c, &st),
                 _ => {
                     let t = text.unwrap_or("");
                     let (min, max) = crate::text::intrinsic_widths(t, inp.text);

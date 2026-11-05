@@ -69,7 +69,29 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// The 28 pairs that linked `/fonts/ahem.css` are now laid out as written
 /// (the harness satisfies that sheet; see `reftest_common`), 27 of them differ in
 /// layout and none matches, so they add no passes.
-const MATCH_FLOOR: usize = 151;
+///
+/// 156 once inline content had boxes of its own and `inline-flex` / `inline-grid`
+/// became atomic inlines that sit on a line like an `inline-block` (Phase 9,
+/// `inline.rs`), instead of being laid out as block-level boxes. Eight pairs
+/// gained and three lost, all read:
+/// - Gained `flex-inline.html`, `flexbox_inline.html`,
+///   `flexbox-baseline-empty-001a.html` and `-001b.html`: they are about
+///   `inline-flex` sitting inline (shrink-to-fit, next to text, on a baseline).
+///   Gained `flexbox_box-clear.html`, `flexbox_flex-natural-mixed-basis.html`,
+///   `flexbox_flex-natural-mixed-basis-auto.html` and `percentage-heights-004.html`:
+///   text, spans and an `inline-flex` laid out by the new line machinery (the
+///   mixed-basis pair puts `<span>` flex items in a flex container; the clear
+///   pair has text that does not fit beside a float and now moves below it, §9.5).
+///   These four were read for what they exercise but not bisected one by one.
+/// - Lost `percentage-heights-015.html`, `percentage-padding-002.html` and
+///   `flexbox-with-multi-column-property.html`: the test puts an `inline-flex`
+///   on a line and the reference a block (or a top-aligned `inline-block`), so
+///   the test's line box is the box plus the strut's descent below the baseline
+///   (3px at 16px Ahem), or its inline box adds a line fragment, and the sets of
+///   rectangles differ by that. Browsers draw the same picture (the extra is
+///   empty space under the box), which a rectangle comparison cannot see: the
+///   oracle's blind spot, not a flex defect.
+const MATCH_FLOOR: usize = 156;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 543).
 const MIN_PAIRS: usize = 540;

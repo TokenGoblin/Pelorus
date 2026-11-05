@@ -34,8 +34,9 @@
 //!   `height`; otherwise they behave as `auto`.
 //! - **Static position** of an absolutely positioned child is the content-box
 //!   origin, not the position it would have had as the container's sole item.
-//! - **`inline-flex`** is block-level here (the engine has no atomic inlines): it
-//!   shrinks to fit but breaks the line instead of sitting in it.
+//! - **`inline-flex`** is an atomic inline (see `crate::inline`): it shrinks to fit
+//!   and sits on a line, with the baseline of its last line box rather than the
+//!   first item's.
 //! - **`visibility: collapse`**, `aspect-ratio`, replaced elements.
 //!
 //! # Integers
@@ -582,7 +583,9 @@ impl FlexState {
             run.clear();
             if !collapsed.trim().is_empty() {
                 cont.items.push(anonymous_item(&collapsed, cont));
-                contents.push(Content::InlineRun(collapsed));
+                contents.push(Content::InlineRun(crate::inline::InlineRunData::plain(
+                    collapsed,
+                )));
             }
         }
 

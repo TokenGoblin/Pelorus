@@ -96,7 +96,18 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// font registry whether or not an `@font-face` names it). That moved 56 pairs
 /// from "stylesheet not vendored" to "differ in layout" (113 to 57) and matched
 /// none of them: they test baselines, writing modes, subgrid and the like.
-const MATCH_FLOOR: usize = 67;
+///
+/// **66 once `inline-grid` became an atomic inline** (Phase 9, `inline.rs`),
+/// lowered deliberately: one pair gained, two lost, all read. Gained
+/// `alignment/grid-inline-baseline.html` (an `inline-grid` on a baseline). Lost
+/// `alignment/grid-gutters-015.html` and `-016.html`: the test makes an
+/// `inline-grid` and the reference a block grid; with the grid on a line the
+/// test's line box is the 106px grid plus 3px of strut descent below the
+/// baseline (109), which browsers also have and which draws no pixels, so the
+/// picture is the same and the rectangles are not. The oracle's blind spot; the
+/// old result was the grid being laid out as a block, which is wrong for any
+/// page that puts an `inline-grid` beside text.
+const MATCH_FLOOR: usize = 66;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 405).
 const MIN_PAIRS: usize = 400;

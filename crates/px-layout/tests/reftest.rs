@@ -196,9 +196,41 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[
 /// 10px line box). Every other css2 pair moved by category 0: the corpus is
 /// almost entirely text-free or compares two runs of the same text.
 ///
+/// 56 once inline elements got boxes of their own (Phase 9, `inline.rs`: styled
+/// runs, inline-box fragments, `<br>`, `inline-block` and `vertical-align`
+/// shifts). Four pairs gained and three lost, all read:
+/// - Gained `linebox/line-breaking-font-size-zero-001.html`: 80px
+///   `inline-block`s separated by `font-size: 0` spans in a 100px block. Each
+///   box now sits on a line and wraps like a word, and the separators measure
+///   with their own zero size, so the test lays out as the reference does.
+///   Gained `linebox/iframe-in-wrapped-span.html`: a span holding a `<br>` and
+///   an `iframe`, against the same `<br>` and `iframe` with no span; the forced
+///   break is a line on both sides now. Gained `normal-flow/canvas-paint-order.html`
+///   and `video-paint-order.html`: they differ only in a `canvas` (or `video`)
+///   with a red background in the test, an empty inline box, which has no area
+///   to paint and so no fragment, and an `inline-block` with a negative margin
+///   that now sits on its line on both sides.
+/// - Lost `normal-flow/inline-box-border-line-break.html`: the test has a span
+///   with a 50px transparent left border and the reference spells the same room
+///   with `display: inline-block; padding-left: 50px`. Both render alike; the
+///   reference's box has a line of its own inside it (an inline-block is a block
+///   container) and the test's span does not, so the sets of rectangles differ
+///   by that one text line. A limit of the oracle, as ADR 029 anticipated.
+/// - Lost `floats/float-no-content-beside-001.html`: its reference writes the
+///   same picture with a `<br>` that the test does not have; the `<br>` now
+///   makes a zero-width line the test lacks. Before, `<br>` generated nothing on
+///   either side. (The §9.5 rule the test is about, a line too narrow for its
+///   first word moving below the float, is implemented in the same commit and
+///   all three of its examples now place the word at the same coordinates.)
+/// - Lost `positioning/abspos-negative-margin-001.html`: the reference's
+///   inline-block is now on its line (with `vertical-align: bottom`, which is
+///   honoured), and the test's absolutely positioned child still has its static
+///   position at the block's start rather than after the `x` it follows on the
+///   line. It matched before only because the inline-block was dropped.
+///
 /// **It may not fall from here.** Raising it is a deliberate commit whose diff
 /// says the engine improved.
-const MATCH_FLOOR: usize = 55;
+const MATCH_FLOOR: usize = 56;
 
 /// Whether this test's meaning depends on script this engine cannot run.
 ///

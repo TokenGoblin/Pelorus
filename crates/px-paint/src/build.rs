@@ -17,10 +17,20 @@
 //! clipping ancestors; an absolutely positioned box escapes the clips between it
 //! and its containing block.
 //!
-//! Not done, and not approximated: `opacity` contexts, transforms, inline-level
-//! backgrounds and borders (layout produces no fragment for an inline box),
-//! `outline`, shadows, background images, `border-radius`. `position: sticky`
-//! counts as positioned. A page using them paints without them.
+//! Not done, and not approximated: `opacity` contexts, transforms, `outline`,
+//! `text-decoration`, shadows, background images, `border-radius`. `position:
+//! sticky` counts as positioned. A page using them paints without them.
+//!
+//! # Inline content
+//!
+//! A line fragment's children are the pieces of the inline boxes drawn on it
+//! (`FragmentKind::Inline`, with a border or a background) and the inline-blocks
+//! sitting on it. Per line, in the inline step: each piece's background and border,
+//! outermost first (a piece owns only the side edges its kind says), then the
+//! line's text, each run in the `color` and `visibility` of its own element; the
+//! inline-blocks are painted after, each atomically as if it were a stacking
+//! context (its own background, blocks, floats and text), so an inline-block that
+//! overlaps text paints over all of the line's text, not only the text before it.
 //!
 //! # What is drawn
 //!
@@ -103,8 +113,12 @@ struct Unit {
     blocks: Vec<Op>,
     /// Non-positioned floats (step 4).
     floats: Vec<usize>,
-    /// Inline content (step 5).
+    /// Inline content (step 5): per line, the inline boxes' backgrounds and
+    /// borders outermost first, then the line's text.
     inline: Vec<Op>,
+    /// Inline-blocks (step 5, after the line's text): each painted atomically as
+    /// if it were a stacking context (CSS 2.1 Appendix E, 7.2.1).
+    atomics: Vec<usize>,
     /// Positioned `z-index: auto` boxes and `z-index: 0` contexts (step 6), in
     /// tree order.
     zero: Vec<usize>,
@@ -218,19 +232,51 @@ fn build_units(tree: &FragmentTree, facts: &Facts, root: FragmentId) -> Vec<Unit
     units[0].root_box = facts.style[root.index()].map(|_| root);
     let mut contexts = vec![(0usize, root)];
     while let Some((real, ctx_root)) = contexts.pop() {
-        let mut stack: Vec<(FragmentId, usize)> = tree
+        // The flag marks an inline-block: a block-level fragment that is a child
+        // of a line.
+        let mut stack: Vec<(FragmentId, usize, bool)> = tree
             .children(ctx_root)
             .iter()
             .rev()
-            .map(|k| (*k, real))
+            .map(|k| (*k, real, false))
             .collect();
-        while let Some((id, carried)) = stack.pop() {
+        while let Some((id, carried, atomic)) = stack.pop() {
             let Some(fragment) = tree.get(id) else {
                 continue;
             };
             let mut kids_unit = carried;
             if fragment.kind == FragmentKind::Line {
+                // Inline boxes first, so their backgrounds and borders are under
+                // the text; they have no children of their own.
+                for kid in tree.children(id) {
+                    if tree
+                        .get(*kid)
+                        .is_some_and(|k| matches!(k.kind, FragmentKind::Inline { .. }))
+                    {
+                        units[carried].inline.push(Op::Boxed(*kid));
+                    }
+                }
                 units[carried].inline.push(Op::Text(id));
+                for kid in tree.children(id).iter().rev() {
+                    if tree
+                        .get(*kid)
+                        .is_some_and(|k| !matches!(k.kind, FragmentKind::Inline { .. }))
+                    {
+                        stack.push((*kid, carried, true));
+                    }
+                }
+                continue;
+            } else if atomic {
+                let u = units.len();
+                units.push(Unit {
+                    root_box: facts.style[id.index()].map(|_| id),
+                    ..Unit::default()
+                });
+                units[carried].atomics.push(u);
+                for kid in tree.children(id).iter().rev() {
+                    stack.push((*kid, u, false));
+                }
+                continue;
             } else if let Some(s) = facts.style[id.index()] {
                 if s.positioned
                     && let Some(z) = s.z_index
@@ -264,7 +310,7 @@ fn build_units(tree: &FragmentTree, facts: &Facts, root: FragmentId) -> Vec<Unit
                 }
             }
             for kid in tree.children(id).iter().rev() {
-                stack.push((*kid, kids_unit));
+                stack.push((*kid, kids_unit, false));
             }
         }
     }
@@ -295,6 +341,9 @@ fn emit(
                     jobs.push(Job::Unit(c));
                 }
                 for c in unit.zero.into_iter().rev() {
+                    jobs.push(Job::Unit(c));
+                }
+                for c in unit.atomics.into_iter().rev() {
                     jobs.push(Job::Unit(c));
                 }
                 jobs.push(Job::Ops(unit.inline));
@@ -353,7 +402,13 @@ fn emit_ops(
                     && style.visible
                 {
                     let skip_bg = fragment.node.is_some() && fragment.node == propagated;
-                    paint_box(list, rect, &style, skip_bg);
+                    // A piece of an inline box owns only the side edges it was
+                    // given (`box-decoration-break: slice`).
+                    let (left, right) = match fragment.kind {
+                        FragmentKind::Inline { left, right } => (left, right),
+                        _ => (true, true),
+                    };
+                    paint_box(list, rect, &style, skip_bg, (left, right));
                 }
             }
         }
@@ -462,7 +517,13 @@ fn canvas_background(
     (None, None)
 }
 
-fn paint_box(list: &mut DisplayList, rect: Rect, style: &PaintStyle, skip_background: bool) {
+fn paint_box(
+    list: &mut DisplayList,
+    rect: Rect,
+    style: &PaintStyle,
+    skip_background: bool,
+    (left, right): (bool, bool),
+) {
     if !skip_background && style.background[3] > 0 {
         let filled = match style.background_clip {
             BackgroundClip::BorderBox => rect,
@@ -474,7 +535,12 @@ fn paint_box(list: &mut DisplayList, rect: Rect, style: &PaintStyle, skip_backgr
             color: color(style.background),
         });
     }
-    let drawn = |i: usize| style.borders[i].drawn && style.borders[i].width > Au(0);
+    let drawn = |i: usize| {
+        style.borders[i].drawn
+            && style.borders[i].width > Au(0)
+            && !(i == 3 && !left)
+            && !(i == 1 && !right)
+    };
     if (0..4).any(drawn) {
         let side = |i: usize| {
             let b = style.borders[i];
