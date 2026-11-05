@@ -4,66 +4,115 @@
 
 #![cfg(unix)]
 
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Duration, Instant};
-
-use px_display::x11::X11Window;
 use px_display::x11::discover::Auth;
 use px_display::x11::proto;
-use px_display::{Display, DisplayEvent, WindowOptions};
-use px_paint::raster::Canvas;
+use px_display::{Display, DisplayEvent};
 use px_ui::geom::{Rect, Size};
 use px_ui::input::{Button, CursorShape, Event, Key, PointerKind, WindowAction};
 use px_ui::platform::PlatformWindow;
+use std::os::unix::net::UnixStream;
+use std::time::{Duration, Instant};
 
-static NEXT: AtomicU32 = AtomicU32::new(0);
+// Helpers live in a cfg(test) module so the workspace panic lints treat them like test code (clippy.toml).
+#[cfg(test)]
+mod h {
+    use std::os::unix::net::UnixStream;
+    use std::path::Path;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{Duration, Instant};
 
-struct Server {
-    child: Child,
-    number: u32,
-}
+    use px_display::x11::X11Window;
+    use px_display::x11::discover::Auth;
+    use px_display::{Display, DisplayEvent, WindowOptions};
+    use px_paint::raster::Canvas;
 
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = std::fs::remove_file(format!("/tmp/.X11-unix/X{}", self.number));
-        let _ = std::fs::remove_file(format!("/tmp/.X{}-lock", self.number));
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+
+    pub struct Server {
+        child: Child,
+        pub number: u32,
     }
-}
 
-fn start() -> Option<Server> {
-    let number = 300 + (std::process::id() % 500) + NEXT.fetch_add(1, Ordering::SeqCst) * 500;
-    let child = Command::new("Xvfb")
-        .arg(format!(":{number}"))
-        .args(["-screen", "0", "800x600x24", "-nolisten", "tcp"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let server = Server { child, number };
-    let sock = format!("/tmp/.X11-unix/X{number}");
-    let t = Instant::now();
-    while !Path::new(&sock).exists() {
-        if t.elapsed() > Duration::from_secs(10) {
-            return None;
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_file(format!("/tmp/.X11-unix/X{}", self.number));
+            let _ = std::fs::remove_file(format!("/tmp/.X{}-lock", self.number));
         }
-        std::thread::sleep(Duration::from_millis(20));
     }
-    Some(server)
+
+    pub fn start() -> Option<Server> {
+        let number = 300 + (std::process::id() % 500) + NEXT.fetch_add(1, Ordering::SeqCst) * 500;
+        let child = Command::new("Xvfb")
+            .arg(format!(":{number}"))
+            .args(["-screen", "0", "800x600x24", "-nolisten", "tcp"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let server = Server { child, number };
+        let sock = format!("/tmp/.X11-unix/X{number}");
+        let t = Instant::now();
+        while !Path::new(&sock).exists() {
+            if t.elapsed() > Duration::from_secs(10) {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Some(server)
+    }
+
+    pub fn open(s: &Server, w: u32, h: u32) -> X11Window {
+        let stream = UnixStream::connect(format!("/tmp/.X11-unix/X{}", s.number)).unwrap();
+        X11Window::connect(stream, &Auth::default(), &WindowOptions::new("test", w, h)).unwrap()
+    }
+
+    /// Poll `win` until `pred` accepts an event, up to two seconds.
+    pub fn wait_for(
+        win: &mut X11Window,
+        mut pred: impl FnMut(&DisplayEvent) -> bool,
+    ) -> Vec<DisplayEvent> {
+        let t = Instant::now();
+        let mut seen = Vec::new();
+        while t.elapsed() < Duration::from_secs(2) {
+            for e in win.wait_events(Some(Duration::from_millis(50))).unwrap() {
+                let hit = pred(&e);
+                seen.push(e);
+                if hit {
+                    return seen;
+                }
+            }
+        }
+        panic!("event never arrived; saw {seen:?}");
+    }
+
+    pub fn gradient(w: u32, h: u32) -> Canvas {
+        let mut c = Canvas::new(w, h).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                c.pixels[i] = (x % 256) as u8;
+                c.pixels[i + 1] = (y % 256) as u8;
+                c.pixels[i + 2] = 128;
+                c.pixels[i + 3] = 255;
+            }
+        }
+        c
+    }
+
+    pub fn pixel(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 3] {
+        let i = ((y * w + x) * 4) as usize;
+        [img[i + 2], img[i + 1], img[i]] // stored B,G,R,X
+    }
 }
 
-fn open(s: &Server, w: u32, h: u32) -> X11Window {
-    let stream = UnixStream::connect(format!("/tmp/.X11-unix/X{}", s.number)).unwrap();
-    X11Window::connect(stream, &Auth::default(), &WindowOptions::new("test", w, h)).unwrap()
-}
+use h::*;
 
 macro_rules! server {
     () => {
-        match start() {
+        match h::start() {
             Some(s) => s,
             None => {
                 eprintln!("SKIPPED: Xvfb is not available");
@@ -71,41 +120,6 @@ macro_rules! server {
             }
         }
     };
-}
-
-/// Poll `win` until `pred` accepts an event, up to two seconds.
-fn wait_for(win: &mut X11Window, mut pred: impl FnMut(&DisplayEvent) -> bool) -> Vec<DisplayEvent> {
-    let t = Instant::now();
-    let mut seen = Vec::new();
-    while t.elapsed() < Duration::from_secs(2) {
-        for e in win.wait_events(Some(Duration::from_millis(50))).unwrap() {
-            let hit = pred(&e);
-            seen.push(e);
-            if hit {
-                return seen;
-            }
-        }
-    }
-    panic!("event never arrived; saw {seen:?}");
-}
-
-fn gradient(w: u32, h: u32) -> Canvas {
-    let mut c = Canvas::new(w, h).unwrap();
-    for y in 0..h {
-        for x in 0..w {
-            let i = ((y * w + x) * 4) as usize;
-            c.pixels[i] = (x % 256) as u8;
-            c.pixels[i + 1] = (y % 256) as u8;
-            c.pixels[i + 2] = 128;
-            c.pixels[i + 3] = 255;
-        }
-    }
-    c
-}
-
-fn pixel(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 3] {
-    let i = ((y * w + x) * 4) as usize;
-    [img[i + 2], img[i + 1], img[i]] // stored B,G,R,X
 }
 
 #[test]
@@ -130,8 +144,8 @@ fn damage_changes_only_its_rectangle() {
     let mut frame = gradient(100, 100);
     win.present(&frame, Rect::new(0, 0, 100, 100)).unwrap();
     // New content everywhere, but only a 10x10 patch declared as damage.
-    for p in frame.pixels.chunks_exact_mut(4) {
-        p.copy_from_slice(&[255, 0, 0, 255]);
+    for p in frame.pixels.as_chunks_mut::<4>().0 {
+        *p = [255, 0, 0, 255];
     }
     win.present(&frame, Rect::new(40, 30, 10, 10)).unwrap();
     win.sync().unwrap();
@@ -156,7 +170,10 @@ fn a_large_frame_is_sent_whole_or_in_bands() {
     win.sync().unwrap();
     assert!(win.take_errors().is_empty());
     let img = win.get_image(Rect::new(0, 590, 800, 10)).unwrap();
-    assert_eq!(pixel(&img, 800, 700, 9), [(700 % 256) as u8, (599 % 256) as u8, 128]);
+    assert_eq!(
+        pixel(&img, 800, 700, 9),
+        [(700 % 256) as u8, (599 % 256) as u8, 128]
+    );
 }
 
 #[test]
@@ -185,8 +202,11 @@ fn another_client_can_send_keys_pointer_and_close() {
     // keycode 38 is "a" on a standard PC keymap; 36 is Return.
     send(&mut c, input(proto::EV_KEY_PRESS, 38, 0, 0, 0), 1);
     let seen = wait_for(&mut win, |e| matches!(e, DisplayEvent::Ui(Event::Text(_))));
-    assert!(seen.iter().any(|e| matches!(e,
-        DisplayEvent::Ui(Event::Key(k)) if k.key == Key::Char('a'))), "{seen:?}");
+    assert!(
+        seen.iter().any(|e| matches!(e,
+        DisplayEvent::Ui(Event::Key(k)) if k.key == Key::Char('a'))),
+        "{seen:?}"
+    );
     assert!(seen.contains(&DisplayEvent::Ui(Event::Text("a".into()))));
 
     send(&mut c, input(proto::EV_KEY_PRESS, 38, 0, 0, 1), 1); // Shift
@@ -196,12 +216,20 @@ fn another_client_can_send_keys_pointer_and_close() {
     // Ctrl+a is a shortcut: a key, no text.
     send(&mut c, input(proto::EV_KEY_PRESS, 38, 0, 0, 4), 1);
     let seen = wait_for(&mut win, |e| matches!(e, DisplayEvent::Ui(Event::Key(_))));
-    assert!(seen.iter().all(|e| !matches!(e, DisplayEvent::Ui(Event::Text(_)))));
+    assert!(
+        seen.iter()
+            .all(|e| !matches!(e, DisplayEvent::Ui(Event::Text(_))))
+    );
     let more = win.wait_events(Some(Duration::from_millis(100))).unwrap();
-    assert!(more.iter().all(|e| !matches!(e, DisplayEvent::Ui(Event::Text(_)))));
+    assert!(
+        more.iter()
+            .all(|e| !matches!(e, DisplayEvent::Ui(Event::Text(_))))
+    );
 
     send(&mut c, input(proto::EV_BUTTON_PRESS, 1, 12, 34, 0), 4);
-    let seen = wait_for(&mut win, |e| matches!(e, DisplayEvent::Ui(Event::Pointer(_))));
+    let seen = wait_for(&mut win, |e| {
+        matches!(e, DisplayEvent::Ui(Event::Pointer(_)))
+    });
     assert!(seen.iter().any(|e| matches!(e,
         DisplayEvent::Ui(Event::Pointer(p))
             if p.kind == PointerKind::Down(Button::Primary) && p.pos.x == 12 && p.pos.y == 34)));
@@ -209,7 +237,9 @@ fn another_client_can_send_keys_pointer_and_close() {
     // WM_DELETE_WINDOW.
     let atoms = {
         let a = c.round_trip(proto::intern_atom("WM_PROTOCOLS")).unwrap();
-        let b = c.round_trip(proto::intern_atom("WM_DELETE_WINDOW")).unwrap();
+        let b = c
+            .round_trip(proto::intern_atom("WM_DELETE_WINDOW"))
+            .unwrap();
         (a.u32_at(8).unwrap(), b.u32_at(8).unwrap())
     };
     let ev = proto::client_message_event(wid, atoms.0, [atoms.1, 0, 0, 0, 0]);
@@ -234,7 +264,9 @@ fn resizing_the_window_reports_a_new_size() {
     )
     .unwrap();
     c.sync().unwrap();
-    let seen = wait_for(&mut win, |e| matches!(e, DisplayEvent::Ui(Event::Resize(_))));
+    let seen = wait_for(&mut win, |e| {
+        matches!(e, DisplayEvent::Ui(Event::Resize(_)))
+    });
     assert!(seen.contains(&DisplayEvent::Ui(Event::Resize(Size::new(300, 150)))));
     assert_eq!(win.size(), Size::new(300, 150));
 }
@@ -299,7 +331,11 @@ fn losing_the_selection_forgets_the_text() {
 fn cursor_title_and_window_actions_are_accepted_by_the_server() {
     let srv = server!();
     let mut win = open(&srv, 100, 100);
-    for s in [CursorShape::Text, CursorShape::Pointer, CursorShape::Default] {
+    for s in [
+        CursorShape::Text,
+        CursorShape::Pointer,
+        CursorShape::Default,
+    ] {
         win.set_cursor(s);
     }
     win.window_action(WindowAction::Minimize);

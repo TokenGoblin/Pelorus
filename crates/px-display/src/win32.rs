@@ -39,40 +39,42 @@ use px_ui::platform::{PlatformError, PlatformWindow};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BeginPaint, DIB_RGB_COLORS, EndPaint, GetDC, HALFTONE,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, DIB_RGB_COLORS, EndPaint, GetDC, HALFTONE,
     PAINTSTRUCT, ReleaseDC, SRCCOPY, SetStretchBltMode, StretchDIBits,
 };
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
 };
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Memory::{
+    GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
+};
 use windows_sys::Win32::UI::HiDpi::{
-    AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
+    AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow,
+    SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Input::Ime::{
-    CANDIDATEFORM, CFS_CANDIDATEPOS, COMPOSITIONFORM, CFS_POINT, GCS_COMPSTR, GCS_RESULTSTR,
+    CANDIDATEFORM, CFS_CANDIDATEPOS, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
     IACE_DEFAULT, ImmAssociateContextEx, ImmGetCompositionStringW, ImmGetContext,
     ImmReleaseContext, ImmSetCandidateWindow, ImmSetCompositionWindow,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, MapVirtualKeyW, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT,
     TrackMouseEvent, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F12,
-    VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN,
-    VK_SHIFT, VK_TAB, VK_UP,
+    VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT,
+    VK_TAB, VK_UP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA,
-    GetClientRect, GetWindowLongPtrW, HTCLIENT, IDC_ARROW, IDC_HAND, IDC_IBEAM, IsZoomed,
-    LoadCursorW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
-    RegisterClassExW, SIZE_MINIMIZED, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-    WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-    WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY,
-    WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE,
-    WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
+    DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HTCLIENT,
+    IDC_ARROW, IDC_HAND, IDC_IBEAM, IsZoomed, LoadCursorW, MSG, MsgWaitForMultipleObjects,
+    PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassExW, SIZE_MINIMIZED, SW_MAXIMIZE,
+    SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, TranslateMessage, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KILLFOCUS,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS,
+    WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::{Display, DisplayError, DisplayEvent, WindowOptions};
@@ -143,7 +145,10 @@ fn key_down(vk: i32) -> bool {
 }
 
 fn modifiers() -> Modifiers {
-    let (mut ctrl, mut alt) = (key_down(i32::from(VK_CONTROL)), key_down(i32::from(VK_MENU)));
+    let (mut ctrl, mut alt) = (
+        key_down(i32::from(VK_CONTROL)),
+        key_down(i32::from(VK_MENU)),
+    );
     if ctrl && alt {
         // AltGr.
         ctrl = false;
@@ -210,12 +215,7 @@ fn ime_string(hwnd: HWND, what: u32) -> Option<String> {
         // SAFETY: `buf` is a live allocation of `bytes` bytes (rounded down to
         // whole units), and the call writes at most the length we pass.
         let got = unsafe {
-            ImmGetCompositionStringW(
-                himc,
-                what,
-                buf.as_mut_ptr().cast(),
-                (buf.len() * 2) as u32,
-            )
+            ImmGetCompositionStringW(himc, what, buf.as_mut_ptr().cast(), (buf.len() * 2) as u32)
         };
         if got >= 0 {
             buf.truncate(got as usize / 2);
@@ -362,7 +362,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     // boxed `State` that `Win32Window` owns until it destroys the window (the
     // pointer is cleared in WM_NCDESTROY). It is only turned into a shared
     // reference, and `State` mutates through Cell/RefCell.
-    let st: Option<&State> = unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State).as_ref() };
+    let st: Option<&State> =
+        unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State).as_ref() };
     let Some(st) = st else {
         // SAFETY: forwarding the system's own arguments.
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
@@ -446,7 +447,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             if let Some(key) = map_key(wp as u32) {
-                st.push(DisplayEvent::Ui(Event::Key(KeyEvent::with(key, modifiers()))));
+                st.push(DisplayEvent::Ui(Event::Key(KeyEvent::with(
+                    key,
+                    modifiers(),
+                ))));
             }
             if msg == WM_SYSKEYDOWN {
                 // SAFETY: forwarding the system's own arguments (Alt+F4 etc.).
@@ -616,7 +620,11 @@ impl Win32Window {
         // zero return is "already registered" on a second window, which is fine.
         unsafe { RegisterClassExW(&wc) };
 
-        let style = if opts.frameless { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
+        let style = if opts.frameless {
+            WS_POPUP
+        } else {
+            WS_OVERLAPPEDWINDOW
+        };
         let mut r = RECT {
             left: 0,
             top: 0,
@@ -694,7 +702,9 @@ impl PlatformWindow for Win32Window {
         );
         let need = fw as usize * fh as usize * 4;
         if frame.pixels.len() != need || need == 0 {
-            return Err(PlatformError::Present("frame buffer does not match its size".into()));
+            return Err(PlatformError::Present(
+                "frame buffer does not match its size".into(),
+            ));
         }
         {
             let mut bgra = self
@@ -707,7 +717,11 @@ impl PlatformWindow for Win32Window {
                 bgra.clear();
                 bgra.resize(need, 0);
             }
-            let d = if whole { Rect::new(0, 0, fw, fh) } else { damage };
+            let d = if whole {
+                Rect::new(0, 0, fw, fh)
+            } else {
+                damage
+            };
             let (x0, y0) = (d.x.max(0), d.y.max(0));
             let (x1, y1) = (d.right().min(fw), d.bottom().min(fh));
             for y in y0..y1.max(y0) {
@@ -716,13 +730,13 @@ impl PlatformWindow for Win32Window {
                 let (Some(src), Some(dst)) = (frame.pixels.get(a..b), bgra.get_mut(a..b)) else {
                     continue;
                 };
-                for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
-                    if let ([r, g, bl, _], [d0, d1, d2, d3]) = (s, d) {
-                        *d0 = *bl;
-                        *d1 = *g;
-                        *d2 = *r;
-                        *d3 = 255;
-                    }
+                let pairs = src
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(dst.as_chunks_mut::<4>().0);
+                for (&[r, g, bl, _], d) in pairs {
+                    *d = [bl, g, r, 255];
                 }
             }
         }
@@ -891,7 +905,9 @@ impl Display for Win32Window {
                     if left.is_zero() {
                         return Ok(Vec::new());
                     }
-                    u32::try_from(left.as_millis()).unwrap_or(INFINITE - 1).max(1)
+                    u32::try_from(left.as_millis())
+                        .unwrap_or(INFINITE - 1)
+                        .max(1)
                 }
             };
             // SAFETY: no handles to wait on (count 0, null array), wake on any

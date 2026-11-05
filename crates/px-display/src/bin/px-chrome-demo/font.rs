@@ -16,7 +16,11 @@ impl Noto {
     /// `PX_DEMO_FONT` names a TTF; otherwise the repository's bundled one.
     pub fn load() -> Result<Noto, String> {
         let path = std::env::var("PX_DEMO_FONT").unwrap_or_else(|_| {
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fonts/NotoSans-Regular.ttf").into()
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fonts/NotoSans-Regular.ttf"
+            )
+            .into()
         });
         let bytes = std::fs::read(&path).map_err(|e| format!("cannot read font {path}: {e}"))?;
         let font = Font::from_bytes(bytes).map_err(|e| format!("bad font {path}: {e:?}"))?;

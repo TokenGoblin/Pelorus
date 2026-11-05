@@ -147,8 +147,15 @@ fn real_main(light: bool, stop: Option<Instant>) -> Result<(), String> {
             let d = demo.borrow();
             let s = w.size();
             let mut list = px_paint::DisplayList::new();
-            paint::paint(&d.chrome, &font, theme, px_ui::geom::Point::default(), &mut list);
-            px_paint::raster::rasterize_with(&list, s.w.max(1) as u32, s.h.max(1) as u32, &font).ok()
+            paint::paint(
+                &d.chrome,
+                &font,
+                theme,
+                px_ui::geom::Point::default(),
+                &mut list,
+            );
+            px_paint::raster::rasterize_with(&list, s.w.max(1) as u32, s.h.max(1) as u32, &font)
+                .ok()
         },
     )
     .map_err(|e| e.to_string())

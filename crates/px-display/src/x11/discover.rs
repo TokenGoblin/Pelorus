@@ -83,8 +83,9 @@ fn be16(b: &[u8], i: usize) -> Option<u16> {
 /// `$XAUTHORITY` or `~/.Xauthority`. A missing cookie file is not an error
 /// (many servers allow local connections); a missing socket is.
 pub fn open() -> Result<(UnixStream, Auth), DisplayError> {
-    let display = std::env::var("DISPLAY")
-        .map_err(|_| DisplayError::Connect("DISPLAY is not set (no X server or XWayland?)".into()))?;
+    let display = std::env::var("DISPLAY").map_err(|_| {
+        DisplayError::Connect("DISPLAY is not set (no X server or XWayland?)".into())
+    })?;
     open_display(&display)
 }
 

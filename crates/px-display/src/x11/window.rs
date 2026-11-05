@@ -5,9 +5,7 @@ use std::time::Duration;
 use px_paint::raster::Canvas;
 use px_ui::chrome::PlatformConfig;
 use px_ui::geom::{Rect, Size};
-use px_ui::input::{
-    Button, CursorShape, Event, KeyEvent, PointerEvent, PointerKind, WindowAction,
-};
+use px_ui::input::{Button, CursorShape, Event, KeyEvent, PointerEvent, PointerKind, WindowAction};
 use px_ui::platform::{PlatformError, PlatformWindow};
 
 use super::conn::{Conn, RawEvent, Wait};
@@ -109,7 +107,14 @@ impl X11Window {
             | proto::MASK_STRUCTURE_NOTIFY
             | proto::MASK_FOCUS_CHANGE
             | proto::MASK_PROPERTY_CHANGE;
-        conn.send(proto::create_window(wid, s.root, 24, s.root_visual, (w, h), mask))?;
+        conn.send(proto::create_window(
+            wid,
+            s.root,
+            24,
+            s.root_visual,
+            (w, h),
+            mask,
+        ))?;
         conn.send(proto::create_gc(gc, wid))?;
 
         // Title, class, close protocol.
@@ -248,10 +253,11 @@ impl X11Window {
                     self.keymap.keysym(e.detail, e.state),
                 ) {
                     if let Some(key) = keys::logical_key(l0, sym) {
-                        self.out.push_back(DisplayEvent::Ui(Event::Key(KeyEvent::with(
-                            key,
-                            keys::modifiers(e.state),
-                        ))));
+                        self.out
+                            .push_back(DisplayEvent::Ui(Event::Key(KeyEvent::with(
+                                key,
+                                keys::modifiers(e.state),
+                            ))));
                     }
                     if let Some(t) = keys::text_of(sym, e.state) {
                         self.out.push_back(DisplayEvent::Ui(Event::Text(t)));
@@ -381,7 +387,11 @@ impl X11Window {
                 };
                 // The header and padding come out of the request budget.
                 if bytes.len() + 64 <= self.conn.max_request_bytes() {
-                    let ty = if target == a.utf8 { a.utf8 } else { proto::ATOM_STRING };
+                    let ty = if target == a.utf8 {
+                        a.utf8
+                    } else {
+                        proto::ATOM_STRING
+                    };
                     self.conn.send(proto::change_property(
                         requestor,
                         prop,
@@ -417,9 +427,9 @@ impl X11Window {
             }
             return Ok(());
         }
-        let rep = self
-            .conn
-            .round_trip(proto::get_property(self.wid, prop, true, MAX_CLIPBOARD / 4))?;
+        let rep =
+            self.conn
+                .round_trip(proto::get_property(self.wid, prop, true, MAX_CLIPBOARD / 4))?;
         let ty = rep.u32_at(8).unwrap_or(0);
         let after = rep.u32_at(12).unwrap_or(0);
         let len = rep.u32_at(16).unwrap_or(0) as usize;
@@ -437,8 +447,7 @@ impl X11Window {
         } else {
             return Ok(());
         };
-        self.out
-            .push_back(DisplayEvent::Ui(Event::Clipboard(text)));
+        self.out.push_back(DisplayEvent::Ui(Event::Clipboard(text)));
         Ok(())
     }
 
@@ -454,12 +463,12 @@ impl X11Window {
         if x1 <= x0 || y1 <= y0 {
             return Ok(());
         }
-        let (w, rows) = (usize::try_from(x1 - x0).unwrap_or(0), usize::try_from(y1 - y0).unwrap_or(0));
-        let (Ok(wx), Ok(sx), Ok(_)) = (
-            u16::try_from(w),
-            i16::try_from(x0),
-            i16::try_from(y0),
-        ) else {
+        let (w, rows) = (
+            usize::try_from(x1 - x0).unwrap_or(0),
+            usize::try_from(y1 - y0).unwrap_or(0),
+        );
+        let (Ok(wx), Ok(sx), Ok(_)) = (u16::try_from(w), i16::try_from(x0), i16::try_from(y0))
+        else {
             return Err(DisplayError::Protocol("damage out of range".into()));
         };
         let stride = frame.width as usize * 4;
@@ -475,18 +484,15 @@ impl X11Window {
             for row in 0..n {
                 let start = (y + row) * stride + x0 as usize * 4;
                 let src = frame.pixels.get(start..start + row_bytes).unwrap_or(&[]);
-                for px in src.chunks_exact(4) {
+                for &[r, g, b, _] in src.as_chunks::<4>().0 {
                     // RGBA -> B,G,R,X
-                    buf.extend_from_slice(&[
-                        px.get(2).copied().unwrap_or(0),
-                        px.get(1).copied().unwrap_or(0),
-                        px.first().copied().unwrap_or(0),
-                        0,
-                    ]);
+                    buf.extend_from_slice(&[b, g, r, 0]);
                 }
             }
             if buf.len() != n * row_bytes {
-                return Err(DisplayError::Protocol("frame buffer is shorter than its size".into()));
+                return Err(DisplayError::Protocol(
+                    "frame buffer is shorter than its size".into(),
+                ));
             }
             let (Ok(hn), Ok(dy)) = (u16::try_from(n), i16::try_from(y)) else {
                 return Err(DisplayError::Protocol("damage out of range".into()));
@@ -542,8 +548,11 @@ fn intern_all(conn: &mut Conn) -> Result<Atoms, DisplayError> {
         incr: g(12),
         text: g(13),
     };
-    if ids.len() != ATOM_NAMES.len() || [a.wm_protocols, a.delete, a.utf8, a.clipboard].contains(&0) {
-        return Err(DisplayError::Protocol("server would not intern atoms".into()));
+    if ids.len() != ATOM_NAMES.len() || [a.wm_protocols, a.delete, a.utf8, a.clipboard].contains(&0)
+    {
+        return Err(DisplayError::Protocol(
+            "server would not intern atoms".into(),
+        ));
     }
     Ok(a)
 }
@@ -559,11 +568,10 @@ fn fetch_keymap(conn: &mut Conn) -> Result<KeyMap, DisplayError> {
     let per = usize::from(r.detail);
     let syms: Vec<u32> = r
         .data_from(32)
-        .chunks_exact(4)
-        .filter_map(|c| match *c {
-            [a, b, c, d] => Some(u32::from_le_bytes([a, b, c, d])),
-            _ => None,
-        })
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
     Ok(KeyMap::new(min, per, syms))
 }
@@ -637,7 +645,12 @@ impl PlatformWindow for X11Window {
         let a = self.atoms;
         let r = self
             .conn
-            .send(proto::convert_selection(self.wid, a.clipboard, a.utf8, a.prop))
+            .send(proto::convert_selection(
+                self.wid,
+                a.clipboard,
+                a.utf8,
+                a.prop,
+            ))
             .map(|_| ());
         self.note(r);
     }

@@ -100,7 +100,8 @@ impl WindowOptions {
 pub trait Display: PlatformWindow {
     /// Wait up to `timeout` (forever for `None`) for events. Returns early with
     /// whatever has arrived; an empty vector means the wait timed out.
-    fn wait_events(&mut self, timeout: Option<Duration>) -> Result<Vec<DisplayEvent>, DisplayError>;
+    fn wait_events(&mut self, timeout: Option<Duration>)
+    -> Result<Vec<DisplayEvent>, DisplayError>;
 }
 
 /// The shared loop. `frame` is called whenever the window needs pixels and

@@ -11,6 +11,13 @@
 //! comparing (the old way was `ci/unsafe-audit.sh > ci/unsafe-baseline.json`;
 //! a gate prints a verdict on stdout, so redirecting it is no longer possible).
 //!
+//! Scope: the vendored dependency tree only. First-party unsafe (`px-sandbox`,
+//! and `px-display` since ADR 044) is policed by `cargo xtask unsafe-headers`,
+//! which requires a `SAFETY` comment on every block in `px-display`. The window
+//! layer adds no third-party crate, and the `windows-sys` features it enables
+//! move no number here because this counts every feature of a crate whether or
+//! not it is on.
+//!
 //! Why this counts text and not cargo-geiger: this is a security project, the
 //! count is a gate, and the gate should not depend on a thinly-maintained
 //! third-party tool that runs arbitrary build scripts to produce its number.

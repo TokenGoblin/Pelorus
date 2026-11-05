@@ -2,12 +2,17 @@
 //! (build-spec §4, CLAUDE.md). Port of `ci/gate-unsafe-headers.sh`.
 //!
 //! A source-text assertion, not a convention. Every crate's entry point must
-//! open with `#![forbid(unsafe_code)]`. Two crates are excepted, with
+//! open with `#![forbid(unsafe_code)]`. Three crates are excepted, with
 //! different rules, and the difference is the point:
 //!
 //! - `px-sandbox` (ADR 008) must carry `#![deny(unsafe_op_in_unsafe_fn)]` and
 //!   must NOT carry forbid, which would make the crate unable to do the one
 //!   job it exists for.
+//! - `px-display` (ADR 044, accepted 2026-11-05) has the same header rule as
+//!   `px-sandbox`, and two more that the gate enforces below: every unsafe
+//!   block carries a `SAFETY` comment, and no crate but the browser's
+//!   (`px-broker`) may depend on it, so that "no content, GPU or network
+//!   process can create a window" is a property of the dependency graph.
 //! - `px-css` (ADR 024) may drop forbid, because stylo's `TElement` declares
 //!   six unsafe fn methods and forbid rejects *implementing* an unsafe method.
 //!   In exchange the crate must contain zero unsafe blocks and zero unsafe
@@ -34,11 +39,17 @@ use std::path::{Path, PathBuf};
 
 const SANDBOX: &str = "px-sandbox";
 const STYLO_CRATE: &str = "px-css";
+/// The window layer (ADR 044). Same header rule as the sandbox.
+const DISPLAY: &str = "px-display";
+/// The only crates whose manifests may name `px-display`.
+const DISPLAY_DEPENDENTS: [&str; 1] = ["px-broker"];
+/// Lines above an unsafe block in which its `SAFETY` comment must appear.
+const SAFETY_LOOKBACK: usize = 8;
 
 /// Crates carrying `[lints] workspace = true`. px-ipc was added to that set
 /// and omitted here once, which left a waiver in the crate that decodes
 /// hostile bytes passing CI silently -- the exact bypass this scan exists for.
-const PANIC_LINT_CRATES: [&str; 11] = [
+const PANIC_LINT_CRATES: [&str; 12] = [
     "px-content",
     "px-net",
     "px-mcp",
@@ -50,6 +61,7 @@ const PANIC_LINT_CRATES: [&str; 11] = [
     "px-block",
     "px-update",
     "px-image",
+    "px-display",
 ];
 
 const PANIC_LINTS: [&str; 4] = ["unwrap_used", "expect_used", "indexing_slicing", "panic"];
@@ -78,7 +90,7 @@ pub enum Outcome {
 /// `entry` the repository-relative path used in the messages.
 pub fn check_entry(name: &str, entry: &str, src: &[u8]) -> Vec<Outcome> {
     let mut out = Vec::new();
-    if name == SANDBOX {
+    if name == SANDBOX || name == DISPLAY {
         if has_deny_op(src) {
             out.push(Outcome::Ok(format!("{entry} deny(unsafe_op_in_unsafe_fn)")));
         } else {
@@ -88,7 +100,7 @@ pub fn check_entry(name: &str, entry: &str, src: &[u8]) -> Vec<Outcome> {
         }
         if has_forbid(src) {
             out.push(Outcome::Fail(format!(
-                "{entry} carries forbid(unsafe_code); {SANDBOX} is the crate that needs unsafe"
+                "{entry} carries forbid(unsafe_code); {name} is a crate that needs unsafe"
             )));
         }
     } else if name == STYLO_CRATE {
@@ -334,8 +346,9 @@ fn check_unsafe_code_waivers(g: &mut Gate, root: &Path) {
         g.fail("the unsafe_code waiver scan matched no files at all");
     }
     let sandbox_prefix = format!("crates/{SANDBOX}/");
+    let display_prefix = format!("crates/{DISPLAY}/");
     for path in &paths {
-        if path.starts_with(&sandbox_prefix) {
+        if path.starts_with(&sandbox_prefix) || path.starts_with(&display_prefix) {
             continue;
         }
         // px-css is allowed to not carry forbid (ADR 024), so a waiver there is
@@ -347,7 +360,7 @@ fn check_unsafe_code_waivers(g: &mut Gate, root: &Path) {
             .unwrap_or_default();
         if !hits.is_empty() {
             g.fail(format!(
-                "{path} switches off unsafe_code locally; only {SANDBOX} may use unsafe"
+                "{path} switches off unsafe_code locally; only {SANDBOX} and {DISPLAY} may use unsafe"
             ));
             for (n, l) in hits.iter().take(5) {
                 g.detail(format!("{n}:{l}"));
@@ -433,10 +446,91 @@ fn check_css_counts(g: &mut Gate, root: &Path) {
     }
 }
 
+/// 1-based numbers of lines opening an unsafe block that have no `SAFETY`
+/// comment on the line or within the lines above it.
+pub fn blocks_without_safety_comment(src: &[u8]) -> Vec<usize> {
+    let lines: Vec<&[u8]> = src.split(|b| *b == b'\n').collect();
+    let mut bad = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if count_unsafe_lines(l, false) == 0 {
+            continue;
+        }
+        let from = i.saturating_sub(SAFETY_LOOKBACK);
+        let has = lines
+            .get(from..=i)
+            .unwrap_or(&[])
+            .iter()
+            .any(|l| l.windows(6).any(|w| w == b"SAFETY"));
+        if !has {
+            bad.push(i + 1);
+        }
+    }
+    bad
+}
+
+/// ADR 044: `px-display`'s unsafe is reviewed block by block, so each block
+/// says why it is sound.
+fn check_display_safety_comments(g: &mut Gate, root: &Path) {
+    let src_dir = root.join("crates").join(DISPLAY).join("src");
+    if !src_dir.is_dir() {
+        return;
+    }
+    let mut files = Vec::new();
+    walk_files(&src_dir, &mut files);
+    let (mut blocks, mut bad) = (0, 0);
+    for f in &files {
+        let b = std::fs::read(f).unwrap_or_default();
+        blocks += count_unsafe_lines(&b, false);
+        for n in blocks_without_safety_comment(&b) {
+            bad += 1;
+            g.fail(format!(
+                "{}:{n} unsafe block without a SAFETY comment (ADR 044)",
+                f.strip_prefix(root).unwrap_or(f).display()
+            ));
+        }
+    }
+    if bad == 0 {
+        g.ok(format!(
+            "{DISPLAY}: {blocks} unsafe block(s), each with a SAFETY comment"
+        ));
+    }
+}
+
+/// Only the browser binary may link the window layer (ADR 044).
+fn check_display_dependents(g: &mut Gate, root: &Path) {
+    let mut bad = false;
+    for name in sorted_names(&root.join("crates"), true) {
+        if name == DISPLAY || DISPLAY_DEPENDENTS.contains(&name.as_str()) {
+            continue;
+        }
+        let manifest = std::fs::read_to_string(root.join("crates").join(&name).join("Cargo.toml"))
+            .unwrap_or_default();
+        let names_it = manifest.lines().any(|l| {
+            l.trim_start()
+                .strip_prefix(DISPLAY)
+                .is_some_and(|r| r.trim_start().starts_with('='))
+        });
+        if names_it {
+            bad = true;
+            g.fail(format!(
+                "crates/{name}/Cargo.toml depends on {DISPLAY}; only {} may (ADR 044)",
+                DISPLAY_DEPENDENTS.join(", ")
+            ));
+        }
+    }
+    if !bad {
+        g.ok(format!(
+            "no process crate but the browser's depends on {DISPLAY}"
+        ));
+    }
+}
+
 pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
     if !check_headers(g, root) {
         return;
     }
+    check_display_safety_comments(g, root);
+    check_display_dependents(g, root);
     check_unsafe_code_waivers(g, root);
     check_panic_lint_waivers(g, root);
     check_css_counts(g, root);
@@ -576,7 +670,7 @@ mod tests {
         assert_eq!(
             g.failures(),
             [
-                "crates/px-a/src/m.rs switches off unsafe_code locally; only px-sandbox may use unsafe"
+                "crates/px-a/src/m.rs switches off unsafe_code locally; only px-sandbox and px-display may use unsafe"
             ]
         );
     }
@@ -631,6 +725,64 @@ mod tests {
         );
         assert_eq!(f.len(), 3 + 2);
         assert_eq!(f[3], "px-css contains 2 unsafe impl(s); ADR 024 says zero.");
+    }
+
+    #[test]
+    fn display_header_rule_is_the_sandbox_rule() {
+        let f = |n: &str, s: &str| check_entry(n, "p", s.as_bytes());
+        assert!(matches!(
+            f("px-display", "#![deny(unsafe_op_in_unsafe_fn)]\n")[0],
+            Outcome::Ok(_)
+        ));
+        assert!(matches!(f("px-display", FORBID)[0], Outcome::Fail(_)));
+        assert!(matches!(f("px-display", "")[0], Outcome::Fail(_)));
+    }
+
+    #[test]
+    fn display_unsafe_needs_a_safety_comment() {
+        let ok = b"// SAFETY: fine\nlet x = unsafe { f() };\n";
+        assert!(blocks_without_safety_comment(ok).is_empty());
+        let bad = b"fn a() {}\nlet x = unsafe { f() };\n";
+        assert_eq!(blocks_without_safety_comment(bad), [2]);
+        let far = b"// SAFETY: too far away\n\n\n\n\n\n\n\n\n\nlet x = unsafe { f() };\n";
+        assert_eq!(blocks_without_safety_comment(far), [11]);
+
+        let fx = Fixture::new("uh-display-safety");
+        healthy(&fx);
+        fx.write(
+            "crates/px-display/src/lib.rs",
+            "#![deny(unsafe_op_in_unsafe_fn)]\n",
+        )
+        .write("crates/px-display/src/w.rs", "fn f() { unsafe { g() } }\n");
+        let g = run_on(&fx);
+        assert_eq!(
+            g.failures(),
+            ["crates/px-display/src/w.rs:1 unsafe block without a SAFETY comment (ADR 044)"]
+        );
+    }
+
+    #[test]
+    fn only_the_browser_may_depend_on_the_window_layer() {
+        let fx = Fixture::new("uh-display-deps");
+        healthy(&fx);
+        fx.write(
+            "crates/px-display/src/lib.rs",
+            "#![deny(unsafe_op_in_unsafe_fn)]\n",
+        )
+        .write(
+            "crates/px-net/Cargo.toml",
+            "[dependencies]\n# px-display = \"x\"\npx-display = { path = \"../px-display\" }\n",
+        )
+        .write("crates/px-broker/src/lib.rs", FORBID)
+        .write(
+            "crates/px-broker/Cargo.toml",
+            "[dependencies]\npx-display = { path = \"../px-display\" }\n",
+        );
+        let g = run_on(&fx);
+        assert_eq!(
+            g.failures(),
+            ["crates/px-net/Cargo.toml depends on px-display; only px-broker may (ADR 044)"]
+        );
     }
 
     #[test]

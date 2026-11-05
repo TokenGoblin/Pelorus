@@ -62,7 +62,7 @@ pub fn char_of(sym: u32) -> Option<char> {
     match sym {
         0x20..=0x7e | 0xa0..=0xff => char::from_u32(sym),
         0x0100_0100..=0x0110_ffff => char::from_u32(sym - 0x0100_0000),
-        0xff80 => Some(' '),            // KP_Space
+        0xff80 => Some(' '), // KP_Space
         0xffaa..=0xffb9 => {
             // Keypad operators and digits.
             char::from_u32(sym - 0xff80)

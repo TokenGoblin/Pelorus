@@ -299,11 +299,7 @@ pub enum Message {
         body: Vec<u8>,
     },
     /// The 32-byte event, high "sent" bit cleared in `code`.
-    Event {
-        code: u8,
-        sent: bool,
-        raw: [u8; 32],
-    },
+    Event { code: u8, sent: bool, raw: [u8; 32] },
 }
 
 /// Decode one message from the front of `buf`. `Ok(None)` means more bytes are
@@ -483,7 +479,14 @@ pub fn create_gc(gc: u32, drawable: u32) -> Req {
 }
 
 /// ZPixmap `PutImage`. `data` is `w*h*4` bytes of B,G,R,X.
-pub fn put_image(drawable: u32, gc: u32, (w, h): (u16, u16), (x, y): (i16, i16), depth: u8, data: &[u8]) -> Req {
+pub fn put_image(
+    drawable: u32,
+    gc: u32,
+    (w, h): (u16, u16),
+    (x, y): (i16, i16),
+    depth: u8,
+    data: &[u8],
+) -> Req {
     Req::new(OP_PUT_IMAGE, 2)
         .u32(drawable)
         .u32(gc)
@@ -498,7 +501,10 @@ pub fn put_image(drawable: u32, gc: u32, (w, h): (u16, u16), (x, y): (i16, i16),
 }
 
 pub fn get_keyboard_mapping(first: u8, count: u8) -> Req {
-    Req::new(OP_GET_KEYBOARD_MAPPING, 0).u8(first).u8(count).zeros(2)
+    Req::new(OP_GET_KEYBOARD_MAPPING, 0)
+        .u8(first)
+        .u8(count)
+        .zeros(2)
 }
 
 pub fn set_selection_owner(owner: u32, selection: u32) -> Req {
@@ -611,7 +617,9 @@ mod tests {
         let b = intern_atom("WM_PROTOCOLS").finish(false).unwrap();
         assert_eq!(b.len() % 4, 0);
         assert_eq!(u16::from_le_bytes([b[2], b[3]]) as usize * 4, b.len());
-        let b = put_image(1, 2, (3, 1), (0, 0), 24, &[0; 12]).finish(false).unwrap();
+        let b = put_image(1, 2, (3, 1), (0, 0), 24, &[0; 12])
+            .finish(false)
+            .unwrap();
         assert_eq!(u16::from_le_bytes([b[2], b[3]]) as usize * 4, b.len());
         assert_eq!(b[0], OP_PUT_IMAGE);
         assert_eq!(b[1], 2);
@@ -620,8 +628,14 @@ mod tests {
     #[test]
     fn big_requests_use_the_extended_header() {
         let data = vec![0u8; 300_000];
-        assert!(change_property(1, 2, 3, 8, 300_000, &data).finish(false).is_err());
-        let b = change_property(1, 2, 3, 8, 300_000, &data).finish(true).unwrap();
+        assert!(
+            change_property(1, 2, 3, 8, 300_000, &data)
+                .finish(false)
+                .is_err()
+        );
+        let b = change_property(1, 2, 3, 8, 300_000, &data)
+            .finish(true)
+            .unwrap();
         assert_eq!(&b[2..4], &[0, 0]);
         let words = u32::from_le_bytes([b[4], b[5], b[6], b[7]]) as usize;
         assert_eq!(words * 4, b.len());
@@ -635,7 +649,14 @@ mod tests {
         assert_eq!(parse_message(&ev[..31]), Ok(None));
         let (m, n) = parse_message(&ev).unwrap().unwrap();
         assert_eq!(n, 32);
-        assert!(matches!(m, Message::Event { code: 2, sent: true, .. }));
+        assert!(matches!(
+            m,
+            Message::Event {
+                code: 2,
+                sent: true,
+                ..
+            }
+        ));
 
         let mut rep = vec![0u8; 36];
         rep[0] = 1;
@@ -679,6 +700,9 @@ mod tests {
             SetupReply::Failed(m) => assert_eq!(m, "nope"),
             _ => panic!("expected failure"),
         }
-        assert!(matches!(parse_setup(&b[..9]).unwrap(), SetupReply::Incomplete));
+        assert!(matches!(
+            parse_setup(&b[..9]).unwrap(),
+            SetupReply::Incomplete
+        ));
     }
 }

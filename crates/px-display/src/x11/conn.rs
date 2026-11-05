@@ -41,7 +41,9 @@ impl Reply {
         proto::Reader::new(&self.body).u32_at(orig_offset.checked_sub(8)?)
     }
     pub fn data_from(&self, orig_offset: usize) -> &[u8] {
-        self.body.get(orig_offset.saturating_sub(8)..).unwrap_or(&[])
+        self.body
+            .get(orig_offset.saturating_sub(8)..)
+            .unwrap_or(&[])
     }
 }
 
@@ -118,7 +120,9 @@ impl Conn {
     }
 
     pub fn enable_big_requests(&mut self, max_words: u32) {
-        let bytes = (max_words as usize).saturating_mul(4).min(proto::MAX_MESSAGE);
+        let bytes = (max_words as usize)
+            .saturating_mul(4)
+            .min(proto::MAX_MESSAGE);
         if bytes > self.max_req_bytes {
             self.big = true;
             self.max_req_bytes = bytes;
@@ -215,7 +219,9 @@ impl Conn {
 
     fn file(&mut self, m: Message) {
         match m {
-            Message::Event { code, sent, raw } => self.events.push_back(RawEvent { code, sent, raw }),
+            Message::Event { code, sent, raw } => {
+                self.events.push_back(RawEvent { code, sent, raw })
+            }
             Message::Error {
                 code,
                 seq,
@@ -237,10 +243,19 @@ impl Conn {
         loop {
             while let Some(m) = self.next_message()? {
                 match m {
-                    Message::Reply { seq: s, detail, body } if s == seq => {
+                    Message::Reply {
+                        seq: s,
+                        detail,
+                        body,
+                    } if s == seq => {
                         return Ok(Reply { detail, body });
                     }
-                    Message::Error { seq: s, code, major, .. } if s == seq => {
+                    Message::Error {
+                        seq: s,
+                        code,
+                        major,
+                        ..
+                    } if s == seq => {
                         return Err(DisplayError::Protocol(format!(
                             "X error {code} from request opcode {major}"
                         )));
@@ -249,7 +264,9 @@ impl Conn {
                 }
             }
             if !self.fill(Wait::For(REPLY_TIMEOUT))? {
-                return Err(DisplayError::Protocol("timed out waiting for the server".into()));
+                return Err(DisplayError::Protocol(
+                    "timed out waiting for the server".into(),
+                ));
             }
         }
     }
@@ -270,7 +287,9 @@ fn read_retry(s: &mut UnixStream, buf: &mut [u8]) -> Result<usize, DisplayError>
         match s.read(buf) {
             Err(e) if e.kind() == ErrorKind::Interrupted => {}
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
-                return Err(DisplayError::Connect("the server did not answer the handshake".into()));
+                return Err(DisplayError::Connect(
+                    "the server did not answer the handshake".into(),
+                ));
             }
             r => return r.map_err(Into::into),
         }
