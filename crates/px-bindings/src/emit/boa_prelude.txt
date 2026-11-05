@@ -1,0 +1,335 @@
+use ::boa_engine::object::builtins::JsArray;
+use ::boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
+use ::boa_engine::property::{Attribute, PropertyDescriptor};
+use ::boa_engine::{
+    js_string, Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue,
+    NativeFunction,
+};
+use ::std::cell::RefCell;
+use ::std::collections::BTreeMap;
+use ::std::num::NonZeroU32;
+use ::std::rc::Rc;
+
+/// Native data of every platform object: handle index, handle generation,
+/// index into `INTERFACES`. A tuple because it is already `Trace + JsData`.
+pub type Wrapped = (u32, u32, u32);
+
+/// An interface and its inheritance chain, itself first.
+pub struct Interface {
+    pub name: &'static str,
+    pub chain: &'static [&'static str],
+}
+
+/// The host, shared with the glue through the context's host-defined data.
+pub struct HostSlot<H: 'static>(pub Rc<RefCell<H>>);
+
+/// Prototype objects by interface name.
+pub struct Prototypes(pub BTreeMap<&'static str, JsObject>);
+
+type Native = fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ConvMode {
+    Wrap,
+    EnforceRange,
+    Clamp,
+}
+
+#[allow(dead_code)]
+fn type_error(message: &str) -> JsError {
+    JsNativeError::typ().with_message(message.to_owned()).into()
+}
+
+#[allow(dead_code)]
+fn host_error(e: rt::HostError) -> JsError {
+    match e {
+        rt::HostError::Stale => type_error("the object no longer exists"),
+        rt::HostError::Type(m) => JsNativeError::typ().with_message(m).into(),
+        rt::HostError::Range(m) => JsNativeError::range().with_message(m).into(),
+        rt::HostError::Dom { name, message } => JsNativeError::error()
+            .with_message(format!("{name}: {message}"))
+            .into(),
+        rt::HostError::NotSupported(m) => JsNativeError::typ().with_message(m).into(),
+    }
+}
+
+/// Run `f` on the host. A re-entrant call finds the host borrowed and throws.
+#[allow(dead_code)]
+fn with_host<H: 'static, R>(
+    ctx: &mut Context,
+    f: impl FnOnce(&mut H) -> rt::HostResult<R>,
+) -> JsResult<R> {
+    let slot = ctx
+        .get_data::<HostSlot<H>>()
+        .ok_or_else(|| type_error("no host installed"))?
+        .0
+        .clone();
+    let mut guard = slot
+        .try_borrow_mut()
+        .map_err(|_| type_error("the host is busy"))?;
+    f(&mut guard).map_err(host_error)
+}
+
+#[allow(dead_code)]
+fn interface_index(name: &str) -> Option<u32> {
+    INTERFACES
+        .iter()
+        .position(|i| i.name == name)
+        .and_then(|p| u32::try_from(p).ok())
+}
+
+/// The handle behind `v`, if `v` is a platform object that is, or inherits
+/// from, interface `want`.
+#[allow(dead_code)]
+fn this_handle<T>(v: &JsValue, want: &str) -> JsResult<rt::Handle<T>> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| type_error("illegal invocation"))?;
+    let data = obj
+        .downcast_ref::<Wrapped>()
+        .ok_or_else(|| type_error("illegal invocation"))?;
+    let (index, generation, iface) = *data;
+    let ok = usize::try_from(iface)
+        .ok()
+        .and_then(|i| INTERFACES.get(i))
+        .is_some_and(|i| i.chain.contains(&want));
+    let generation = NonZeroU32::new(generation).filter(|_| ok);
+    match generation {
+        Some(g) => Ok(rt::Handle::new(index, g)),
+        None => Err(type_error("illegal invocation")),
+    }
+}
+
+/// A script object for `h`, whose static type is `static_interface`.
+#[allow(dead_code)]
+fn wrap<H: ScriptHost, T>(
+    ctx: &mut Context,
+    static_interface: &'static str,
+    h: rt::Handle<T>,
+) -> JsResult<JsValue> {
+    let (index, generation) = (h.index(), h.generation().get());
+    let dynamic = with_host::<H, _>(ctx, |host| {
+        Ok(host.dynamic_interface(static_interface, index, generation))
+    })?;
+    let name = dynamic.unwrap_or(static_interface);
+    let id = interface_index(name).ok_or_else(|| type_error("unknown interface"))?;
+    let derives = INTERFACES
+        .get(usize::try_from(id).unwrap_or(usize::MAX))
+        .is_some_and(|i| i.chain.contains(&static_interface));
+    if !derives {
+        return Err(type_error("host named an unrelated interface"));
+    }
+    let proto = ctx
+        .get_data::<Prototypes>()
+        .and_then(|p| p.0.get(name))
+        .cloned();
+    let obj = JsObject::from_proto_and_data(proto, (index, generation, id));
+    Ok(JsValue::from(obj))
+}
+
+/// WebIDL ConvertToInt (section 3.2.4). The result fits `bits`/`signed`.
+#[allow(dead_code)]
+fn conv_int(
+    v: &JsValue,
+    ctx: &mut Context,
+    bits: u8,
+    signed: bool,
+    mode: ConvMode,
+) -> JsResult<i128> {
+    let n = v.to_number(ctx)?;
+    let n = if n == 0.0 { 0.0 } else { n };
+    let (mut lower, mut upper): (i128, i128) = if signed {
+        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
+    } else {
+        (0, (1i128 << bits) - 1)
+    };
+    if bits == 64 && mode != ConvMode::Wrap {
+        let cap = (1i128 << 53) - 1;
+        upper = upper.min(cap);
+        lower = lower.max(-cap);
+    }
+    // Every f64 in these ranges is exactly representable as i128 when cast.
+    let (lo, hi) = (lower as f64, upper as f64);
+    match mode {
+        ConvMode::EnforceRange => {
+            if !n.is_finite() {
+                return Err(type_error("value is not a finite number"));
+            }
+            let t = n.trunc();
+            if t < lo || t > hi {
+                return Err(JsNativeError::typ()
+                    .with_message("value is outside the allowed range")
+                    .into());
+            }
+            Ok(t as i128)
+        }
+        ConvMode::Clamp => {
+            if n.is_nan() {
+                return Ok(0);
+            }
+            Ok(n.clamp(lo, hi).round_ties_even() as i128)
+        }
+        ConvMode::Wrap => {
+            if !n.is_finite() || n == 0.0 {
+                return Ok(0);
+            }
+            let t = n.trunc();
+            // |t| can exceed i128 only for absurd exponents: reduce first.
+            let modulus = (1u128 << bits) as f64;
+            let r = t.rem_euclid(modulus) as i128;
+            let m = 1i128 << bits;
+            Ok(if signed && r >= m / 2 { r - m } else { r })
+        }
+    }
+}
+
+/// WebIDL float/double conversion. Restricted types reject non-finite values.
+#[allow(dead_code)]
+fn conv_float(v: &JsValue, ctx: &mut Context, double: bool, unrestricted: bool) -> JsResult<f64> {
+    let n = v.to_number(ctx)?;
+    let n = if double { n } else { f64::from(n as f32) };
+    if !unrestricted && !n.is_finite() {
+        return Err(type_error("value is not a finite number"));
+    }
+    Ok(n)
+}
+
+/// DOMString and USVString. Lone surrogates become U+FFFD (exact for
+/// USVString, lossy for DOMString: see `docs/phase-11-bindings.md`).
+#[allow(dead_code)]
+fn conv_string(v: &JsValue, ctx: &mut Context, null_to_empty: bool) -> JsResult<String> {
+    if null_to_empty && v.is_null() {
+        return Ok(String::new());
+    }
+    Ok(v.to_string(ctx)?.to_std_string_lossy())
+}
+
+/// ByteString: every code unit must be at most 255.
+#[allow(dead_code)]
+fn conv_byte_string(v: &JsValue, ctx: &mut Context) -> JsResult<Vec<u8>> {
+    v.to_string(ctx)?
+        .to_vec()
+        .into_iter()
+        .map(|u| u8::try_from(u).map_err(|_| type_error("not a ByteString")))
+        .collect()
+}
+
+#[allow(dead_code)]
+fn illegal_constructor(_: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
+    Err(type_error("illegal constructor"))
+}
+
+#[allow(dead_code)]
+fn make_proto(ctx: &mut Context, parent: Option<JsObject>) -> JsObject {
+    let proto = ObjectInitializer::new(ctx).build();
+    if parent.is_some() {
+        proto.set_prototype(parent);
+    }
+    proto
+}
+
+#[allow(dead_code)]
+fn make_constructor(
+    ctx: &mut Context,
+    name: &'static str,
+    native: Native,
+    proto: &JsObject,
+    parent: Option<JsObject>,
+) -> JsResult<JsObject> {
+    let f = FunctionObjectBuilder::new(ctx.realm(), NativeFunction::from_fn_ptr(native))
+        .name(JsString::from(name))
+        .constructor(true)
+        .build();
+    let ctor: JsObject = f.into();
+    if parent.is_some() {
+        ctor.set_prototype(parent);
+    }
+    ctor.define_property_or_throw(
+        js_string!("prototype"),
+        PropertyDescriptor::builder()
+            .value(proto.clone())
+            .writable(false)
+            .enumerable(false)
+            .configurable(false),
+        ctx,
+    )?;
+    proto.define_property_or_throw(
+        js_string!("constructor"),
+        PropertyDescriptor::builder()
+            .value(ctor.clone())
+            .writable(true)
+            .enumerable(false)
+            .configurable(true),
+        ctx,
+    )?;
+    Ok(ctor)
+}
+
+#[allow(dead_code)]
+fn make_function(ctx: &mut Context, name: &str, f: Native, length: usize) -> JsValue {
+    FunctionObjectBuilder::new(ctx.realm(), NativeFunction::from_fn_ptr(f))
+        .name(JsString::from(name))
+        .length(length)
+        .build()
+        .into()
+}
+
+#[allow(dead_code)]
+fn def_method(
+    ctx: &mut Context,
+    target: &JsObject,
+    name: &'static str,
+    f: Native,
+    length: usize,
+) -> JsResult<()> {
+    let func = make_function(ctx, name, f, length);
+    target.define_property_or_throw(
+        JsString::from(name),
+        PropertyDescriptor::builder()
+            .value(func)
+            .writable(true)
+            .enumerable(true)
+            .configurable(true),
+        ctx,
+    )?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn def_accessor(
+    ctx: &mut Context,
+    target: &JsObject,
+    name: &'static str,
+    get: Option<Native>,
+    set: Option<Native>,
+) -> JsResult<()> {
+    let mut d = PropertyDescriptor::builder().enumerable(true).configurable(true);
+    if let Some(g) = get {
+        d = d.get(make_function(ctx, name, g, 0));
+    }
+    if let Some(s) = set {
+        d = d.set(make_function(ctx, name, s, 1));
+    }
+    target.define_property_or_throw(JsString::from(name), d, ctx)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn def_const(
+    ctx: &mut Context,
+    target: &JsObject,
+    name: &'static str,
+    value: JsValue,
+) -> JsResult<()> {
+    target.define_property_or_throw(
+        JsString::from(name),
+        PropertyDescriptor::builder()
+            .value(value)
+            .writable(false)
+            .enumerable(true)
+            .configurable(false),
+        ctx,
+    )?;
+    Ok(())
+}

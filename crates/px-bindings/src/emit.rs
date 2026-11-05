@@ -1021,3 +1021,6 @@ fn variant_names(values: &[String]) -> Vec<String> {
         .map(|v| claims.claim(variant_ident(v)))
         .collect()
 }
+
+mod boa;
+pub use boa::BoaGlueEmitter;

@@ -3,8 +3,11 @@
 //! `px-bindgen`: run the generator over IDL files.
 //!
 //! ```text
-//! cargo run -p px-bindings --bin px-bindgen -- [--lenient] [--out FILE] PATH...
+//! cargo run -p px-bindings --bin px-bindgen -- [--lenient] [--out FILE] [--boa-out FILE] PATH...
 //! ```
+//!
+//! `--boa-out FILE` also runs the Boa glue emitter and writes `boa.rs` there;
+//! without it only the host traits are generated.
 //!
 //! Each `PATH` is an `.idl` file or a directory whose `.idl` files are read in
 //! sorted name order (so output does not depend on directory order). With no
@@ -15,7 +18,7 @@
 //! This is the only place in the crate that touches the file system: it is a
 //! build-time tool, and the library itself is pure text in, text out.
 
-use px_bindings::emit::{Emitter, RustHostEmitter};
+use px_bindings::emit::{BoaGlueEmitter, Emitter, RustHostEmitter};
 use px_bindings::resolve::BuildOptions;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -39,6 +42,7 @@ fn collect(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
 fn run() -> Result<(), Vec<String>> {
     let mut lenient = false;
     let mut out_path: Option<PathBuf> = None;
+    let mut boa_out: Option<PathBuf> = None;
     let mut inputs: Vec<PathBuf> = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -48,12 +52,16 @@ fn run() -> Result<(), Vec<String>> {
                 Some(p) => out_path = Some(PathBuf::from(p)),
                 None => return Err(vec!["--out needs a file name".to_owned()]),
             },
+            "--boa-out" => match args.next() {
+                Some(p) => boa_out = Some(PathBuf::from(p)),
+                None => return Err(vec!["--boa-out needs a file name".to_owned()]),
+            },
             other => inputs.push(PathBuf::from(other)),
         }
     }
     if inputs.is_empty() {
         return Err(vec![
-            "usage: px-bindgen [--lenient] [--out FILE] PATH...".to_owned(),
+            "usage: px-bindgen [--lenient] [--out FILE] [--boa-out FILE] PATH...".to_owned(),
         ]);
     }
     let mut files = Vec::new();
@@ -68,10 +76,18 @@ fn run() -> Result<(), Vec<String>> {
     let opts = BuildOptions {
         require_exposed: !lenient,
     };
-    let emitters: [&dyn Emitter; 1] = [&RustHostEmitter];
+    let mut emitters: Vec<&dyn Emitter> = vec![&RustHostEmitter];
+    if boa_out.is_some() {
+        emitters.push(&BoaGlueEmitter);
+    }
     let outputs = px_bindings::generate(&sources, opts, &emitters)?;
     for o in outputs {
-        match &out_path {
+        let dest = if o.path == "boa.rs" {
+            &boa_out
+        } else {
+            &out_path
+        };
+        match dest {
             Some(p) => {
                 std::fs::write(p, o.contents).map_err(|e| vec![format!("{}: {e}", p.display())])?
             }
