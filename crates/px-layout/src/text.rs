@@ -1138,11 +1138,11 @@ impl<'a> Prepared<'a> {
     }
 
     /// The content of one line, in visual order, left to right, positioned from
-    /// the line's start edge. `extra_space` is added to every space and one more app
-    /// unit to the first `remainder` of them
+    /// the line's start edge. `extra_space` is added to every space, and `remainder` as
+    /// well to the first one
     /// (justification).
     #[must_use]
-    pub fn line_runs(&self, line: &LineBreak, extra_space: Au, remainder: usize) -> LineContent {
+    pub fn line_runs(&self, line: &LineBreak, extra_space: Au, remainder: Au) -> LineContent {
         let mut remainder = remainder;
         let (a, e) = (line.start, line.content_end);
         let visual: Vec<bidi::Run> = match &self.bidi {
@@ -1255,11 +1255,8 @@ impl<'a> Prepared<'a> {
                                 }
                                 if ch == Some(' ') {
                                     advance += extra_space;
-                                    if remainder > 0 {
-                                        // One app unit of what did not divide evenly.
-                                        remainder -= 1;
-                                        advance += Au(1);
-                                    }
+                                    // What did not divide evenly goes to the first space.
+                                    advance += std::mem::replace(&mut remainder, Au(0));
                                 }
                                 if !g.atomic {
                                     placed.push((
@@ -1512,7 +1509,7 @@ mod tests {
     fn text_mixed_line_has_one_run_per_face_with_the_right_ids() {
         let p = Prepared::new("ab שלום", noto(20));
         let l = p.next_line(0, px(1000)).expect("a line");
-        let runs = p.line_runs(&l, Au(0), 0).runs;
+        let runs = p.line_runs(&l, Au(0), Au(0)).runs;
         let hebrew = resolve_font(["Noto Sans Hebrew"]);
         assert!(
             runs.iter()

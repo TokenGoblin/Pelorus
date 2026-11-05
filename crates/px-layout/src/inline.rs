@@ -78,7 +78,7 @@ use style::properties::ComputedValues;
 
 use crate::block::Edges;
 use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree, RunDeco, TextRun};
-use crate::geom::{LogicalEdges, LogicalSize};
+use crate::geom::{LogicalEdges, LogicalSize, px};
 use crate::text::{
     self, Align, Atomic, Deco, Edge, OBJECT, Prepared, StyleRange, TextStyle, WhiteSpace,
 };
@@ -675,19 +675,18 @@ pub(crate) fn layout_lines(
             .map_or(0, |s| s.bytes().filter(|b| *b == b' ').count());
         let justify = style.align == Align::Justify && !line.last && !line.forced && spaces > 0;
         // Justification spreads the slack over the spaces in whole app units: every
-        // space gets `each`, and the first `remainder` spaces one unit more, so the
-        // line is exactly full.
+        // space gets `each`, and the first one also what did not divide, so the line
+        // is exactly full.
         let n = i32::try_from(spaces).unwrap_or(i32::MAX).max(1);
         let (shift, extra_space, remainder) = match style.align {
-            Align::Justify if justify => (
-                Au(0),
-                Au(slack.0 / n),
-                usize::try_from(slack.0 % n).unwrap_or(0),
-            ),
-            Align::Right => (slack, Au(0), 0),
-            Align::Center => (slack / 2, Au(0), 0),
-            Align::Justify if style.rtl => (slack, Au(0), 0),
-            Align::Left | Align::Justify => (Au(0), Au(0), 0),
+            Align::Justify if justify => {
+                let each = slack / n;
+                (Au(0), each, slack - each * n)
+            }
+            Align::Right => (slack, Au(0), Au(0)),
+            Align::Center => (slack / 2, Au(0), Au(0)),
+            Align::Justify if style.rtl => (slack, Au(0), Au(0)),
+            Align::Left | Align::Justify => (Au(0), Au(0), Au(0)),
         };
         let shift = shift + indent_left;
         let width = if justify {
@@ -903,10 +902,17 @@ pub(crate) fn run_deco(style: &TextStyle, deco: Deco) -> RunDeco {
     if deco.is_none() {
         return RunDeco::default();
     }
-    const PX: i32 = 60;
     let m = style.metrics();
-    let thickness = Au(((style.size.0 / 16 + PX / 2) / PX).max(1) * PX);
-    let snap = |v: Au| Au((v.0 + PX / 2).div_euclid(PX) * PX);
+    let half = px(1) / 2;
+    let thickness = px((style.size / 16 + half).to_px().max(1));
+    // To whole pixels, half away from zero.
+    let snap = |v: Au| {
+        if v < Au(0) {
+            Au(0) - px((Au(0) - v + half).to_px())
+        } else {
+            px((v + half).to_px())
+        }
+    };
     RunDeco {
         under: deco.under,
         over: deco.over,

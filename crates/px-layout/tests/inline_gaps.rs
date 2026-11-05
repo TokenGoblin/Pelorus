@@ -456,8 +456,8 @@ fn layout_inline_gaps_an_atomic_inside_a_raised_span_is_raised_with_it() {
 #[test]
 fn layout_inline_gaps_justify_gives_the_remainder_to_the_first_spaces() {
     // Width 151 over "a b c d e f g h" (15 glyphs, 150px, seven spaces): 1px is 60
-    // app units, 8 each with 4 over, so the first four spaces take one more and the
-    // line is exactly 151px.
+    // app units, 8 each with 4 over, so the first space takes the 4 over and the line
+    // is exactly 151px.
     let l = lay(
         "<div style='width: 151px; text-align: justify'>a b c d e f g h iiiiiiiiiiiiiiiiiiiiiiii</div>",
         "",
