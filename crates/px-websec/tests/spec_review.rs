@@ -168,7 +168,7 @@ fn meta_referrer_legacy_keywords() {
     assert_eq!(m("NEVER"), Some(P::NoReferrer));
     assert_eq!(m("always"), Some(P::UnsafeUrl));
     assert_eq!(m("origin-when-crossorigin"), Some(P::OriginWhenCrossOrigin));
-    assert_eq!(m("default"), Some(P::NoReferrerWhenDowngrade));
+    assert_eq!(m("default"), None, "mapping of legacy `default` not guessed");
     assert_eq!(m("no-referrer"), Some(P::NoReferrer));
     assert_eq!(m("bogus"), None);
     // The attribute form does not accept legacy keywords.

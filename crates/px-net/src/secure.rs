@@ -1170,7 +1170,7 @@ impl<'a> SecureFetcher<'a> {
                     );
                     return HopResult::Denied;
                 }
-                Ok(md) if md.is_enforced() => {
+                Ok(md) if md.needs_check() => {
                     if let Err(e) = sri::verify(&md, taint, &body) {
                         out.deny("sri::verify", ViolationKind::Sri(e), url, format!("{e:?}"));
                         return HopResult::Denied;

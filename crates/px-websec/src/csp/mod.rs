@@ -63,9 +63,10 @@
 //!   deny-all policy. Unknown directives past
 //!   [`policy::MAX_UNKNOWN_DIRECTIVES`] are dropped (no effect on
 //!   enforcement). Directive names that are not `[A-Za-z0-9-]+` are skipped.
-//! * `frame-ancestors` ignores policy paths and is not applied for
-//!   report-only or `<meta>` policies; `sandbox` is not applied for those
-//!   either; `upgrade-insecure-requests` is not applied when report-only.
+//! * `frame-ancestors` ignores policy paths and is not applied for `<meta>`
+//!   policies (it is evaluated for report-only ones, producing reports only);
+//!   `sandbox` is not applied for report-only or `<meta>` policies;
+//!   `upgrade-insecure-requests` is not applied when report-only.
 
 pub mod check;
 pub mod policy;

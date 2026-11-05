@@ -82,14 +82,28 @@ pub struct HashExpr {
 /// Parsed integrity metadata: the recognised hash expressions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Metadata {
-    /// Recognised, well-formed expressions in order.
+    /// Recognised-algorithm expressions in order. A token whose digest does
+    /// not decode, or has the wrong length, is kept with an empty `digest`:
+    /// it can never match, so the load fails (it must not silently disable
+    /// the check).
     pub hashes: Vec<HashExpr>,
+    /// Whether the value held any token at all. SRI "parse metadata" returns
+    /// "no metadata" only for an empty value; a value with only unknown
+    /// algorithms is an empty *set*, which still requires an eligible
+    /// response.
+    pub had_tokens: bool,
 }
 
 impl Metadata {
     /// Whether any integrity check will actually be performed.
     pub fn is_enforced(&self) -> bool {
         !self.hashes.is_empty()
+    }
+
+    /// Whether [`verify`] must be consulted at all (it is the only place the
+    /// eligibility rule is applied).
+    pub fn needs_check(&self) -> bool {
+        self.had_tokens
     }
 
     /// The strongest algorithm present.
@@ -173,15 +187,26 @@ pub fn parse(value: &str) -> Result<Metadata, SriError> {
         let Some(algorithm) = Algorithm::from_token(alg) else {
             continue;
         };
-        let Some(digest) = base64_decode(b64) else {
-            continue;
-        };
-        if digest.len() != algorithm.digest_len() {
+        // Grammar: 1*(ALPHA / DIGIT / "+" / "/" / "-" / "_") *2("="). A token
+        // that fails it is not valid metadata and is skipped.
+        let body = b64.trim_end_matches('=');
+        if body.is_empty()
+            || b64.len() - body.len() > 2
+            || !body
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'-' | b'_'))
+        {
             continue;
         }
+        let digest = base64_decode(b64)
+            .filter(|d| d.len() == algorithm.digest_len())
+            .unwrap_or_default();
         hashes.push(HashExpr { algorithm, digest });
     }
-    Ok(Metadata { hashes })
+    Ok(Metadata {
+        hashes,
+        had_tokens: count > 0,
+    })
 }
 
 /// A response is eligible for integrity validation only if it is
@@ -199,12 +224,17 @@ pub fn verify_with(
     digest: &dyn Fn(Algorithm, &[u8]) -> Vec<u8>,
 ) -> Result<(), SriError> {
     trace::hit("sri::verify");
-    let Some(strongest) = metadata.strongest() else {
+    // SRI "does response match metadataList": no metadata => true; then
+    // eligibility; only then does an empty set mean true.
+    if !metadata.had_tokens && metadata.hashes.is_empty() {
         return Ok(());
-    };
+    }
     if !eligible(tainting) {
         return Err(SriError::NotEligible);
     }
+    let Some(strongest) = metadata.strongest() else {
+        return Ok(());
+    };
     let actual = digest(strongest, body);
     if metadata
         .hashes
@@ -266,16 +296,17 @@ mod tests {
     #[test]
     fn parse_accepts_and_ignores() {
         let m = parse(&format!(
-            "sha256-{S256} sha384-{S384}?opt=1 md5-AAAA bogus sha512-short"
+            "sha256-{S256} sha384-{S384}?opt=1 md5-AAAA bogus"
         ))
         .unwrap();
         assert_eq!(m.hashes.len(), 2);
         assert_eq!(m.strongest(), Some(Algorithm::Sha384));
         assert!(parse("").unwrap().hashes.is_empty());
         assert!(!parse("md5-AAAA").unwrap().is_enforced());
-        // Case-insensitive algorithm, wrong digest length ignored.
+        // Case-insensitive algorithm; a wrong-length digest is still metadata
+        // (it can never match, so the load fails: SRI "parse metadata").
         assert!(parse(&format!("SHA256-{S256}")).unwrap().is_enforced());
-        assert!(!parse(&format!("sha256-{S384}")).unwrap().is_enforced());
+        assert!(parse(&format!("sha256-{S384}")).unwrap().is_enforced());
         // Whitespace variety.
         assert_eq!(
             parse(&format!("\tsha256-{S256}\n\nsha256-{S256}  "))

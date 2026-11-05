@@ -564,7 +564,7 @@ pub fn check_base_uri(policy: &Policy, url: &CspUrl, origin: &Origin) -> Decisio
 /// `frame-ancestors` (CSP3 §6.3.2): every ancestor, from the parent up to
 /// the top, must match. `response_url` supplies `'self'`. The path-part of a
 /// host-source is ignored (matches the redirect-count rule), so a path never
-/// reveals or depends on an ancestor's URL. Not applied for report-only or
+/// reveals or depends on an ancestor's URL. Report-only policies are evaluated (the set turns the block into a report); not applied for
 /// `<meta>` policies. An empty chain (top-level) is never a violation.
 pub fn check_frame_ancestors(
     policy: &Policy,
@@ -572,7 +572,9 @@ pub fn check_frame_ancestors(
     ancestors: &[CspUrl],
 ) -> Decision {
     mark("frame-ancestors");
-    if policy.disposition() == Disposition::Report || policy.source() == PolicySource::Meta {
+    // Report-only policies are evaluated too: `PolicySet::evaluate` turns
+    // their blocks into reports, never into enforcement.
+    if policy.source() == PolicySource::Meta {
         return Decision::Allowed;
     }
     let Some(list) = policy.source_list("frame-ancestors") else {
@@ -1607,7 +1609,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_ancestors_ignored_for_report_only_and_meta() {
+    fn frame_ancestors_reports_for_report_only_and_ignored_for_meta() {
         let me = url("https://page.example/doc");
         let anc = [url("https://other.test/")];
         let ro = Policy::parse(
@@ -1616,7 +1618,10 @@ mod tests {
             PolicySource::Header,
         )
         .unwrap();
-        assert!(!check_frame_ancestors(&ro, &me, &anc).is_blocked());
+        assert!(
+            check_frame_ancestors(&ro, &me, &anc).is_blocked(),
+            "per-policy decision; PolicySet downgrades it to a report"
+        );
         let meta = Policy::from_directives(
             pol("frame-ancestors 'none'").directives().to_vec(),
             Disposition::Enforce,
