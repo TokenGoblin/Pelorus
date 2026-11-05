@@ -69,6 +69,7 @@
 use crate::display_list::{
     BorderSide, BorderStyle, Color, DisplayList, FontId, Item, ListError, Rect,
 };
+use crate::round::Shape;
 use crate::glyph::{self, Mask, PathCmd, Scale};
 use crate::png;
 use std::collections::BTreeMap;
@@ -277,7 +278,13 @@ enum Side {
     Left,
 }
 
-fn draw_border(cv: &mut Canvas, clip: PxRect, rect: &Rect, sides: &[BorderSide; 4]) {
+fn draw_border(
+    cv: &mut Canvas,
+    clip: &Clip,
+    rect: &Rect,
+    sides: &[BorderSide; 4],
+    rounded: Option<&Shape>,
+) {
     let outer = snap_rect(rect);
     if outer.is_empty() {
         return;
@@ -391,23 +398,137 @@ fn draw_border(cv: &mut Canvas, clip: PxRect, rect: &Rect, sides: &[BorderSide; 
         }
     };
 
-    let vis = outer.intersect(clip);
+    let vis = outer.intersect(clip.rect);
     if vis.is_empty() {
+        return;
+    }
+    if let Some(shape) = rounded {
+        // The ring between the outer shape and the padding edge. Every pixel
+        // the inner shape fully contains is skipped; the rest take their side's
+        // colour (mitred as above) at the ring's coverage.
+        let inner = shape.inner(ix0, iy0, ix1, iy1);
+        for py in vis.y0..vis.y1 {
+            let (a, b) = match &inner {
+                Some(i) if py >= iy0 && py < iy1 => i.solid_span(py),
+                _ => (vis.x1, vis.x1),
+            };
+            for px in vis.x0..vis.x1 {
+                if px >= a && px < b {
+                    continue;
+                }
+                let cov = shape.ring_coverage(inner.as_ref(), px, py);
+                if cov > 0 {
+                    plot(cv, clip, px, py, color(owner(px, py)), cov);
+                }
+            }
+        }
         return;
     }
     for py in vis.y0..vis.y1 {
         let in_band_row = py < iy0 || py >= iy1;
         if in_band_row {
             for px in vis.x0..vis.x1 {
-                cv.put(px, py, color(owner(px, py)));
+                plot(cv, clip, px, py, color(owner(px, py)), 255);
             }
         } else {
             for px in vis.x0..vis.x1.min(ix0) {
-                cv.put(px, py, color(owner(px, py)));
+                plot(cv, clip, px, py, color(owner(px, py)), 255);
             }
             for px in vis.x0.max(ix1)..vis.x1 {
-                cv.put(px, py, color(owner(px, py)));
+                plot(cv, clip, px, py, color(owner(px, py)), 255);
             }
+        }
+    }
+}
+
+/// The current clip: a pixel rectangle and any number of rounded shapes (from
+/// [`Item::PushRoundedClip`]) whose coverages multiply into it.
+#[derive(Clone, Debug)]
+struct Clip {
+    rect: PxRect,
+    rounds: Vec<Shape>,
+}
+
+impl Clip {
+    /// The clip's coverage of pixel `(x, y)` from its rounded shapes, `0..=255`
+    /// (255 if there are none). The rectangle is checked by the caller.
+    fn factor(&self, x: i64, y: i64) -> u32 {
+        let mut f = 255u32;
+        for s in &self.rounds {
+            let c = s.coverage(x, y);
+            f = (f * c + 127) / 255;
+            if f == 0 {
+                break;
+            }
+        }
+        f
+    }
+}
+
+/// Blend `color` at pixel `(x, y)` with coverage `cov` (0..=255) and the clip's
+/// rounded shapes. `(x, y)` is inside the canvas and the clip rectangle.
+fn plot(cv: &mut Canvas, clip: &Clip, x: i64, y: i64, color: Color, cov: u32) {
+    let cov = if clip.rounds.is_empty() {
+        cov
+    } else {
+        (cov * clip.factor(x, y) + 127) / 255
+    };
+    if cov == 0 {
+        return;
+    }
+    let a = if cov >= 255 {
+        u32::from(color.a)
+    } else {
+        (u32::from(color.a) * cov + 127) / 255
+    };
+    cv.put(
+        x,
+        y,
+        Color {
+            a: a as u8,
+            ..color
+        },
+    );
+}
+
+fn fill_rounded(cv: &mut Canvas, clip: &Clip, shape: &Shape, color: Color) {
+    if color.a == 0 {
+        return;
+    }
+    let vis = PxRect {
+        x0: shape.x0,
+        y0: shape.y0,
+        x1: shape.x1,
+        y1: shape.y1,
+    }
+    .intersect(clip.rect);
+    if vis.is_empty() {
+        return;
+    }
+    for py in vis.y0..vis.y1 {
+        let (a, b) = shape.solid_span(py);
+        let a = a.clamp(vis.x0, vis.x1);
+        let b = b.clamp(a, vis.x1);
+        for px in vis.x0..a {
+            plot(cv, clip, px, py, color, shape.coverage(px, py));
+        }
+        if clip.rounds.is_empty() {
+            cv.fill(
+                PxRect {
+                    x0: a,
+                    y0: py,
+                    x1: b,
+                    y1: py + 1,
+                },
+                color,
+            );
+        } else {
+            for px in a..b {
+                plot(cv, clip, px, py, color, 255);
+            }
+        }
+        for px in b..vis.x1 {
+            plot(cv, clip, px, py, color, shape.coverage(px, py));
         }
     }
 }
@@ -479,21 +600,55 @@ pub fn rasterize_with(
     }
     list.validate().map_err(RasterError::BadList)?;
     let mut cache = MaskCache::default();
-    let full = PxRect {
-        x0: 0,
-        y0: 0,
-        x1: viewport_width_px as i64,
-        y1: viewport_height_px as i64,
+    let mut clip = Clip {
+        rect: PxRect {
+            x0: 0,
+            y0: 0,
+            x1: viewport_width_px as i64,
+            y1: viewport_height_px as i64,
+        },
+        rounds: Vec::new(),
     };
-    let mut stack: Vec<PxRect> = Vec::new();
-    let mut clip = full;
+    let mut stack: Vec<Clip> = Vec::new();
     for item in &list.items {
         match item {
             Item::FillRect { rect, color } | Item::TextRun { rect, color } => {
-                let r = snap_rect(rect).intersect(clip);
-                cv.fill(r, *color);
+                let r = snap_rect(rect).intersect(clip.rect);
+                if clip.rounds.is_empty() {
+                    cv.fill(r, *color);
+                } else if !r.is_empty() && color.a > 0 {
+                    for y in r.y0..r.y1 {
+                        for x in r.x0..r.x1 {
+                            plot(&mut cv, &clip, x, y, *color, 255);
+                        }
+                    }
+                }
             }
-            Item::Border { rect, sides } => draw_border(&mut cv, clip, rect, sides),
+            Item::Border { rect, sides } => draw_border(&mut cv, &clip, rect, sides, None),
+            Item::FillRoundedRect { shape, color } => {
+                fill_rounded(&mut cv, &clip, &Shape::from_item(shape), *color);
+            }
+            Item::RoundedBorder { shape, sides } => {
+                let sh = Shape::from_item(shape);
+                let rounded = sh.is_rounded().then_some(&sh);
+                draw_border(&mut cv, &clip, &shape.rect, sides, rounded);
+            }
+            Item::PushRoundedClip { shape } => {
+                if stack.len() >= MAX_CLIP_DEPTH {
+                    return Err(RasterError::ClipTooDeep);
+                }
+                let sh = Shape::from_item(shape);
+                stack.push(clip.clone());
+                clip.rect = clip.rect.intersect(PxRect {
+                    x0: sh.x0,
+                    y0: sh.y0,
+                    x1: sh.x1,
+                    y1: sh.y1,
+                });
+                if sh.is_rounded() {
+                    clip.rounds.push(sh);
+                }
+            }
             Item::GlyphRun {
                 font,
                 size,
@@ -506,10 +661,13 @@ pub fn rasterize_with(
                 else {
                     continue;
                 };
-                if clip.is_empty() {
+                if clip.rect.is_empty() {
                     continue;
                 }
-                let clip_t = (clip.x0, clip.y0, clip.x1, clip.y1);
+                let clip_t = (clip.rect.x0, clip.rect.y0, clip.rect.x1, clip.rect.y1);
+                let shaped = |x: i64, y: i64| clip.factor(x, y);
+                let shape_fn: Option<&dyn Fn(i64, i64) -> u32> =
+                    if clip.rounds.is_empty() { None } else { Some(&shaped) };
                 for g in glyphs {
                     let (Ok(ox), Ok(oy)) = (
                         i32::try_from(snap(g.x.0 as i64)),
@@ -518,7 +676,7 @@ pub fn rasterize_with(
                         continue;
                     };
                     if let Some(mask) = cache.get(source, *font, size64, g.glyph_id) {
-                        glyph::composite_mask_clipped(&mut cv, mask, ox, oy, *color, clip_t);
+                        glyph::composite_mask_shaped(&mut cv, mask, ox, oy, *color, clip_t, shape_fn);
                     }
                 }
             }
@@ -526,8 +684,11 @@ pub fn rasterize_with(
                 if stack.len() >= MAX_CLIP_DEPTH {
                     return Err(RasterError::ClipTooDeep);
                 }
-                stack.push(clip);
-                clip = clip.intersect(snap_rect(rect));
+                let next = Clip {
+                    rect: clip.rect.intersect(snap_rect(rect)),
+                    rounds: clip.rounds.clone(),
+                };
+                stack.push(std::mem::replace(&mut clip, next));
             }
             Item::PopClip => {
                 clip = stack.pop().ok_or(RasterError::UnbalancedClips)?;

@@ -18,10 +18,13 @@
 
 use px_ipc::gpu::{
     MAX_FRAME_DIMENSION, MAX_FRAME_PIXELS, MAX_STRIP_BYTES, WireBorderSide, WireBorderStyle,
-    WireColor, WireGlyph, WireItem, WireRect,
+    WireColor, WireCorner, WireGlyph, WireItem, WireRect, WireRoundedRect,
 };
 use px_layout::geom::{Au, au};
-use px_paint::{BorderSide, BorderStyle, Canvas, Color, FontId, Item, PositionedGlyph, Rect};
+use px_paint::{
+    BorderSide, BorderStyle, Canvas, Color, Corner, CornerShape, FontId, Item, PositionedGlyph,
+    Rect, RoundedRect,
+};
 
 /// A wire value that is not a display item layout could have produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +100,47 @@ fn side_from_wire(side: &WireBorderSide) -> Result<BorderSide, BadCoordinate> {
     })
 }
 
+fn shape_to_wire(shape: &RoundedRect) -> WireRoundedRect {
+    WireRoundedRect {
+        rect: rect_to_wire(&shape.rect),
+        corners: shape.corners.map(|c| {
+            let (concave, n16) = match c.shape {
+                CornerShape::Convex(n) => (false, n),
+                CornerShape::Concave(n) => (true, n),
+            };
+            WireCorner {
+                rx: c.rx.0,
+                ry: c.ry.0,
+                concave,
+                n16,
+            }
+        }),
+    }
+}
+
+fn shape_from_wire(shape: &WireRoundedRect) -> Result<RoundedRect, BadCoordinate> {
+    let corner = |c: &WireCorner| -> Result<Corner, BadCoordinate> {
+        Ok(Corner {
+            rx: to_au(c.rx)?,
+            ry: to_au(c.ry)?,
+            shape: if c.concave {
+                CornerShape::Concave(c.n16)
+            } else {
+                CornerShape::Convex(c.n16)
+            },
+        })
+    };
+    Ok(RoundedRect {
+        rect: rect_from_wire(&shape.rect)?,
+        corners: [
+            corner(&shape.corners[0])?,
+            corner(&shape.corners[1])?,
+            corner(&shape.corners[2])?,
+            corner(&shape.corners[3])?,
+        ],
+    })
+}
+
 /// A display item as it crosses the boundary.
 pub fn item_to_wire(item: &Item) -> WireItem {
     match item {
@@ -121,6 +165,22 @@ pub fn item_to_wire(item: &Item) -> WireItem {
             rect: rect_to_wire(rect),
         },
         Item::PopClip => WireItem::PopClip,
+        Item::FillRoundedRect { shape, color } => WireItem::FillRoundedRect {
+            shape: shape_to_wire(shape),
+            color: color_to_wire(*color),
+        },
+        Item::RoundedBorder { shape, sides } => WireItem::RoundedBorder {
+            shape: shape_to_wire(shape),
+            sides: [
+                side_to_wire(&sides[0]),
+                side_to_wire(&sides[1]),
+                side_to_wire(&sides[2]),
+                side_to_wire(&sides[3]),
+            ],
+        },
+        Item::PushRoundedClip { shape } => WireItem::PushRoundedClip {
+            shape: shape_to_wire(shape),
+        },
         Item::GlyphRun {
             font,
             size,
@@ -179,6 +239,22 @@ pub fn item_from_wire(item: &WireItem) -> Result<Item, BadCoordinate> {
             rect: rect_from_wire(rect)?,
         },
         WireItem::PopClip => Item::PopClip,
+        WireItem::FillRoundedRect { shape, color } => Item::FillRoundedRect {
+            shape: shape_from_wire(shape)?,
+            color: color_from_wire(*color),
+        },
+        WireItem::RoundedBorder { shape, sides } => Item::RoundedBorder {
+            shape: shape_from_wire(shape)?,
+            sides: [
+                side_from_wire(&sides[0])?,
+                side_from_wire(&sides[1])?,
+                side_from_wire(&sides[2])?,
+                side_from_wire(&sides[3])?,
+            ],
+        },
+        WireItem::PushRoundedClip { shape } => Item::PushRoundedClip {
+            shape: shape_from_wire(shape)?,
+        },
         WireItem::GlyphRun {
             font,
             size,

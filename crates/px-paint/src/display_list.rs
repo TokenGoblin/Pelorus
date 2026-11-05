@@ -74,6 +74,164 @@ pub struct BorderSide {
     pub color: Color,
 }
 
+/// The shape of one corner: `superellipse(K)` of CSS Borders 4 (`corner-shape`),
+/// carried as an integer so that no float reaches the rasterizer.
+///
+/// The curve is `u^n + v^n = 1` with `n = 2^K`, where `u` and `v` run from 0 at
+/// the corner box's inner edges to 1 at its outer edges. `n16` is `n` in 1/16
+/// (so `round`, `K = 1`, `n = 2`, is 32; `squircle`, `K = 2`, `n = 4`, is 64;
+/// `bevel`, `K = 0`, `n = 1`, is 16). [`CornerShape::INFINITE`] stands for
+/// `K = infinity` (`square`) or `-infinity` (`notch`) and every `n` the
+/// rasterizer cannot tell from it. `Concave` is `K < 0`: the same curve mirrored,
+/// bulging into the box (`scoop` is `K = -1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerShape {
+    /// `K >= 0`.
+    Convex(u16),
+    /// `K < 0`, with `n = 2^-K`.
+    Concave(u16),
+}
+
+impl CornerShape {
+    /// `n16` standing for an infinite exponent.
+    pub const INFINITE: u16 = u16::MAX;
+    /// `round`, the initial value of `corner-shape`.
+    pub const ROUND: CornerShape = CornerShape::Convex(32);
+    /// `squircle`.
+    pub const SQUIRCLE: CornerShape = CornerShape::Convex(64);
+    /// `bevel`.
+    pub const BEVEL: CornerShape = CornerShape::Convex(16);
+    /// `scoop`.
+    pub const SCOOP: CornerShape = CornerShape::Concave(32);
+    /// `square`: the corner is not cut at all.
+    pub const SQUARE: CornerShape = CornerShape::Convex(Self::INFINITE);
+    /// `notch`: the whole corner box is cut away.
+    pub const NOTCH: CornerShape = CornerShape::Concave(Self::INFINITE);
+
+    /// Is this corner a plain right angle whatever its radii?
+    pub fn is_square(self) -> bool {
+        self == Self::SQUARE
+    }
+}
+
+/// One corner of a [`RoundedRect`]: an elliptical radius and a shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Corner {
+    /// Horizontal radius.
+    pub rx: Au,
+    /// Vertical radius.
+    pub ry: Au,
+    pub shape: CornerShape,
+}
+
+impl Corner {
+    pub const SQUARE_CORNER: Corner = Corner {
+        rx: Au(0),
+        ry: Au(0),
+        shape: CornerShape::ROUND,
+    };
+
+    /// Does this corner cut anything?
+    pub fn is_rounded(&self) -> bool {
+        self.rx.0 > 0 && self.ry.0 > 0 && !self.shape.is_square()
+    }
+}
+
+/// A rectangle with four independently shaped corners, in the order top-left,
+/// top-right, bottom-right, bottom-left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoundedRect {
+    pub rect: Rect,
+    pub corners: [Corner; 4],
+}
+
+impl RoundedRect {
+    /// `rect` with `corners`, radii made non-negative and scaled down so that
+    /// they do not overlap (see [`RoundedRect::clamped`]).
+    pub fn new(rect: Rect, corners: [Corner; 4]) -> RoundedRect {
+        RoundedRect { rect, corners }.clamped()
+    }
+
+    /// Does any corner cut anything? A list item whose shape is not rounded is
+    /// better emitted as its plain rectangle form.
+    pub fn is_rounded(&self) -> bool {
+        self.corners.iter().any(Corner::is_rounded)
+    }
+
+    /// CSS Backgrounds 3 section 5.5 (overlapping curves): negative radii become
+    /// zero; then, with `f = min(L_i / S_i)` over the four sides (`L` the side's
+    /// length, `S` the sum of the two radii along it), if `f < 1` every radius is
+    /// multiplied by `f`. Integer arithmetic, each radius `r` becoming
+    /// `floor(r * L / S)` for the binding side, so the sums never exceed the
+    /// sides. Idempotent.
+    #[must_use]
+    pub fn clamped(self) -> RoundedRect {
+        let mut c = self.corners;
+        for k in &mut c {
+            k.rx = Au(k.rx.0.max(0));
+            k.ry = Au(k.ry.0.max(0));
+        }
+        let w = i64::from(self.rect.width.0.max(0));
+        let h = i64::from(self.rect.height.0.max(0));
+        let sums = [
+            (w, i64::from(c[0].rx.0) + i64::from(c[1].rx.0)),
+            (w, i64::from(c[3].rx.0) + i64::from(c[2].rx.0)),
+            (h, i64::from(c[0].ry.0) + i64::from(c[3].ry.0)),
+            (h, i64::from(c[1].ry.0) + i64::from(c[2].ry.0)),
+        ];
+        // The binding side: the smallest L / S, compared by cross-multiplication.
+        let mut best: Option<(i64, i64)> = None;
+        for (l, s) in sums {
+            if s > l && best.is_none_or(|(bl, bs)| l * bs < bl * s) {
+                best = Some((l, s));
+            }
+        }
+        if let Some((l, s)) = best {
+            for k in &mut c {
+                k.rx = Au(scale(k.rx.0, l, s));
+                k.ry = Au(scale(k.ry.0, l, s));
+            }
+        }
+        RoundedRect {
+            rect: self.rect,
+            corners: c,
+        }
+    }
+
+    /// The same shape shrunk by border widths `[top, right, bottom, left]`: the
+    /// padding edge, with each radius reduced by the width of the adjacent
+    /// sides (never below zero), as CSS Backgrounds 3 section 5.2 does for the
+    /// inner border edge.
+    #[must_use]
+    pub fn inset(self, widths: [Au; 4]) -> RoundedRect {
+        let [t, r, b, l] = widths.map(|w| w.0.max(0));
+        let sub = |v: Au, d: i32| Au(v.0.saturating_sub(d).max(0));
+        let mut c = self.corners;
+        c[0].rx = sub(c[0].rx, l);
+        c[0].ry = sub(c[0].ry, t);
+        c[1].rx = sub(c[1].rx, r);
+        c[1].ry = sub(c[1].ry, t);
+        c[2].rx = sub(c[2].rx, r);
+        c[2].ry = sub(c[2].ry, b);
+        c[3].rx = sub(c[3].rx, l);
+        c[3].ry = sub(c[3].ry, b);
+        RoundedRect {
+            rect: Rect {
+                x: Au(self.rect.x.0.saturating_add(l)),
+                y: Au(self.rect.y.0.saturating_add(t)),
+                width: Au((self.rect.width.0 - l - r).max(0)),
+                height: Au((self.rect.height.0 - t - b).max(0)),
+            },
+            corners: c,
+        }
+    }
+}
+
+/// `floor(v * l / s)` for `0 <= v <= s`, `s > 0`; never above `v`.
+fn scale(v: i32, l: i64, s: i64) -> i32 {
+    i32::try_from((i64::from(v) * l.max(0)) / s.max(1)).unwrap_or(0)
+}
+
 /// A font as the display list names it. The number is meaningful only between
 /// the producer of a list and whoever supplies glyph outlines for it (the
 /// [`crate::raster::GlyphSource`]); `px-paint` does not know what a font is.
@@ -159,6 +317,23 @@ pub enum Item {
         rect: Rect,
     },
     PopClip,
+    /// Fill a rounded rectangle (a background with `border-radius`): anti-aliased
+    /// coverage on an integer grid, see [`crate::raster`].
+    FillRoundedRect {
+        shape: RoundedRect,
+        color: Color,
+    },
+    /// A border around a rounded `shape`: the ring between the shape and the
+    /// shape inset by the side widths. Sides in CSS order.
+    RoundedBorder {
+        shape: RoundedRect,
+        sides: [BorderSide; 4],
+    },
+    /// As [`Item::PushClip`], but the clip is a rounded rectangle. Closed by the
+    /// same [`Item::PopClip`].
+    PushRoundedClip {
+        shape: RoundedRect,
+    },
 }
 
 /// Items in paint order, back to front.
@@ -249,7 +424,7 @@ impl DisplayList {
         let mut depth = 0usize;
         for item in &self.items {
             match item {
-                Item::PushClip { .. } => depth += 1,
+                Item::PushClip { .. } | Item::PushRoundedClip { .. } => depth += 1,
                 Item::PopClip => match depth.checked_sub(1) {
                     Some(d) => depth = d,
                     None => return false,

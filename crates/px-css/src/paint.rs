@@ -45,6 +45,48 @@ pub struct PaintBorder {
     pub color: Rgba,
 }
 
+/// One radius component as painting sees it: `abs + pct * basis`, where `basis`
+/// is the border-box width (horizontal radius) or height (vertical radius).
+///
+/// A `<length-percentage>` is linear in its basis (`calc()` with `min`/`max` is
+/// not, and is approximated by its value at the two sample points). Storing the
+/// two coefficients keeps the conversion here, where floats are allowed, and the
+/// resolution against the box in `px-paint`, where they are not.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RadiusLen {
+    /// The length part.
+    pub abs: Au,
+    /// The percentage part in 1/65536: `basis * pct / 65536` Au.
+    pub pct: i32,
+}
+
+/// The shape of one corner: `corner-*-shape` as the exponent of its
+/// superellipse. See `px_paint::display_list::CornerShape`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerKind {
+    /// `superellipse(K)` for `K >= 0` (`round` is 1, `squircle` 2, `bevel` 0),
+    /// as `n = 2^K` in 1/16, saturated. `square` (K = infinity) is `u16::MAX`.
+    Convex(u16),
+    /// `K < 0` (`scoop` is -1), as `n = 2^-K` in 1/16. `notch` is `u16::MAX`.
+    Concave(u16),
+}
+
+impl CornerKind {
+    /// `round`, the initial value.
+    pub const ROUND: CornerKind = CornerKind::Convex(32);
+}
+
+/// One corner: elliptical radii and shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintCorner {
+    /// Horizontal radius.
+    pub x: RadiusLen,
+    /// Vertical radius.
+    pub y: RadiusLen,
+    /// `corner-*-shape`.
+    pub kind: CornerKind,
+}
+
 /// What painting reads from one element's computed style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaintStyle {
@@ -73,6 +115,51 @@ pub struct PaintStyle {
     /// `float` is not `none` (and the box is not absolutely positioned, which
     /// computes `float` to `none` by CSS 2.1 section 9.7).
     pub floated: bool,
+    /// `border-radius` and `corner-shape`, corners in the order top-left,
+    /// top-right, bottom-right, bottom-left.
+    pub corners: [PaintCorner; 4],
+}
+
+/// Linear coefficients of a radius component.
+fn radius_len(lp: &style::values::computed::NonNegativeLengthPercentage) -> RadiusLen {
+    use style::values::computed::Length;
+    let lp = &lp.0;
+    let abs = lp.resolve(Length::new(0.0)).to_i32_au();
+    // Au per 2^20 Au of basis, then reduced to 1/65536.
+    let slope = i64::from(lp.resolve(Length::from(Au(1 << 20))).to_i32_au()) - i64::from(abs);
+    RadiusLen {
+        abs: Au(abs.max(0)),
+        pct: i32::try_from((slope >> 4).clamp(0, 1 << 24)).unwrap_or(0),
+    }
+}
+
+/// `n = 2^|K|` in 1/16, rounded half up and saturated at `u16::MAX` (which means
+/// "infinite": a square or a notch). Uses `exp2`, which is a float operation, in
+/// the one crate allowed floats; what crosses into `px-paint` is an integer.
+fn exponent16(k: f32) -> u16 {
+    if k.is_nan() {
+        return 32;
+    }
+    let k = k.abs();
+    if !k.is_finite() || k >= 12.0 {
+        return u16::MAX;
+    }
+    let n = (k.exp2() * 16.0).round();
+    if n >= f32::from(u16::MAX) {
+        u16::MAX
+    } else {
+        n as u16
+    }
+}
+
+fn corner_kind(shape: style::values::computed::corner_shape::CornerShape) -> CornerKind {
+    if shape.k.is_nan() {
+        CornerKind::ROUND
+    } else if shape.k >= 0.0 {
+        CornerKind::Convex(exponent16(shape.k))
+    } else {
+        CornerKind::Concave(exponent16(shape.k))
+    }
 }
 
 /// Convert a resolved colour to 8-bit sRGB.
@@ -119,7 +206,27 @@ pub fn paint_style_of(style: &ComputedValues) -> PaintStyle {
             _ => BackgroundClip::BorderBox,
         }
     };
+    let corner = |r: &style::values::computed::BorderCornerRadius,
+                  shape: style::values::computed::corner_shape::CornerShape| {
+        PaintCorner {
+            x: radius_len(&r.0.width),
+            y: radius_len(&r.0.height),
+            kind: corner_kind(shape),
+        }
+    };
     PaintStyle {
+        corners: [
+            corner(&b.border_top_left_radius, b.clone_corner_top_left_shape()),
+            corner(&b.border_top_right_radius, b.clone_corner_top_right_shape()),
+            corner(
+                &b.border_bottom_right_radius,
+                b.clone_corner_bottom_right_shape(),
+            ),
+            corner(
+                &b.border_bottom_left_radius,
+                b.clone_corner_bottom_left_shape(),
+            ),
+        ],
         visible: style.get_inherited_box().clone_visibility() == Visibility::Visible,
         color: rgba(style.get_inherited_text().clone_color()),
         background: rgba(style.resolve_color(&style.get_background().clone_background_color())),

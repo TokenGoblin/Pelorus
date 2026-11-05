@@ -12,10 +12,12 @@ pub mod display_list;
 pub mod glyph;
 pub mod png;
 pub mod raster;
+pub mod round;
 
 pub use build::{build, build_with_viewport};
 pub use display_list::{
-    BorderSide, BorderStyle, Color, DisplayList, FontId, Item, ListError, PositionedGlyph, Rect,
+    BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, Item, ListError,
+    PositionedGlyph, Rect, RoundedRect,
 };
 pub use png::{decode, encode};
 pub use raster::{Canvas, rasterize};

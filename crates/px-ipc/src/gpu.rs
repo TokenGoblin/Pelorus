@@ -261,6 +261,30 @@ pub struct WireBorderSide {
     pub color: WireColor,
 }
 
+/// One corner of a rounded rectangle: radii in app units and the exponent of
+/// its superellipse (`corner-shape`), see the display list's `CornerShape`.
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
+pub struct WireCorner {
+    /// Horizontal radius.
+    pub rx: i32,
+    /// Vertical radius.
+    pub ry: i32,
+    /// `K < 0`: the curve is mirrored (`scoop`, `notch`).
+    pub concave: bool,
+    /// `n = 2^|K|` in 1/16; `u16::MAX` is infinite.
+    pub n16: u16,
+}
+
+/// A rectangle with four shaped corners: top-left, top-right, bottom-right,
+/// bottom-left.
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
+pub struct WireRoundedRect {
+    /// The rectangle.
+    pub rect: WireRect,
+    /// The corners.
+    pub corners: [WireCorner; 4],
+}
+
 /// One paint operation, mirroring the display list's `Item`.
 ///
 /// A mirror rather than the display list's own type so that this crate depends
@@ -309,6 +333,25 @@ pub enum WireItem {
         start: u32,
         /// How many.
         len: u32,
+    },
+    /// Fill a rounded rectangle.
+    FillRoundedRect {
+        /// Where and what shape.
+        shape: WireRoundedRect,
+        /// With what.
+        color: WireColor,
+    },
+    /// A border around a rounded rectangle, sides in CSS order.
+    RoundedBorder {
+        /// Around what.
+        shape: WireRoundedRect,
+        /// The four sides.
+        sides: [WireBorderSide; 4],
+    },
+    /// Begin a rounded clip, ended by [`WireItem::PopClip`].
+    PushRoundedClip {
+        /// The clip shape.
+        shape: WireRoundedRect,
     },
 }
 

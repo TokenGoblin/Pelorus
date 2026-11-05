@@ -738,7 +738,7 @@ impl GpuSession {
         let mut depth = 0usize;
         for item in &list.items {
             match item {
-                Item::PushClip { .. } => depth += 1,
+                Item::PushClip { .. } | Item::PushRoundedClip { .. } => depth += 1,
                 Item::PopClip => depth = depth.saturating_sub(1),
                 _ => {}
             }
