@@ -204,6 +204,7 @@ pub fn serve<R: Read, W: Write>(
                 let list = DisplayList {
                     items: frame.items,
                     glyphs: frame.glyphs,
+                    ..DisplayList::default()
                 };
                 if list.validate().is_err() {
                     return fail(channel, GpuFailure::BadGlyphs);

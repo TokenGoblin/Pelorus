@@ -695,6 +695,45 @@ pub fn rasterize_with(
                     }
                 }
             }
+            Item::Image {
+                rect,
+                image,
+                filter,
+            } => {
+                let Some(img) = list.images.get(*image as usize) else {
+                    continue;
+                };
+                let dest = snap_rect(rect);
+                let vis = dest.intersect(clip.rect);
+                if dest.is_empty() || vis.is_empty() {
+                    continue;
+                }
+                let (Ok(dw), Ok(dh)) = (
+                    u32::try_from(dest.x1 - dest.x0),
+                    u32::try_from(dest.y1 - dest.y0),
+                ) else {
+                    continue;
+                };
+                // The visible window, relative to the destination's corner.
+                let (Ok(vx0), Ok(vx1), Ok(vy0), Ok(vy1)) = (
+                    u32::try_from(vis.x0 - dest.x0),
+                    u32::try_from(vis.x1 - dest.x0),
+                    u32::try_from(vis.y0 - dest.y0),
+                    u32::try_from(vis.y1 - dest.y0),
+                ) else {
+                    continue;
+                };
+                let px = crate::image::scale(img, dw, dh, (vx0, vx1), (vy0, vy1), *filter);
+                let w = (vx1 - vx0) as usize;
+                for (i, c) in px.iter().enumerate() {
+                    if c.a == 0 {
+                        continue;
+                    }
+                    let x = vis.x0 + (i % w) as i64;
+                    let y = vis.y0 + (i / w) as i64;
+                    plot(&mut cv, &clip, x, y, *c, 255);
+                }
+            }
             Item::PushClip { rect } => {
                 if stack.len() >= MAX_CLIP_DEPTH {
                     return Err(RasterError::ClipTooDeep);

@@ -181,6 +181,13 @@ pub fn item_to_wire(item: &Item) -> WireItem {
         Item::PushRoundedClip { shape } => WireItem::PushRoundedClip {
             shape: shape_to_wire(shape),
         },
+        // The GPU wire carries no image table yet (backlog): an image is
+        // dropped there as an empty fill, and the in-process rasterizer, which
+        // the shell uses, draws it.
+        Item::Image { rect, .. } => WireItem::FillRect {
+            rect: rect_to_wire(rect),
+            color: color_to_wire(Color::TRANSPARENT),
+        },
         Item::GlyphRun {
             font,
             size,

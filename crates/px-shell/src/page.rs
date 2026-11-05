@@ -315,6 +315,7 @@ impl Laid {
                 Item::FillRect { rect, .. }
                 | Item::TextRun { rect, .. }
                 | Item::Border { rect, .. }
+                | Item::Image { rect, .. }
                 | Item::PushClip { rect } => rect.y = shift(rect.y),
                 Item::FillRoundedRect { shape, .. }
                 | Item::RoundedBorder { shape, .. }
