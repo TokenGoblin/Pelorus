@@ -153,3 +153,7 @@ source = "tests/render/pages/text-script-devanagari.html"
 [[page]]
 id = "inline-decoration"
 source = "tests/render/pages/inline-decoration.html"
+
+[[page]]
+id = "inline-spacing-transform"
+source = "tests/render/pages/inline-spacing-transform.html"

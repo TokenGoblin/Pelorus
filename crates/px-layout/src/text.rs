@@ -1454,6 +1454,20 @@ mod tests {
     }
 
     #[test]
+    fn text_transform_maps_case_and_capitalises_words() {
+        assert_eq!(Transform::Uppercase.apply("a\u{df}c", None), "ASSC");
+        assert_eq!(Transform::Lowercase.apply("ABC", None), "abc");
+        assert_eq!(
+            Transform::Capitalize.apply("hello wORLD don't a-b 3x", None),
+            "Hello WORLD Don't A-B 3x"
+        );
+        // A word continues across the boundary between two pieces of text.
+        assert_eq!(Transform::Capitalize.apply("bc", Some('a')), "bc");
+        assert_eq!(Transform::Capitalize.apply("bc", Some(' ')), "Bc");
+        assert_eq!(Transform::None.apply("aB", None), "aB");
+    }
+
+    #[test]
     fn text_greedy_break_drops_the_trailing_space() {
         let p = Prepared::new("foo bar", ahem(10));
         let l = p.next_line(0, px(50)).expect("a line");
