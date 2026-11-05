@@ -90,7 +90,11 @@ fn main() {
 }
 
 fn real_main(args: Args) -> Result<(), String> {
-    let theme = if args.light { Theme::Light } else { Theme::Dark };
+    let theme = if args.light {
+        Theme::Light
+    } else {
+        Theme::Dark
+    };
     let opts = WindowOptions::new(px_brand::PRODUCT_NAME, args.size.0, args.size.1);
     let mut window = open(&opts)?;
     let mut shell = Shell::new(window.size(), window.config(), theme, &args.pages);

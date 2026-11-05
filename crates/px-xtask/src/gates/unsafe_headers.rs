@@ -41,8 +41,10 @@ const SANDBOX: &str = "px-sandbox";
 const STYLO_CRATE: &str = "px-css";
 /// The window layer (ADR 044). Same header rule as the sandbox.
 const DISPLAY: &str = "px-display";
-/// The only crates whose manifests may name `px-display`.
-const DISPLAY_DEPENDENTS: [&str; 1] = ["px-broker"];
+/// The only crates whose manifests may name `px-display`. `px-shell` is the
+/// interim browser binary (Phase 18 integration, one process); it is retired
+/// into `px-broker` by the Phase 19 process split.
+const DISPLAY_DEPENDENTS: [&str; 2] = ["px-broker", "px-shell"];
 /// Lines above an unsafe block in which its `SAFETY` comment must appear.
 const SAFETY_LOOKBACK: usize = 8;
 
@@ -781,7 +783,9 @@ mod tests {
         let g = run_on(&fx);
         assert_eq!(
             g.failures(),
-            ["crates/px-net/Cargo.toml depends on px-display; only px-broker may (ADR 044)"]
+            [
+                "crates/px-net/Cargo.toml depends on px-display; only px-broker, px-shell may (ADR 044)"
+            ]
         );
     }
 

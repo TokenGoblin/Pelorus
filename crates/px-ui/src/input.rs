@@ -140,7 +140,9 @@ pub enum Event {
     Resize(Size),
     /// The mouse wheel turned. `notches` is positive for "scroll down" (content
     /// moves up), one per detent. Never the chrome's: always offered to the page.
-    Wheel { notches: i32 },
+    Wheel {
+        notches: i32,
+    },
 }
 
 /// What the chrome did with an event. An unconsumed event belongs to the page

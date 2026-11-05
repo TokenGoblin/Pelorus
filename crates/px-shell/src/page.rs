@@ -140,8 +140,10 @@ fn ceil_px(a: Au) -> i32 {
 /// stylesheets); `None` for a built-in page. Never panics: an engine panic is
 /// reported as an error.
 pub fn layout(source: &str, page: Option<&Path>, width: u32, height: u32) -> Result<Laid, String> {
-    catch_unwind(AssertUnwindSafe(|| layout_inner(source, page, width, height)))
-        .map_err(|_| "the engine panicked on this page".to_string())?
+    catch_unwind(AssertUnwindSafe(|| {
+        layout_inner(source, page, width, height)
+    }))
+    .map_err(|_| "the engine panicked on this page".to_string())?
 }
 
 fn layout_inner(
@@ -268,7 +270,8 @@ impl Laid {
 /// A thin overlay thumb on the right edge, 35% black over whatever is there.
 fn scrollbar(cv: &mut Canvas, scroll: i32, doc_h: i32) {
     let (w, h) = (cv.width as i32, cv.height as i32);
-    let thumb_h = ((i64::from(h) * i64::from(h)) / i64::from(doc_h.max(1))).clamp(24, i64::from(h)) as i32;
+    let thumb_h =
+        ((i64::from(h) * i64::from(h)) / i64::from(doc_h.max(1))).clamp(24, i64::from(h)) as i32;
     let travel = (h - thumb_h).max(0);
     let range = (doc_h - h).max(1);
     let top = (i64::from(scroll.clamp(0, range)) * i64::from(travel) / i64::from(range)) as i32;

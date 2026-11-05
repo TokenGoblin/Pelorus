@@ -275,6 +275,7 @@ impl Shell {
     }
 
     fn scroll_to(&mut self, y: i32) {
+        self.ensure_layout();
         let max = self.max_scroll();
         if let Some(e) = self.tabs.get_mut(self.active).and_then(TabState::entry) {
             e.scroll = y.clamp(0, max.max(0));
@@ -412,14 +413,23 @@ impl Shell {
     pub fn frame(&mut self) -> Option<Canvas> {
         self.ensure_layout();
         let s = self.chrome.size();
-        let (w, h) = (u32::try_from(s.w).ok()?.max(1), u32::try_from(s.h).ok()?.max(1));
+        let (w, h) = (
+            u32::try_from(s.w).ok()?.max(1),
+            u32::try_from(s.h).ok()?.max(1),
+        );
         let mut list = px_paint::DisplayList::new();
-        paint::paint(&self.chrome, &self.font, self.theme, Point::default(), &mut list);
+        paint::paint(
+            &self.chrome,
+            &self.font,
+            self.theme,
+            Point::default(),
+            &mut list,
+        );
         let mut cv = px_paint::raster::rasterize_with(&list, w, h, &LayoutFonts).ok()?;
         let v = self.view();
         let laid = self.tabs.get(self.active)?.doc.laid.as_ref()?;
         if let Ok(pg) = laid.render(self.scroll(), v.w as u32, v.h as u32) {
-            blit(&mut cv, &pg, v.x, v.y);
+            blit(&mut cv, &pg, v.x, v.y, self.chrome.config().window_radius);
         }
         Some(cv)
     }
@@ -433,8 +443,9 @@ fn load_into(doc: &mut Doc, loc: &Location) {
     doc.title = String::new();
 }
 
-/// Copy `src` into `dst` at (`x`, `y`), clipped to `dst`.
-fn blit(dst: &mut Canvas, src: &Canvas, x: i32, y: i32) {
+/// Copy `src` into `dst` at (`x`, `y`), clipped to `dst`, leaving the chrome's own
+/// pixels in the bottom corners of a rounded window (`radius` px, 0 for square).
+fn blit(dst: &mut Canvas, src: &Canvas, x: i32, y: i32, radius: i32) {
     for row in 0..src.height as i32 {
         let dy = y + row;
         if dy < 0 || dy >= dst.height as i32 {
@@ -448,8 +459,30 @@ fn blit(dst: &mut Canvas, src: &Canvas, x: i32, y: i32) {
         let s = (row as usize * src.width as usize + (x0 - x) as usize) * 4;
         let d = (dy as usize * dst.width as usize + x0 as usize) * 4;
         let n = (x1 - x0) as usize * 4;
-        if let (Some(from), Some(to)) = (src.pixels.get(s..s + n), dst.pixels.get_mut(d..d + n)) {
-            to.copy_from_slice(from);
+        let Some(from) = src.pixels.get(s..s + n) else {
+            continue;
+        };
+        // Rows within `radius` of the window's bottom edge lose their corner pixels.
+        let up = dst.height as i32 - 1 - dy;
+        let inset = if radius > 0 && up < radius {
+            let dyc = radius - 1 - up;
+            let half =
+                (i64::from(radius) * i64::from(radius) - i64::from(dyc) * i64::from(dyc)).max(0);
+            radius - (half as f64).sqrt() as i32
+        } else {
+            0
+        };
+        let (a, b) = (x0.max(inset), x1.min(dst.width as i32 - inset));
+        if a >= b {
+            continue;
+        }
+        let (fa, ta) = (((a - x0) * 4) as usize, ((a - x0) * 4) as usize);
+        let len = ((b - a) * 4) as usize;
+        if let (Some(f), Some(t)) = (
+            from.get(fa..fa + len),
+            dst.pixels.get_mut(d + ta..d + ta + len),
+        ) {
+            t.copy_from_slice(f);
         }
     }
 }
