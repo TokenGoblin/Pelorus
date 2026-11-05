@@ -63,16 +63,24 @@ pub enum Rung {
     UserNamespaces,
     /// Windows: a token with privileges and SIDs removed.
     RestrictedToken,
-    /// Windows: the object that makes killing a process tree possible, and
-    /// that carries the memory cap at Phase 17.
+    /// Windows: the object that makes killing a process tree possible. At
+    /// Phase 17 it also carries the memory cap, kill-on-close, an active-process
+    /// limit of one and the UI restrictions (ADR 044).
     JobObject,
+    /// Windows: the token's integrity level is Low, so writes to anything not
+    /// labelled low are refused whatever the DACL says (Phase 17, ADR 044). In
+    /// the Windows [`FLOOR`]; reported in [`SandboxedChild::applied`] only after
+    /// the parent read the level back from the child's own token.
+    LowIntegrity,
     /// Linux: a hard address-space limit (`RLIMIT_AS`), applied at creation and
     /// read back from the kernel by the parent (Phase 17, ADR 043). It is not in
     /// [`FLOOR`]: a machine that cannot cap memory still sandboxes. It is
     /// *required* by [`spawn`] all the same (a policy that carries a limit
     /// refuses to launch without it), and it appears in
     /// [`SandboxedChild::applied`] only once the kernel has confirmed it.
-    /// Windows has no implementation yet (the job object's memory cap).
+    /// Windows: the job object's per-process commit limit
+    /// (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`), read back from the job. That is
+    /// committed memory, not address space (ADR 044).
     MemoryCap,
 }
 
@@ -86,7 +94,14 @@ impl Rung {
             Self::UserNamespaces => "user namespaces",
             Self::RestrictedToken => "restricted token",
             Self::JobObject => "job object",
-            Self::MemoryCap => "address-space limit",
+            Self::LowIntegrity => "low integrity level",
+            Self::MemoryCap => {
+                if cfg!(target_os = "windows") {
+                    "commit limit"
+                } else {
+                    "address-space limit"
+                }
+            }
         }
     }
 }
@@ -106,7 +121,7 @@ impl fmt::Display for Rung {
 pub const FLOOR: &[Rung] = if cfg!(target_os = "linux") {
     &[Rung::NoNewPrivs, Rung::Seccomp]
 } else if cfg!(target_os = "windows") {
-    &[Rung::RestrictedToken, Rung::JobObject]
+    &[Rung::RestrictedToken, Rung::JobObject, Rung::LowIntegrity]
 } else {
     // An unknown platform has no floor we can verify, so nothing clears it.
     // Fail closed by construction rather than by remembering to.
@@ -559,8 +574,8 @@ impl SandboxedChild {
     ///
     /// `Some` only if the parent read the limit back from the operating system
     /// after the child was created and it equals what the policy asked for. It
-    /// is never the child's word. `None` means no cap is in force (Windows, for
-    /// now: its job-object memory cap is not built).
+    /// is never the child's word. On Windows the cap is the job's commit limit,
+    /// read back from the job object. `None` means no cap is in force.
     pub fn memory_limit(&self) -> Option<MemoryLimit> {
         self.memory
     }
@@ -634,9 +649,9 @@ impl SandboxedChild {
 
     /// Kill the child.
     ///
-    /// On Windows this terminates the process; the job object it belongs to is
-    /// what will make killing the whole tree possible when Phase 17 sets
-    /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. On Linux it is a signal to the
+    /// On Windows this terminates the job object, which ends every process in
+    /// it, and the job also carries kill-on-close, so dropping the child ends it
+    /// too. On Linux it is a signal to the
     /// one process, and the orphaned-grandchild case remains open until
     /// Phase 17's cgroup — see `docs/backlog.md`.
     pub fn kill(&mut self) -> std::io::Result<()> {
@@ -741,12 +756,12 @@ pub fn spawn_with(
 
     #[cfg(target_os = "windows")]
     {
-        // The job object's memory cap is not built (docs/backlog.md): the
-        // policy's limit is not applied here and is not reported.
-        let _ = policy;
-        let spawned = windows::spawn(executable)?;
+        // The job's limits are applied before the process exists and read back
+        // from the OS before `windows::spawn` returns, so the cap is reported
+        // here exactly as the Linux path reports it: confirmed, never assumed.
+        let spawned = windows::spawn(executable, policy)?;
         Ok(SandboxedChild {
-            memory: None,
+            memory: Some(policy.memory),
             stdin: Some(windows::into_file(spawned.stdin)),
             stdout: Some(windows::into_file(spawned.stdout)),
             applied: spawned.applied,
@@ -870,6 +885,29 @@ mod tests {
             row.split_whitespace().filter(|f| *f == "805306368").count() == 2,
             "soft and hard must both be 768 MiB: {row}"
         );
+    }
+
+    /// The Windows counterpart: the cap and the low-integrity rung are in
+    /// `applied()` and `memory_limit()` only because `windows::spawn` read them
+    /// back from the OS, and the Windows floor includes the new rung.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn sandbox_memory_cap_windows_is_reported_after_the_job_confirms_it() {
+        if !can_exercise_a_policy() {
+            return;
+        }
+        let policy = Policy::content().with_memory(MemoryLimit::from_bytes(768 << 20).unwrap());
+        let mut child = spawn_with(&a_spawnable_executable(), &policy).expect("a sandboxed child");
+        let applied = child.applied().to_vec();
+        let reported = child.memory_limit();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        for rung in [Rung::MemoryCap, Rung::LowIntegrity, Rung::JobObject] {
+            assert!(applied.contains(&rung), "{rung} missing from {applied:?}");
+        }
+        assert_eq!(reported, Some(policy.memory));
+        assert!(FLOOR.contains(&Rung::LowIntegrity));
     }
 
     /// A child that is not capped does not become capped by being reported so:
