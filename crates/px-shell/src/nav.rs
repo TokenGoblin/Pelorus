@@ -166,15 +166,19 @@ impl Location {
             Location::Web(u) => return net.load(u),
         };
         match result {
-            Ok((source, file)) => Loaded {
-                source,
-                res: Resources {
+            Ok((source, file)) => {
+                let mut res = Resources {
                     file,
                     ..Resources::default()
-                },
-                failed: false,
-                final_url: None,
-            },
+                };
+                crate::images::load_local(&source, &mut res);
+                Loaded {
+                    source,
+                    res,
+                    failed: false,
+                    final_url: None,
+                }
+            }
             Err(msg) => Loaded {
                 source: error_page(&msg),
                 res: Resources::default(),

@@ -184,17 +184,17 @@ pub(crate) fn used_size(i: &Inputs<'_>) -> Option<(Au, Au)> {
     };
 
     let mut w: Option<Au> = match i.style.clone_width() {
-        Size::LengthPercentage(ref lp) => lp
-            .0
-            .maybe_to_used_value(Some(i.containing))
-            .map(|v| content(v, i.surround.0)),
+        Size::LengthPercentage(ref lp) => {
+            lp.0.maybe_to_used_value(Some(i.containing))
+                .map(|v| content(v, i.surround.0))
+        }
         _ => None,
     };
     let mut h: Option<Au> = match i.style.clone_height() {
-        Size::LengthPercentage(ref lp) => lp
-            .0
-            .maybe_to_used_value(None)
-            .map(|v| content(v, i.surround.1)),
+        Size::LengthPercentage(ref lp) => {
+            lp.0.maybe_to_used_value(None)
+                .map(|v| content(v, i.surround.1))
+        }
         _ => None,
     };
     if w.is_none()
@@ -210,7 +210,9 @@ pub(crate) fn used_size(i: &Inputs<'_>) -> Option<(Au, Au)> {
     if h.is_none()
         && let Some((n, false)) = attr(i.node, "height").and_then(dimension)
     {
-        h = Some(Au((n * AU_PER_PX / 1000).clamp(0, MAX_PX * AU_PER_PX) as i32));
+        h = Some(Au(
+            (n * AU_PER_PX / 1000).clamp(0, MAX_PX * AU_PER_PX) as i32
+        ));
     }
 
     // Following the ratio, rounding to the nearest Au.

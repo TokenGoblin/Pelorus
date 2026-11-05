@@ -114,7 +114,12 @@ fn smooth_minification_is_a_box_average() {
     let img = image(
         4,
         1,
-        &[[0, 0, 0, 255], [100, 100, 100, 255], [200, 200, 200, 255], [40, 40, 40, 255]],
+        &[
+            [0, 0, 0, 255],
+            [100, 100, 100, 255],
+            [200, 200, 200, 255],
+            [40, 40, 40, 255],
+        ],
     );
     let l = list_with(&img, |image| {
         vec![Item::Image {
@@ -154,7 +159,10 @@ fn alpha_composites_over_what_is_under_it() {
     let cv = draw(&l, 2, 1);
     let mix = |s: u32, d: u32| ((s * 128 + d * 127 + 127) / 255) as u8;
     assert_eq!(cv.pixel(0, 0), Some([mix(255, 0), 0, mix(0, 255), 255]));
-    assert_eq!(cv.pixel(1, 0), Some([mix(255, 255), mix(0, 255), mix(0, 255), 255]));
+    assert_eq!(
+        cv.pixel(1, 0),
+        Some([mix(255, 255), mix(0, 255), mix(0, 255), 255])
+    );
     // A fully transparent pixel changes nothing.
     let clear = image(1, 1, &[[9, 9, 9, 0]]);
     let l = list_with(&clear, |image| {
@@ -236,7 +244,11 @@ fn the_table_is_validated_and_deduplicated() {
     let mut l = DisplayList::new();
     assert_eq!(l.add_image(&img), Some(0));
     assert_eq!(l.add_image(&img), Some(0), "the same Arc is one entry");
-    assert_eq!(l.add_image(&quad()), Some(1), "an equal image elsewhere is not");
+    assert_eq!(
+        l.add_image(&quad()),
+        Some(1),
+        "an equal image elsewhere is not"
+    );
     l.items.push(Item::Image {
         rect: rect(0, 0, 1, 1),
         image: 7,
@@ -442,7 +454,9 @@ fn background_image_sizes_positions_and_repeats() {
     // no-repeat at the right bottom, 4x4.
     let (_, cv) = page(
         "<div></div>",
-        &css("background-repeat: no-repeat; background-size: 4px 4px; background-position: right bottom"),
+        &css(
+            "background-repeat: no-repeat; background-size: 4px 4px; background-position: right bottom",
+        ),
         &[],
         &urls,
         8,

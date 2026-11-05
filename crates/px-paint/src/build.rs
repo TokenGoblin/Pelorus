@@ -81,11 +81,11 @@ use px_dom::{Arena, NodeId};
 use px_layout::fragment::{FragmentId, FragmentKind, FragmentTree};
 use px_layout::geom::Au;
 
-use crate::imgpaint::{self, ImageSet};
 use crate::display_list::{
     BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, Item,
     PositionedGlyph, Rect, RoundedRect,
 };
+use crate::imgpaint::{self, ImageSet};
 
 fn color(c: Rgba) -> Color {
     Color {
@@ -743,9 +743,7 @@ fn image_items(
     let owns_edges = !matches!(fragment.kind, FragmentKind::Inline { .. });
     let shape = border_shape(rect, style, (true, true)).filter(|_| owns_edges);
     let borders = border_widths(style);
-    let layers = if skip_background
-        || images.urls.is_empty()
-        || styles.canvas_images == Some(node)
+    let layers = if skip_background || images.urls.is_empty() || styles.canvas_images == Some(node)
     {
         Vec::new()
     } else {

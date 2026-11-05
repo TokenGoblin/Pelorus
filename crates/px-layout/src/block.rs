@@ -569,7 +569,7 @@ pub fn layout_document(
                             height_bounds: (hb.min, hb.max),
                         })
                     });
-                                        let content_inline = if let Some(f) = &forced {
+                    let content_inline = if let Some(f) = &forced {
                         f.content_inline
                     } else if let Some(p) = &table_plan {
                         resolved = p.edges;
@@ -579,9 +579,7 @@ pub fn layout_document(
                         .max(Au(0))
                     } else {
                         match side {
-                            _ if replaced_size.is_some() => {
-                                replaced_size.map_or(Au(0), |(w, _)| w)
-                            }
+                            _ if replaced_size.is_some() => replaced_size.map_or(Au(0), |(w, _)| w),
                             // §10.3.7. An absolutely positioned box is solved rather
                             // than filled: its width comes from the equation relating
                             // `left`, `width` and `right` to the containing block,

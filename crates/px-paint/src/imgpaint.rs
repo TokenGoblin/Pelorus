@@ -45,9 +45,7 @@ use px_css::image_style::{
 use px_dom::NodeId;
 use px_layout::geom::Au;
 
-use crate::display_list::{
-    DisplayList, ImageData, ImageFilter, Item, Rect, RoundedRect,
-};
+use crate::display_list::{DisplayList, ImageData, ImageFilter, Item, Rect, RoundedRect};
 
 /// Most tiles one background layer may expand to.
 pub const MAX_TILES: usize = 20_000;
@@ -341,13 +339,7 @@ fn layer_items(
     }
     let x = px0 + LenPct::resolve(layer.pos_x, au(pw - w)).0 as i64;
     let y = py0 + LenPct::resolve(layer.pos_y, au(ph - h)).0 as i64;
-    let (xs, w) = tiles_1d(
-        layer.repeat_x,
-        (px0, pw),
-        (cx0, cx0 + cw),
-        x,
-        w,
-    );
+    let (xs, w) = tiles_1d(layer.repeat_x, (px0, pw), (cx0, cx0 + cw), x, w);
     // `round` in one axis with `auto` in the other keeps the ratio.
     let h = if layer.repeat_x == Repeat::Round
         && matches!(layer.size, BgSize::Explicit(_, SizeComp::Auto))
@@ -357,13 +349,7 @@ fn layer_items(
     } else {
         h
     };
-    let (ys, h) = tiles_1d(
-        layer.repeat_y,
-        (py0, ph),
-        (cy0, cy0 + ch),
-        y,
-        h,
-    );
+    let (ys, h) = tiles_1d(layer.repeat_y, (py0, ph), (cy0, cy0 + ch), y, h);
     if xs.is_empty() || ys.is_empty() || xs.len().saturating_mul(ys.len()) > MAX_TILES {
         return;
     }

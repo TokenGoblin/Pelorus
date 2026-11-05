@@ -17,10 +17,10 @@ pub mod raster;
 pub mod round;
 
 pub use build::{build, build_with_images, build_with_viewport};
-pub use imgpaint::ImageSet;
 pub use display_list::{
     BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, ImageData,
     ImageFilter, Item, ListError, PositionedGlyph, Rect, RoundedRect,
 };
+pub use imgpaint::ImageSet;
 pub use png::{decode, encode};
 pub use raster::{Canvas, rasterize};
