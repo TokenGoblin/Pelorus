@@ -372,8 +372,8 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
         return;
     }
     suites::check_suites(g, root, SUITES);
-    g.info("cargo test --workspace --locked");
-    match proc::cargo(root, &["test", "--workspace", "--locked"]) {
+    g.info("cargo test --workspace --locked --no-fail-fast");
+    match proc::cargo(root, &["test", "--workspace", "--locked", "--no-fail-fast"]) {
         Ok(s) if s.success() => {}
         _ => g.fail("tests failed"),
     }

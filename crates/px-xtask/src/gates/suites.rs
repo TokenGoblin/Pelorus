@@ -196,11 +196,16 @@ pub fn check_suites_with(g: &mut Gate, root: &Path, suites: &[Suite], report: Re
     }
 }
 
-/// `cargo test --workspace --locked` with inherited stdio; a failure is the
-/// gate's `tests failed`.
+/// `cargo test --workspace --locked --no-fail-fast` with inherited stdio; a failure
+/// is the gate's `tests failed`.
+///
+/// `--no-fail-fast` because cargo otherwise stops at the first failing test BINARY,
+/// so every crate after it alphabetically is never run. CI on Windows hid whole
+/// crates behind one failing `px-gpu` binary that way. The exit status still
+/// reports failure; the log now shows all of them.
 pub fn run_workspace_tests(g: &mut Gate, root: &Path) {
-    g.info("cargo test --workspace --locked");
-    match proc::cargo(root, &["test", "--workspace", "--locked"]) {
+    g.info("cargo test --workspace --locked --no-fail-fast");
+    match proc::cargo(root, &["test", "--workspace", "--locked", "--no-fail-fast"]) {
         Ok(s) if s.success() => {}
         _ => g.fail("tests failed"),
     }

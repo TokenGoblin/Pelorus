@@ -292,10 +292,19 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
     }
     suites::check_suites(g, root, SUITES);
 
-    g.info("cargo test --workspace --locked --features testing (PX_REQUIRE_SANDBOX=1)");
+    g.info(
+        "cargo test --workspace --locked --no-fail-fast --features testing (PX_REQUIRE_SANDBOX=1)",
+    );
     if !cargo_required(
         root,
-        &["test", "--workspace", "--locked", "--features", "testing"],
+        &[
+            "test",
+            "--workspace",
+            "--locked",
+            "--no-fail-fast",
+            "--features",
+            "testing",
+        ],
     ) {
         g.fail("tests failed");
     }
