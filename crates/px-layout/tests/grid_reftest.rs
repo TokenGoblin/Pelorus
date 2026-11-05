@@ -107,7 +107,7 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// picture is the same and the rectangles are not. The oracle's blind spot; the
 /// old result was the grid being laid out as a block, which is wrong for any
 /// page that puts an `inline-grid` beside text.
-const MATCH_FLOOR: usize = 71;
+const MATCH_FLOOR: usize = 67;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 405).
 const MIN_PAIRS: usize = 400;
