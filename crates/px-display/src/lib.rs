@@ -105,9 +105,10 @@ pub trait Display: PlatformWindow {
 
 /// The shared loop. `frame` is called whenever the window needs pixels and
 /// returns the new frame; `input` is called for each chrome event. Returns when
-/// the window is closed.
+/// the window is closed, or at `stop_at` if given (tools and tests).
 pub fn run<D: Display>(
     window: &mut D,
+    stop_at: Option<std::time::Instant>,
     mut input: impl FnMut(&mut D, Event),
     mut frame: impl FnMut(&mut D) -> Option<px_paint::raster::Canvas>,
 ) -> Result<(), DisplayError> {
@@ -120,10 +121,14 @@ pub fn run<D: Display>(
                 .present(&canvas, d)
                 .map_err(|e| DisplayError::Protocol(format!("{e:?}")))?;
         }
+        let until_stop = stop_at.map(|t| t.saturating_duration_since(std::time::Instant::now()));
+        if until_stop.is_some_and(|d| d.is_zero()) {
+            return Ok(());
+        }
         let timeout = if dirty.is_some() {
             Some(Duration::ZERO)
         } else {
-            None
+            until_stop
         };
         for ev in window.wait_events(timeout)? {
             match ev {
