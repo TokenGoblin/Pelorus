@@ -132,6 +132,8 @@ mod tests {
             tab_count: 1,
             active: Some(0),
             isolated: true,
+            scroll: 0,
+            grips: false,
         })
     }
 

@@ -35,6 +35,12 @@ pub trait Shape {
     fn hint(&self, px: i32, py: i32) -> Option<u8>;
     /// Is the sample point (1/8 px units) inside?
     fn inside(&self, sx: i32, sy: i32) -> bool;
+    /// A run `[x0, x1)` of pixels in row `y` that all have the same coverage,
+    /// when that is cheap to say: lets `fill` skip the middle of big shapes.
+    /// It must agree with `hint`/`inside`; the default knows nothing.
+    fn flat_span(&self, _y: i32) -> Option<(i32, i32, u8)> {
+        None
+    }
 }
 
 /// `u^(37/8)` for `u` in `0..=1`, using only correctly rounded operations.
@@ -126,12 +132,52 @@ impl Shape for Squircle {
         }
         let (bx0, by0) = (px * SUB, py * SUB);
         let (bx1, by1) = (bx0 + SUB, by0 + SUB);
-        for (zx0, zy0, zx1, zy1, ..) in self.zones() {
+        let mut hit = None;
+        for (zx0, zy0, zx1, zy1, cx, cy, r) in self.zones() {
             if zx1 > zx0 && bx0 < zx1 && bx1 > zx0 && by0 < zy1 && by1 > zy0 {
-                return None;
+                if hit.is_some() {
+                    return None;
+                }
+                hit = Some((zx0, zy0, zx1, zy1, cx, cy, r));
             }
         }
-        Some(255)
+        let Some((zx0, zy0, zx1, zy1, cx, cy, r)) = hit else {
+            return Some(255);
+        };
+        // The corner is convex and contains its box's inner edges, so a pixel
+        // is wholly in when its far corner is, and (if it lies wholly within the
+        // corner box) wholly out when its near corner is out.
+        let (lx0, lx1) = (bx0.max(zx0), bx1.min(zx1));
+        let (ly0, ly1) = (by0.max(zy0), by1.min(zy1));
+        let dx = [(lx0 - cx).abs(), (lx1 - cx).abs()];
+        let dy = [(ly0 - cy).abs(), (ly1 - cy).abs()];
+        if corner_inside(dx[0].max(dx[1]), dy[0].max(dy[1]), r) {
+            return Some(255);
+        }
+        let within = bx0 >= zx0 && bx1 <= zx1 && by0 >= zy0 && by1 <= zy1;
+        if within && !corner_inside(dx[0].min(dx[1]), dy[0].min(dy[1]), r) {
+            return Some(0);
+        }
+        None
+    }
+
+    fn flat_span(&self, y: i32) -> Option<(i32, i32, u8)> {
+        if y < self.rect.y || y >= self.rect.bottom() {
+            return None;
+        }
+        let (by0, by1) = (y * SUB, y * SUB + SUB);
+        let (mut x0, mut x1) = (self.rect.x, self.rect.right());
+        for (i, (zx0, zy0, zx1, zy1, ..)) in self.zones().into_iter().enumerate() {
+            if zx1 > zx0 && by0 < zy1 && by1 > zy0 {
+                // Corners 0 and 3 are on the left, 1 and 2 on the right.
+                if i == 0 || i == 3 {
+                    x0 = x0.max((zx1 + SUB - 1).div_euclid(SUB));
+                } else {
+                    x1 = x1.min(zx0.div_euclid(SUB));
+                }
+            }
+        }
+        (x1 > x0).then_some((x0, x1, 255))
     }
 
     fn inside(&self, sx: i32, sy: i32) -> bool {
@@ -166,6 +212,10 @@ impl Shape for Stroke {
             return Some(0);
         }
         None
+    }
+
+    fn flat_span(&self, y: i32) -> Option<(i32, i32, u8)> {
+        self.inner.flat_span(y).map(|(a, b, _)| (a, b, 0))
     }
 
     fn inside(&self, sx: i32, sy: i32) -> bool {
@@ -350,12 +400,22 @@ pub fn fill(list: &mut DisplayList, shape: &dyn Shape, color: Color) {
     for y in b.y..b.bottom() {
         let mut cur: Vec<Run> = Vec::new();
         let mut x = b.x;
+        let span = shape.flat_span(y);
+        // Coverage at `x`, and the first pixel after the run it belongs to.
+        let probe = |x: i32| match span {
+            Some((sa, sb, v)) if x >= sa && x < sb => (v, sb.min(b.right())),
+            _ => (coverage(shape, x, y), x + 1),
+        };
         while x < b.right() {
-            let a = coverage(shape, x, y);
+            let (a, end) = probe(x);
             let start = x;
-            x += 1;
-            while x < b.right() && coverage(shape, x, y) == a {
-                x += 1;
+            x = end;
+            while x < b.right() {
+                let (a2, e2) = probe(x);
+                if a2 != a {
+                    break;
+                }
+                x = e2;
             }
             if a > 0 {
                 let carried = prev
@@ -395,37 +455,97 @@ pub fn color(c: Rgb, alpha: u8) -> Color {
     }
 }
 
-/// A soft shadow under `rect`: `layers` squircles growing outward, each faint,
-/// so alpha builds up toward the rect and falls off quadratically.
+/// Another shape's pixels, but only those inside `to`.
+struct Clipped<'a> {
+    shape: &'a dyn Shape,
+    to: Rect,
+}
+
+impl Shape for Clipped<'_> {
+    fn bounds(&self) -> Rect {
+        self.shape.bounds().intersect(self.to)
+    }
+    fn hint(&self, px: i32, py: i32) -> Option<u8> {
+        self.shape.hint(px, py)
+    }
+    fn inside(&self, sx: i32, sy: i32) -> bool {
+        self.shape.inside(sx, sy)
+    }
+    fn flat_span(&self, y: i32) -> Option<(i32, i32, u8)> {
+        self.shape
+            .flat_span(y)
+            .map(|(a, b, v)| (a.max(self.to.x), b.min(self.to.right()), v))
+            .filter(|(a, b, _)| b > a)
+    }
+}
+
+/// A soft shadow under `rect` (pixels): `extent` one-pixel squircle rings, each
+/// one pixel further out, each with the alpha a blurred edge has at that
+/// distance. The alpha follows a smoothstep from nothing at the outside to
+/// `peak_alpha` at the core, which is what a Gaussian blur of an edge looks like
+/// to the eye; the ring that sits on the (shifted) edge has half the peak. Only
+/// `+ - *` on `f64`, so the bytes are the same on every platform.
+///
+/// Rings, not stacked fills: the window covers everything inside the edge, so
+/// nothing there needs drawing, and each ring is cut into four bands so the cost
+/// is the perimeter, not the area.
 pub fn shadow(
     list: &mut DisplayList,
     rect: Rect,
     radius: i32,
     dy: i32,
-    layers: i32,
+    extent: i32,
     peak_alpha: u8,
 ) {
-    let total: i32 = (1..=layers).map(|k| k * k).sum();
-    if total == 0 {
+    if extent <= 0 || peak_alpha == 0 {
         return;
     }
-    for i in (0..layers).rev() {
-        // Outermost layer first; layer weight grows inward.
-        let weight = layers - i;
-        let alpha = (i32::from(peak_alpha) * weight * weight / total).clamp(0, 255);
-        // A layer's alpha is *added* by the layers drawn after it, so use the
-        // per-layer share, not the running total.
-        let grown = Rect::new(rect.x, rect.y + dy, rect.w, rect.h).inset(-i);
-        fill(
-            list,
-            &Squircle::new(grown, radius + i),
-            Color {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: alpha.min(255) as u8,
-            },
-        );
+    let peak = f64::from(peak_alpha);
+    let half = extent / 2;
+    let base = Rect::new(rect.x, rect.y + dy, rect.w, rect.h).inset(half);
+    for g in 0..extent {
+        let t = f64::from(extent - g) / f64::from(extent);
+        let a8 = (peak * t * t * (3.0 - 2.0 * t) + 0.5).clamp(0.0, 255.0) as u8;
+        let outer = Squircle::new(base.inset(-g), (radius + g - half).max(0));
+        let ring = outer.stroke(1);
+        let o = outer.rect;
+        let big = outer.radii.iter().copied().max().unwrap_or(0);
+        let band = (big + 2).min(o.h.min(o.w) / 2);
+        let (mw, mh) = (o.w - 2 * band, o.h - 2 * band);
+        let col = Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: a8,
+        };
+        // Four corner squares (anti-aliased) and four straight edges (whole
+        // pixels, so plain rectangles), disjoint.
+        for to in [
+            Rect::new(o.x, o.y, band, band),
+            Rect::new(o.right() - band, o.y, band, band),
+            Rect::new(o.x, o.bottom() - band, band, band),
+            Rect::new(o.right() - band, o.bottom() - band, band, band),
+        ] {
+            fill(list, &Clipped { shape: &ring, to }, col);
+        }
+        for e in [
+            Rect::new(o.x + band, o.y, mw, 1),
+            Rect::new(o.x + band, o.bottom() - 1, mw, 1),
+            Rect::new(o.x, o.y + band, 1, mh),
+            Rect::new(o.right() - 1, o.y + band, 1, mh),
+        ] {
+            if !e.is_empty() {
+                list.push(Item::FillRect {
+                    rect: PaintRect {
+                        x: px(e.x),
+                        y: px(e.y),
+                        width: px(e.w),
+                        height: px(e.h),
+                    },
+                    color: col,
+                });
+            }
+        }
     }
 }
 
@@ -476,6 +596,30 @@ mod tests {
         let disc = Circle::disc(circle_centre, circle_centre, r * SUB);
         let ci = render(&disc, 60, 60, BLACK);
         assert!(lum(&ci, 4, 4) > 128, "circle does not cover (4,4)");
+    }
+
+    #[test]
+    fn a_squircles_hints_agree_with_sampling() {
+        for (rect, radius) in [
+            (Rect::new(0, 0, 40, 40), 14),
+            (Rect::new(3, 2, 61, 33), 11),
+            (Rect::new(0, 0, 9, 50), 22),
+        ] {
+            let s = Squircle::new(rect, radius);
+            for y in -1..rect.bottom() + 1 {
+                for x in -1..rect.right() + 1 {
+                    let Some(h) = s.hint(x, y) else { continue };
+                    let mut hits = 0u32;
+                    for j in 0..4 {
+                        for i in 0..4 {
+                            hits += u32::from(s.inside(x * SUB + 2 * i + 1, y * SUB + 2 * j + 1));
+                        }
+                    }
+                    let sampled = ((hits * 255 + 8) / 16) as u8;
+                    assert_eq!(h, sampled, "({x},{y}) in {rect:?} r{radius}");
+                }
+            }
+        }
     }
 
     #[test]

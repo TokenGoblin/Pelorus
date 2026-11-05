@@ -58,5 +58,9 @@ grid (4, 8, 12, 16, 24). Colours come from `crates/px-brand/src/palette.rs`.
 
 ## Open
 
-Real window-control behaviour per OS, focus rings, keyboard navigation,
-high-contrast and reduced-motion modes, and the small-size mark for the taskbar.
+Real window-control behaviour per OS, high-contrast and reduced-motion modes,
+and the small-size mark for the taskbar. Done in Phase 18 polish: focus rings
+and Tab-order traversal, integer HiDPI scale, tab-strip scrolling. Window-control
+dots are neutral grey until the pointer is over them (`ControlDots::Neutral`;
+`Coloured` restores the always-coloured mockup look); the choice is pending the
+user's preference. Previews: `ui-preview-before-*.png`, `ui-preview-after-*.png`.

@@ -562,7 +562,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_SETCURSOR => {
             if (lp & 0xffff) as u32 == HTCLIENT {
                 let id = match st.cursor.get() {
-                    CursorShape::Default => IDC_ARROW,
+                    CursorShape::Default | CursorShape::Resize(_) => IDC_ARROW,
                     CursorShape::Text => IDC_IBEAM,
                     CursorShape::Pointer => IDC_HAND,
                 };
@@ -759,7 +759,7 @@ impl PlatformWindow for Win32Window {
         // SAFETY: stock cursor, as in WM_SETCURSOR.
         unsafe {
             let id = match shape {
-                CursorShape::Default => IDC_ARROW,
+                CursorShape::Default | CursorShape::Resize(_) => IDC_ARROW,
                 CursorShape::Text => IDC_IBEAM,
                 CursorShape::Pointer => IDC_HAND,
             };

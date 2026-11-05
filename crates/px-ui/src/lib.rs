@@ -28,5 +28,5 @@ pub mod text;
 pub mod theme;
 pub mod toolbar;
 
-pub use chrome::{Chrome, PlatformConfig};
+pub use chrome::{Chrome, ControlDots, PlatformConfig, Stop};
 pub use input::{Effect, Event, Outcome};

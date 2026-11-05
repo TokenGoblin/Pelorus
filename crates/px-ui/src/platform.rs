@@ -39,6 +39,16 @@ pub trait PlatformWindow {
     fn clipboard_request_read(&mut self);
     fn window_action(&mut self, action: WindowAction);
     fn request_redraw(&mut self);
+    /// Integer display scale (1, 2, 3): the frame handed to `present` is
+    /// `size() * scale_factor()` physical pixels. Backends that cannot tell say 1.
+    fn scale_factor(&self) -> u32 {
+        1
+    }
+    /// Start an interactive window move from the current pointer press. A
+    /// backend without frameless windows may ignore it.
+    fn begin_move(&mut self) {}
+    /// Start an interactive resize from `edge`.
+    fn begin_resize(&mut self, _edge: crate::input::ResizeEdge) {}
 }
 
 /// Carry out the platform half of `effects`; return the app half for the browser.
@@ -55,6 +65,8 @@ pub fn apply(window: &mut dyn PlatformWindow, effects: Vec<Effect>) -> Vec<AppRe
                 PlatformEffect::ClipboardWrite(t) => window.clipboard_write(&t),
                 PlatformEffect::ClipboardRead => window.clipboard_request_read(),
                 PlatformEffect::Window(a) => window.window_action(a),
+                PlatformEffect::BeginMove => window.begin_move(),
+                PlatformEffect::BeginResize(e) => window.begin_resize(e),
             },
         }
     }
@@ -149,6 +161,31 @@ mod tests {
         fn request_redraw(&mut self) {
             self.calls.push("redraw".into());
         }
+        fn begin_move(&mut self) {
+            self.calls.push("move".into());
+        }
+        fn begin_resize(&mut self, e: crate::input::ResizeEdge) {
+            self.calls.push(format!("resize {e:?}"));
+        }
+    }
+
+    #[test]
+    fn move_and_resize_requests_reach_the_window_and_scale_defaults_to_one() {
+        let mut w = Recording::default();
+        assert_eq!(w.scale_factor(), 1);
+        let mut chrome = Chrome::new(w.config(), w.size());
+        let m = Mono;
+        let ev = |x, y| {
+            Event::Pointer(crate::input::PointerEvent::new(
+                x,
+                y,
+                crate::input::PointerKind::Down(crate::input::Button::Primary),
+            ))
+        };
+        pump(&mut w, &mut chrome, &m, ev(700, 20));
+        pump(&mut w, &mut chrome, &m, ev(917, 300));
+        assert!(w.calls.contains(&"move".to_string()));
+        assert!(w.calls.contains(&"resize East".to_string()));
     }
 
     #[test]

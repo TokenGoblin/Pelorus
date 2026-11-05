@@ -117,6 +117,41 @@ impl PointerEvent {
     }
 }
 
+/// A scroll gesture. `dx`/`dy` are logical pixels, positive meaning "further
+/// along" (right, down): the platform converts wheel notches and touchpad
+/// deltas, the chrome never sees lines or pages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WheelEvent {
+    pub pos: Point,
+    pub dx: i32,
+    pub dy: i32,
+    pub mods: Modifiers,
+}
+
+impl WheelEvent {
+    pub fn new(x: i32, y: i32, dx: i32, dy: i32) -> WheelEvent {
+        WheelEvent {
+            pos: Point { x, y },
+            dx,
+            dy,
+            mods: Modifiers::NONE,
+        }
+    }
+}
+
+/// Which edge or corner of a frameless window a resize grip is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResizeEdge {
+    North,
+    South,
+    East,
+    West,
+    NorthEast,
+    NorthWest,
+    SouthEast,
+    SouthWest,
+}
+
 /// An input-method composition in progress (not yet committed text).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preedit {
@@ -138,6 +173,11 @@ pub enum Event {
     WindowFocus(bool),
     /// Client area resized, logical pixels.
     Resize(Size),
+    /// The display's integer scale factor changed (1, 2 or 3; others are
+    /// clamped). Every other event stays in logical pixels.
+    Scale(u32),
+    /// Wheel or touchpad scroll.
+    Wheel(WheelEvent),
 }
 
 /// What the chrome did with an event. An unconsumed event belongs to the page
@@ -153,6 +193,8 @@ pub enum CursorShape {
     Default,
     Text,
     Pointer,
+    /// Over a resize grip of a frameless window.
+    Resize(ResizeEdge),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +217,11 @@ pub enum PlatformEffect {
     /// Asynchronous: the answer arrives as [`Event::Clipboard`].
     ClipboardRead,
     Window(WindowAction),
+    /// A frameless window's bar was pressed: hand the pointer to the window
+    /// manager to move the window (`_NET_WM_MOVERESIZE`, `WM_NCLBUTTONDOWN`).
+    BeginMove,
+    /// A resize grip was pressed: the same, to resize from `edge`.
+    BeginResize(ResizeEdge),
 }
 
 /// Requests for the browser: the chrome states what the user asked for; it does
