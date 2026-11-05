@@ -21,4 +21,4 @@ pub mod keys;
 pub mod proto;
 mod window;
 
-pub use window::X11Window;
+pub use window::{ShapeMode, X11Window};

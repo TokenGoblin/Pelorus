@@ -12,13 +12,15 @@ use super::conn::{Conn, RawEvent, Wait};
 use super::discover::Auth;
 use super::keys::{self, KeyMap};
 use super::proto::{self, Reader};
-use crate::{Display, DisplayError, DisplayEvent, WindowOptions};
+use crate::{
+    Display, DisplayError, DisplayEvent, Mask, WindowKind, WindowOptions, WindowShape,
+};
 
 /// Largest clipboard payload accepted from another client, in bytes. A larger
 /// one (or an INCR transfer) is dropped rather than truncated.
 const MAX_CLIPBOARD: u32 = 1 << 20;
 
-const ATOM_NAMES: [&str; 14] = [
+const ATOM_NAMES: [&str; 21] = [
     "WM_PROTOCOLS",
     "WM_DELETE_WINDOW",
     "_NET_WM_NAME",
@@ -33,7 +35,32 @@ const ATOM_NAMES: [&str; 14] = [
     "PX_SELECTION",
     "INCR",
     "TEXT",
+    // Compositing manager selection of screen 0 (EWMH): owned = a compositor runs.
+    "_NET_WM_CM_S0",
+    "_NET_WM_WINDOW_TYPE",
+    "_NET_WM_WINDOW_TYPE_DIALOG",
+    "_NET_WM_WINDOW_TYPE_POPUP_MENU",
+    "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
+    "_NET_WM_WINDOW_TYPE_TOOLTIP",
+    "_NET_WM_WINDOW_TYPE_NORMAL",
 ];
+
+/// How the window outline is realised on this display. Chosen once, at creation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeMode {
+    /// No outline requested (or no way to realise one): a plain rectangle.
+    Rect,
+    /// A compositor is running: a 32-bit ARGB visual with premultiplied
+    /// per-pixel alpha. Anti-aliased.
+    Argb,
+    /// No compositor: the core-protocol SHAPE extension clips the window to the
+    /// squircle thresholded at half coverage. Aliased edges (the documented
+    /// fallback).
+    ShapeExt,
+    /// No compositor and no SHAPE: the window stays a rectangle; input in the
+    /// transparent corners is still discarded in software.
+    Software,
+}
 
 #[derive(Clone, Copy)]
 struct Atoms {
@@ -51,6 +78,13 @@ struct Atoms {
     prop: u32,
     incr: u32,
     text: u32,
+    cm_s0: u32,
+    wtype: u32,
+    wt_dialog: u32,
+    wt_popup_menu: u32,
+    wt_dropdown: u32,
+    wt_tooltip: u32,
+    wt_normal: u32,
 }
 
 pub struct X11Window {
@@ -58,6 +92,15 @@ pub struct X11Window {
     wid: u32,
     gc: u32,
     depth: u8,
+    kind: WindowKind,
+    mode: ShapeMode,
+    shape: Option<WindowShape>,
+    /// Outline coverage at the current size.
+    mask: Mask,
+    /// Major opcode of the SHAPE extension, when the server has it.
+    shape_major: Option<u8>,
+    /// The last pointer position was inside the outline.
+    pointer_inside: bool,
     size: Size,
     atoms: Atoms,
     keymap: KeyMap,
@@ -107,14 +150,46 @@ impl X11Window {
             | proto::MASK_STRUCTURE_NOTIFY
             | proto::MASK_FOCUS_CHANGE
             | proto::MASK_PROPERTY_CHANGE;
-        conn.send(proto::create_window(
+
+        // Pick how the outline is realised (see `ShapeMode`).
+        let shape_major = if opts.shape.is_some() {
+            query_major(&mut conn, "SHAPE")
+        } else {
+            None
+        };
+        let compositor = opts.shape.is_some() && compositor_running(&mut conn, atoms.cm_s0);
+        let argb = if compositor { s.argb_visual() } else { None };
+        let mode = match (opts.shape, argb, shape_major) {
+            (None, ..) => ShapeMode::Rect,
+            (Some(_), Some(_), _) => ShapeMode::Argb,
+            (Some(_), None, Some(_)) => ShapeMode::ShapeExt,
+            (Some(_), None, None) => ShapeMode::Software,
+        };
+        let (depth, visual, colormap) = match argb {
+            Some(v) if mode == ShapeMode::Argb => {
+                let cmap = conn.alloc_id()?;
+                conn.send(proto::create_colormap(cmap, s.root, v.id))?;
+                (32u8, v.id, Some(cmap))
+            }
+            _ => (24u8, s.root_visual, None),
+        };
+        let (px, py) = opts.position.map_or((0, 0), |(x, y)| {
+            (
+                i16::try_from(x).unwrap_or(0),
+                i16::try_from(y).unwrap_or(0),
+            )
+        });
+        conn.send(proto::create_window(&proto::NewWindow {
             wid,
-            s.root,
-            24,
-            s.root_visual,
-            (w, h),
-            mask,
-        ))?;
+            parent: s.root,
+            depth,
+            visual,
+            pos: (px, py),
+            size: (w, h),
+            event_mask: mask,
+            override_redirect: opts.kind.is_transient(),
+            colormap,
+        }))?;
         conn.send(proto::create_gc(gc, wid))?;
 
         // Title, class, close protocol.
@@ -155,7 +230,27 @@ impl X11Window {
             1,
             &proto::words_le(&[atoms.delete]),
         ))?;
-        if opts.frameless {
+        // EWMH window type, for managed windows and compositors alike.
+        let wtype = match opts.kind {
+            WindowKind::Main => atoms.wt_normal,
+            WindowKind::Dialog => atoms.wt_dialog,
+            WindowKind::Popup => atoms.wt_dropdown,
+            WindowKind::Menu => atoms.wt_popup_menu,
+            WindowKind::Tooltip => atoms.wt_tooltip,
+        };
+        if wtype != 0 {
+            conn.send(proto::change_property(
+                wid,
+                atoms.wtype,
+                proto::ATOM_ATOM,
+                32,
+                1,
+                &proto::words_le(&[wtype]),
+            ))?;
+        }
+        // A shaped window draws its own outline: the window manager's frame
+        // would be a rectangle around a squircle.
+        if opts.frameless || opts.shape.is_some() {
             // _MOTIF_WM_HINTS: flags = decorations, decorations = none.
             conn.send(proto::change_property(
                 wid,
@@ -176,6 +271,11 @@ impl X11Window {
             conn.send(proto::create_glyph_cursor(id, font, glyph))?;
             *slot = id;
         }
+        let mask = match opts.shape {
+            Some(sh) => sh.mask(u32::from(w), u32::from(h)),
+            None => Mask::full(u32::from(w), u32::from(h)),
+        };
+        apply_shape(&mut conn, wid, mode, shape_major, opts.kind, &mask)?;
         conn.send(proto::map_window(wid))?;
         conn.sync()?;
 
@@ -183,7 +283,13 @@ impl X11Window {
             conn,
             wid,
             gc,
-            depth: 24,
+            depth,
+            kind: opts.kind,
+            mode,
+            shape: opts.shape,
+            mask,
+            shape_major,
+            pointer_inside: true,
             size: Size::new(i32::from(w), i32::from(h)),
             atoms,
             keymap,
@@ -208,6 +314,17 @@ impl X11Window {
 
     /// Read back window pixels as B,G,R,X rows (tests, screenshots).
     pub fn get_image(&mut self, rect: Rect) -> Result<Vec<u8>, DisplayError> {
+        self.get_drawable_image(self.wid, rect)
+    }
+
+    /// Read back root-window pixels (B,G,R,X rows): a screenshot of what is on
+    /// screen, composited if a compositor runs (tests, docs/brand screenshots).
+    pub fn get_root_image(&mut self, rect: Rect) -> Result<Vec<u8>, DisplayError> {
+        let root = self.conn.setup.root;
+        self.get_drawable_image(root, rect)
+    }
+
+    fn get_drawable_image(&mut self, drawable: u32, rect: Rect) -> Result<Vec<u8>, DisplayError> {
         let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
             i16::try_from(rect.x),
             i16::try_from(rect.y),
@@ -218,7 +335,7 @@ impl X11Window {
         };
         let r = self.conn.round_trip(
             proto::Req::new(73, 2)
-                .u32(self.wid)
+                .u32(drawable)
                 .i16(x)
                 .i16(y)
                 .u16(w)
@@ -315,6 +432,7 @@ impl X11Window {
                 );
                 if size != self.size && size.w > 0 && size.h > 0 {
                     self.size = size;
+                    self.reshape()?;
                     self.out.push_back(DisplayEvent::Ui(Event::Resize(size)));
                     self.out
                         .push_back(DisplayEvent::Redraw(Rect::new(0, 0, size.w, size.h)));
@@ -343,7 +461,63 @@ impl X11Window {
         Ok(())
     }
 
+    /// Recompute the outline for the current size and re-apply it.
+    fn reshape(&mut self) -> Result<(), DisplayError> {
+        let (w, h) = (
+            u32::try_from(self.size.w).unwrap_or(0),
+            u32::try_from(self.size.h).unwrap_or(0),
+        );
+        self.mask = match self.shape {
+            Some(sh) => sh.mask(w, h),
+            None => Mask::full(w, h),
+        };
+        apply_shape(
+            &mut self.conn,
+            self.wid,
+            self.mode,
+            self.shape_major,
+            self.kind,
+            &self.mask,
+        )
+    }
+
+    /// How the outline is realised (tests, diagnostics).
+    pub fn shape_mode(&self) -> ShapeMode {
+        self.mode
+    }
+
+    /// Is window pixel `(x, y)` inside the outline? Transparent corners are not.
+    pub fn hit(&self, x: i32, y: i32) -> bool {
+        self.mask.hit(x, y)
+    }
+
     fn pointer(&mut self, x: i16, y: i16, kind: PointerKind, state: u16) {
+        // Transparent corners are outside the window. The server already
+        // withholds them when the input region is set; this covers the rest
+        // (no SHAPE extension). A press there is dropped, a move there becomes
+        // one Leave, a release always passes (a drag may end anywhere).
+        if self.shape.is_some() && kind != PointerKind::Leave {
+            let in_rect = x >= 0
+                && y >= 0
+                && i32::from(x) < self.size.w
+                && i32::from(y) < self.size.h;
+            let hit = self.mask.hit(i32::from(x), i32::from(y));
+            if in_rect && !hit {
+                match kind {
+                    PointerKind::Move if self.pointer_inside => {
+                        self.pointer_inside = false;
+                        let mut e = PointerEvent::new(i32::from(x), i32::from(y), PointerKind::Leave);
+                        e.mods = keys::modifiers(state);
+                        self.out.push_back(DisplayEvent::Ui(Event::Pointer(e)));
+                        return;
+                    }
+                    PointerKind::Move | PointerKind::Down(_) => return,
+                    _ => {}
+                }
+            } else if hit {
+                self.pointer_inside = true;
+            }
+        }
         let mut e = PointerEvent::new(i32::from(x), i32::from(y), kind);
         e.mods = keys::modifiers(state);
         self.out.push_back(DisplayEvent::Ui(Event::Pointer(e)));
@@ -484,9 +658,15 @@ impl X11Window {
             for row in 0..n {
                 let start = (y + row) * stride + x0 as usize * 4;
                 let src = frame.pixels.get(start..start + row_bytes).unwrap_or(&[]);
-                for &[r, g, b, _] in src.as_chunks::<4>().0 {
-                    // RGBA -> B,G,R,X
-                    buf.extend_from_slice(&[b, g, r, 0]);
+                if self.mode == ShapeMode::Argb {
+                    // RGBA -> premultiplied B,G,R,A under the outline.
+                    self.mask
+                        .premultiply_row((y + row) as i32, x0, src.as_chunks::<4>().0, &mut buf);
+                } else {
+                    for &[r, g, b, _] in src.as_chunks::<4>().0 {
+                        // RGBA -> B,G,R,X
+                        buf.extend_from_slice(&[b, g, r, 0]);
+                    }
                 }
             }
             if buf.len() != n * row_bytes {
@@ -547,6 +727,13 @@ fn intern_all(conn: &mut Conn) -> Result<Atoms, DisplayError> {
         prop: g(11),
         incr: g(12),
         text: g(13),
+        cm_s0: g(14),
+        wtype: g(15),
+        wt_dialog: g(16),
+        wt_popup_menu: g(17),
+        wt_dropdown: g(18),
+        wt_tooltip: g(19),
+        wt_normal: g(20),
     };
     if ids.len() != ATOM_NAMES.len() || [a.wm_protocols, a.delete, a.utf8, a.clipboard].contains(&0)
     {
@@ -555,6 +742,79 @@ fn intern_all(conn: &mut Conn) -> Result<Atoms, DisplayError> {
         ));
     }
     Ok(a)
+}
+
+/// Major opcode of an extension, if the server has it.
+fn query_major(conn: &mut Conn, name: &str) -> Option<u8> {
+    let q = conn.round_trip(proto::query_extension(name)).ok()?;
+    let present = q.body.first().copied().unwrap_or(0) != 0;
+    let major = q.body.get(1).copied().unwrap_or(0);
+    (present && major != 0).then_some(major)
+}
+
+/// Is a compositing manager running on screen 0? EWMH: it owns the selection
+/// `_NET_WM_CM_S0`. Fail closed: any error counts as "none", which picks the
+/// SHAPE fallback (always correct, merely aliased).
+fn compositor_running(conn: &mut Conn, atom: u32) -> bool {
+    if atom == 0 {
+        return false;
+    }
+    conn.round_trip(proto::get_selection_owner(atom))
+        .ok()
+        .and_then(|r| r.u32_at(8))
+        .is_some_and(|owner| owner != 0)
+}
+
+/// Clip the window (and its input) to the outline, as the mode allows.
+fn apply_shape(
+    conn: &mut Conn,
+    wid: u32,
+    mode: ShapeMode,
+    major: Option<u8>,
+    kind: WindowKind,
+    mask: &Mask,
+) -> Result<(), DisplayError> {
+    let Some(major) = major else {
+        return Ok(());
+    };
+    if matches!(mode, ShapeMode::Rect | ShapeMode::Software) {
+        return Ok(());
+    }
+    // A tooltip never takes the pointer: an empty input region.
+    let rects: Vec<(i16, i16, u16, u16)> = if kind == WindowKind::Tooltip {
+        Vec::new()
+    } else {
+        mask.rects()
+            .iter()
+            .filter_map(|r| {
+                Some((
+                    i16::try_from(r.x).ok()?,
+                    i16::try_from(r.y).ok()?,
+                    u16::try_from(r.w).ok()?,
+                    u16::try_from(r.h).ok()?,
+                ))
+            })
+            .collect()
+    };
+    if mode == ShapeMode::ShapeExt {
+        // Bounding region: the visible, clipped shape. Aliased.
+        let all: Vec<_> = mask
+            .rects()
+            .iter()
+            .filter_map(|r| {
+                Some((
+                    i16::try_from(r.x).ok()?,
+                    i16::try_from(r.y).ok()?,
+                    u16::try_from(r.w).ok()?,
+                    u16::try_from(r.h).ok()?,
+                ))
+            })
+            .collect();
+        conn.send(proto::shape_rectangles(major, wid, 0, &all))?;
+    }
+    // Input region: transparent corners belong to the window below.
+    conn.send(proto::shape_rectangles(major, wid, 2, &rects))?;
+    Ok(())
 }
 
 fn fetch_keymap(conn: &mut Conn) -> Result<KeyMap, DisplayError> {

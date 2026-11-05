@@ -210,7 +210,42 @@ pub struct Setup {
     pub root_depth: u8,
     pub width_px: u16,
     pub height_px: u16,
+    /// Every visual of the first screen (capped), for picking a 32-bit ARGB one.
+    pub visuals: Vec<Visual>,
 }
+
+/// One visual of the first screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Visual {
+    pub id: u32,
+    pub depth: u8,
+    /// 4 = TrueColor, 5 = DirectColor.
+    pub class: u8,
+    pub red: u32,
+    pub green: u32,
+    pub blue: u32,
+}
+
+impl Setup {
+    /// A 32-bit TrueColor visual laid out as ARGB (alpha in the top byte, 8 bits
+    /// each of R, G, B), the one compositors blend, if the screen has it and the
+    /// server has a matching 32 bpp pixmap format.
+    pub fn argb_visual(&self) -> Option<Visual> {
+        if !self.formats.iter().any(|&(d, bpp, _)| d == 32 && bpp == 32) {
+            return None;
+        }
+        self.visuals.iter().copied().find(|v| {
+            v.depth == 32
+                && v.class == 4
+                && v.red == 0x00ff_0000
+                && v.green == 0x0000_ff00
+                && v.blue == 0x0000_00ff
+        })
+    }
+}
+
+/// At most this many visuals are read from a setup reply.
+const MAX_VISUALS: usize = 256;
 
 pub enum SetupReply {
     /// The server needs more bytes (the number needed in total, if known).
@@ -254,6 +289,7 @@ pub fn parse_setup(b: &[u8]) -> Result<SetupReply, String> {
                 root_depth: 0,
                 width_px: 0,
                 height_px: 0,
+                visuals: Vec::new(),
             };
             if n_screens == 0 {
                 return Err("server has no screen".into());
@@ -273,6 +309,39 @@ pub fn parse_setup(b: &[u8]) -> Result<SetupReply, String> {
             setup.height_px = r.u16_at(p + 22).ok_or_else(bad)?;
             setup.root_visual = r.u32_at(p + 32).ok_or_else(bad)?;
             setup.root_depth = r.u8_at(p + 38).ok_or_else(bad)?;
+            // DEPTH records follow the 40-byte screen header: depth, pad, number
+            // of visuals, pad(4), then 24 bytes per VISUALTYPE. A malformed tail
+            // only costs us the extra visuals, never the connection.
+            let n_depths = usize::from(r.u8_at(p + 39).unwrap_or(0));
+            let mut q = p + 40;
+            'depths: for _ in 0..n_depths {
+                let (Some(depth), Some(nv)) = (r.u8_at(q), r.u16_at(q + 2)) else {
+                    break;
+                };
+                q += 8;
+                for _ in 0..nv {
+                    let (Some(id), Some(class), Some(red), Some(green), Some(blue)) = (
+                        r.u32_at(q),
+                        r.u8_at(q + 4),
+                        r.u32_at(q + 8),
+                        r.u32_at(q + 12),
+                        r.u32_at(q + 16),
+                    ) else {
+                        break 'depths;
+                    };
+                    if setup.visuals.len() < MAX_VISUALS {
+                        setup.visuals.push(Visual {
+                            id,
+                            depth,
+                            class,
+                            red,
+                            green,
+                            blue,
+                        });
+                    }
+                    q += 24;
+                }
+            }
             Ok(SetupReply::Ok(Box::new(setup), total))
         }
         2 => Err("server requires further authentication (not supported)".into()),
@@ -410,28 +479,82 @@ pub fn client_message_words(raw: &[u8; 32]) -> (u32, [u32; 5]) {
 
 // -- request builders ----------------------------------------------------------------------
 
-pub fn create_window(
-    wid: u32,
-    parent: u32,
-    depth: u8,
-    visual: u32,
-    (w, h): (u16, u16),
-    event_mask: u32,
-) -> Req {
-    // value-mask: BackingStore? no. BackPixel (0x2) and EventMask (0x800).
-    Req::new(OP_CREATE_WINDOW, depth)
-        .u32(wid)
-        .u32(parent)
-        .i16(0)
-        .i16(0)
-        .u16(w)
-        .u16(h)
+/// Everything `CreateWindow` needs here.
+pub struct NewWindow {
+    pub wid: u32,
+    pub parent: u32,
+    pub depth: u8,
+    pub visual: u32,
+    pub pos: (i16, i16),
+    pub size: (u16, u16),
+    pub event_mask: u32,
+    /// Bypass the window manager (popups, menus, tooltips).
+    pub override_redirect: bool,
+    /// Required when the visual differs from the parent's (a 32-bit ARGB visual
+    /// under a 24-bit root): a colormap of that visual. Also sets a border pixel,
+    /// the other attribute `BadMatch` demands in that case.
+    pub colormap: Option<u32>,
+}
+
+pub fn create_window(n: &NewWindow) -> Req {
+    // Value mask bits, in the order their values follow: BackPixel 0x2,
+    // BorderPixel 0x8, OverrideRedirect 0x200, EventMask 0x800, Colormap 0x2000.
+    let mut mask = 0x2 | 0x800;
+    if n.colormap.is_some() {
+        mask |= 0x8 | 0x2000;
+    }
+    if n.override_redirect {
+        mask |= 0x200;
+    }
+    let mut r = Req::new(OP_CREATE_WINDOW, n.depth)
+        .u32(n.wid)
+        .u32(n.parent)
+        .i16(n.pos.0)
+        .i16(n.pos.1)
+        .u16(n.size.0)
+        .u16(n.size.1)
         .u16(0)
         .u16(1) // InputOutput
-        .u32(visual)
-        .u32(0x2 | 0x800)
-        .u32(0) // BackPixel: black
-        .u32(event_mask)
+        .u32(n.visual)
+        .u32(mask)
+        .u32(0); // BackPixel: black, or fully transparent on an ARGB visual
+    if n.colormap.is_some() {
+        r = r.u32(0); // BorderPixel
+    }
+    if n.override_redirect {
+        r = r.u32(1);
+    }
+    r = r.u32(n.event_mask);
+    if let Some(c) = n.colormap {
+        r = r.u32(c);
+    }
+    r
+}
+
+/// `CreateColormap` (alloc None) for `visual` on `window`'s screen.
+pub fn create_colormap(mid: u32, window: u32, visual: u32) -> Req {
+    Req::new(78, 0).u32(mid).u32(window).u32(visual)
+}
+
+pub fn get_selection_owner(selection: u32) -> Req {
+    Req::new(23, 0).u32(selection)
+}
+
+/// SHAPE `ShapeRectangles` (minor 1): set `kind` (0 bounding, 2 input) of `wid`
+/// to the union of `rects` (x, y, w, h), YX-banded.
+pub fn shape_rectangles(major: u8, wid: u32, kind: u8, rects: &[(i16, i16, u16, u16)]) -> Req {
+    let mut r = Req::new(major, 1)
+        .u8(0) // operation: Set
+        .u8(kind)
+        .u8(3) // ordering: YXBanded
+        .u8(0)
+        .u32(wid)
+        .i16(0)
+        .i16(0);
+    for &(x, y, w, h) in rects {
+        r = r.i16(x).i16(y).u16(w).u16(h);
+    }
+    r
 }
 
 pub fn map_window(wid: u32) -> Req {
