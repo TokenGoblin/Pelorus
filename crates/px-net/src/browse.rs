@@ -562,6 +562,36 @@ mod tests {
     }
 
     #[test]
+    fn image_signatures_are_sniffed_and_everything_else_is_not() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+        assert_eq!(sniff_image(&png), Some(ImageKind::Png));
+        assert_eq!(sniff_image(b"GIF89a\x01\x00"), Some(ImageKind::Gif));
+        assert_eq!(sniff_image(b"GIF87a"), Some(ImageKind::Gif));
+        assert_eq!(
+            sniff_image(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some(ImageKind::Jpeg)
+        );
+        assert_eq!(sniff_image(b"BM\x00\x00"), Some(ImageKind::Bmp));
+        assert_eq!(sniff_image(&[0, 0, 1, 0, 1, 0]), Some(ImageKind::Ico));
+        assert_eq!(
+            sniff_image(b"RIFF\x00\x00\x00\x00WEBPVP8 "),
+            Some(ImageKind::Webp)
+        );
+        // Documents, scripts, SVG, truncations and the empty body are not pictures.
+        for not in [
+            &b"<html>"[..],
+            b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+            b"<?xml version='1.0'?><svg/>",
+            b"GIF8",
+            b"\x89PNG",
+            b"RIFF\x00\x00\x00\x00WAVEfmt ",
+            b"",
+        ] {
+            assert_eq!(sniff_image(not), None, "{not:?}");
+        }
+    }
+
+    #[test]
     fn lists_parse() {
         assert!(WebSession::new().is_ok());
     }
