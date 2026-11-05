@@ -163,21 +163,25 @@ GitHub CI yet.
 | 5 glyph rasterizer | **Done.** Integer exact-area coverage, hand-derived expectations. Where contours cross inside one pixel the coverage is the clamped sum (an approximation); pixels fully inside or outside are exact |
 | 6 line breaking, 7 bidi | **Done** over data already in the lockfile plus `unicode-bidi` |
 | wiring into paint | **Done.** Text renders as real glyphs; 11 baselines re-blessed, each read; 3 new text fixtures (RTL, centered wrap, mixed direction) |
-| 8 system fonts | **Not started** |
+| 8 system fonts | **Done on Linux, untested on Windows.** Pure bounded scan over an injected `DirReader` in px-text (`sysfonts`), the `std::fs` reader in px-broker (`system_fonts`), a hostile-bytes `name`/`OS/2` parser, generic-family preference lists. Never used by the render corpus or tests (a test pins the registry to the bundled set). Windows roots are unit-tested against a fake environment only |
 | 9 IME | **Not started.** Needs real Windows and Linux machines to prove |
 | 10 cross-OS baselines | **Not started.** One byte-identical set is the claim; Windows has never run it |
-| bundled Noto subsets | **Not started** (Cyrillic, CJK, Arabic, Hebrew, Devanagari) |
+| bundled Noto faces | **Done for Latin, Cyrillic, Hebrew, Arabic, Devanagari** (whole OFL faces, no subsetting, 0.94 MB). **CJK not bundled**: needs a user decision, see docs/backlog.md "Phase 9: no CJK face". Four `text-script-*` baselines read as images |
 
 ### What the gate needs, and the honest distance
 
 The gate is six scripts baselined plus an IME composition test on both OSes.
 
-- **Latin:** the pipeline works end to end, but Ahem draws every letter as a solid
-  square, so today's baselines prove *geometry* (advances, baselines, wrapping,
-  direction), not glyph shapes. A real Latin face is needed for the claim.
-- **Cyrillic, CJK, Arabic, Hebrew, Devanagari:** blocked on bundled fonts. Hebrew
-  currently renders Ahem's hollow `.notdef` box. Nothing for these scripts is
-  baselined.
+- **Latin, Cyrillic, Hebrew, Arabic, Devanagari:** baselined with real glyph shapes
+  (`text-script-latin-cyrillic`, `-hebrew`, `-arabic`, `-devanagari`; bundled Noto
+  faces, per-character fallback). Read as images: shapes recognisable, Hebrew and
+  Arabic right to left, Arabic joined, Devanagari conjuncts and headline bar present.
+  Not yet proven: the same bytes on Windows (the cross-OS job), and agreement with
+  HarfBuzz (no reference tool here; shaping is checked against the fonts' own glyph
+  names instead). The older Ahem baselines still prove geometry only.
+- **CJK:** **not baselined, no face bundled.** The user must choose how
+  (docs/backlog.md, "Phase 9: no CJK face is bundled"): fonttools in a throwaway venv,
+  a Rust subsetter with CFF reading, or defer. The sixth gate script is open until then.
 - **IME:** not started and not provable in a container without a display or an
   input method.
 

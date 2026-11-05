@@ -1386,6 +1386,7 @@ dependencies = [
  "px-layout",
  "px-net",
  "px-sandbox",
+ "px-text",
  "stylo",
  "url",
 ]
@@ -1470,6 +1471,7 @@ name = "px-net"
 version = "0.0.0"
 dependencies = [
  "px-sandbox",
+ "px-websec",
  "rustls",
  "rustls-pki-types",
  "webpki-roots",

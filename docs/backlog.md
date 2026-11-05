@@ -6,6 +6,7 @@ every defect they encounter never close.
 Format: one entry per defect.
 
 ```
+
 ## <short title>
 - **Found in:** phase NN, <crate or file>
 - **Belongs to:** phase NN (or: unassigned)
@@ -1268,6 +1269,7 @@ follows.
   `tests/layout.rs` in px-a11y has the reference adapter and shows the gap. The `hidden`
   attribute, `aria-hidden` and the user-agent never-rendered elements already exclude nodes.
 - **Why deferred:** exposing `display` is a px-css change, outside the accessibility phase's crate.
+
 ## Duplicated inflate and PNG decoder: px-paint and px-image
 
 - **Found in:** phase 15 (px-image, ADR 042)
@@ -1325,3 +1327,86 @@ follows.
     not applied by `spawn`; the grandchild-orphan case in `SandboxedChild::kill` stays open.
   - Clipboard: Linux has none without a display; a display-server connection is the
     `socket_unix` / `connect_unix_display` attempts. Windows clipboard attempts do not exist.
+
+## Phase 10 fixture table: findings and what it cannot see
+
+- **Found in:** phase 10 unit 6 (`crates/px-script/tests/fixtures/table.rs`)
+- **Fixed in the same commit (small, inside px-script):** `setTimeout(f, 2**31)` and
+  `setTimeout(f, Infinity)` were clamped to the 32-bit ceiling (about 24 days). The delay is a
+  WebIDL `long` with no `[Clamp]`, so it converts with `ToInt32`: `2**31` wraps to a negative
+  number, which the timer steps turn into zero, and `Infinity` becomes zero. Browsers agree.
+  `delay_ms` in `runtime.rs` now does `ToInt32`; the row `delay_two_to_the_31_wraps_to_zero`
+  pins it. (Found because the row's expectation was written from the spec before it was run.)
+- **Not reported anywhere: unhandled promise rejections.** `Promise.reject(x)` with no handler,
+  and an async function that throws with nobody awaiting it, are silent: the host has no
+  `promise_rejection_tracker` and no console. HTML would fire `unhandledrejection` on the
+  global and then report to the console. With no `EventTarget` and no console in Phase 10 the
+  difference is not script-visible, and the row
+  `unhandled_rejection_does_not_stop_the_loop_and_is_not_an_uncaught_error` pins what IS
+  required now (the page survives; it is not counted as an uncaught exception). **Belongs to
+  Phase 11** (events) and the devtools/console work: add the tracker when `unhandledrejection`
+  and `rejectionhandled` exist.
+- **Not covered by the table (Phase 11):** DOM event dispatch order, `<script>` parse-blocking
+  and `async`/`defer` order, `requestAnimationFrame` against rendering, `MutationObserver`
+  timing, `postMessage` and `MessageChannel` tasks, `fetch` task sources. Loop-level ordering
+  only.
+- **Process rows run on the real clock:** only rows whose gaps are large against scheduling
+  noise run through the content binary. The close-spaced timing rows (a 3 ms timer against a
+  5 ms one, the 4 ms nested clamp) run on the manual clock only, so the real-clock path has
+  not been shown to honour them under load.
+
+## Phase 9: no CJK face is bundled (needs a user decision)
+
+- **State:** the bundled set is Ahem plus whole Noto Sans, Hebrew, Arabic and Devanagari
+  Regular (`tests/fonts/PROVENANCE`). **No CJK face is bundled**, so the sixth gate script
+  has no baseline. Noto Sans CJK is CFF-based (`OTTO`), which px-text's own reader
+  rejects (`Unsupported`), and a whole face is tens of MB. Subsetting needs a tool that is
+  not installed here, and this session may not install or run third-party code.
+- **Decision needed from the user, one of:**
+  1. Authorize installing `fonttools` in a throwaway virtualenv (outside the repo) to
+     subset a CJK face to the fixtures' glyphs (the subsetter would not be committed;
+     ADR 036 (g) and ADR 032 only need the recipe recorded in `PROVENANCE`). The output
+     is CFF-flavoured unless converted to `glyf`, so also decide whether to add CFF
+     outline support to px-text (the shaper, harfrust/skrifa, already reads CFF; only
+     `glyf.rs` and the rasterizer source do not) or to convert to quadratic `glyf` (a
+     fonttools step, `cu2qu`).
+  2. Write a Rust subsetter and CFF reader in this repo (several hundred lines; keeps
+     the project 100% Rust and removes the external step; the larger option).
+  3. Defer CJK: Phase 9's gate stays at five of six scripts and says so.
+- **Code is CJK-ready:** `FontRegistry::fallback_for` and layout's `split_by_font` take
+  any registered face; appending a CJK face to `BUNDLED_FAMILIES` and `FALLBACK_ORDER`
+  (last, so ids do not move) is the whole change, plus a `text-script-cjk` fixture.
+  `unmapped_characters_have_no_fallback_yet` in `crates/px-text/tests/bundled.rs` pins
+  today's `None` for U+65E5 and must flip then.
+- **System fonts:** symlinks are skipped, never followed, so a font directory made of
+  symlinks (some distributions) finds nothing; resolving a link and checking the target
+  is inside the root needs a `canonicalize` in the broker reader. The scan reads whole
+  files to reach the `name` table, bounded (1 GiB total); a range-reading `DirReader`
+  would make a large CJK-heavy font directory cheaper. The Windows roots are unit-tested
+  with a fake environment only; they have not run on Windows.
+
+## Unify the two Origin types in px-websec; finish Phase 12 wiring outside the fetch path
+
+- **Found in:** phase 12 fetch integration (`crates/px-net/src/secure.rs`)
+- **Belongs to:** phase 12 (types), phase 13 (document / navigation / worker wiring)
+- **What:**
+  - `origin::Origin`/`origin::Url` and `csp::url::Origin`/`CspUrl` are separate
+    types. `secure.rs` crosses between them by serialising a URL and parsing it
+    again, and denies when the CSP engine cannot express it. CSP also drops the
+    query on re-parse, so the CSP engine's `upgrade_insecure_url` result is used
+    only as a yes/no and the upgrade is done on the websec URL. Unifying them
+    removes the round trip and a class of "parsed differently by two parsers"
+    bugs. Not done here: it touches every CSP test.
+  - `RequestOptions::integrity` (CSP hash-source allowing an external script by
+    its `integrity`) is passed empty.
+  - Not reachable from a fetch, left to the content process: `<meta>` CSP,
+    policy inheritance for `about:`/`blob:`/`data:`, `coop::group_switch`,
+    `referrer::parse_attribute`, CSP inline/eval/`form-action`/`base-uri`,
+    COEP report-only reporting, CSP report delivery.
+  - The fetch path does not use the connection pool and opens one connection
+    per request.
+  - WPT thresholds for `cors/`, `fetch/`, `mixed-content/`, `referrer-policy/`,
+    `content-security-policy/` (the Phase 12 gate) are unmeasured.
+- **Why deferred:** each needs a consumer (a document, a worker, a navigation)
+  that does not exist yet, or is a refactor wider than this integration.
+  `docs/phase-12-integration.md` lists what is and is not wired.

@@ -27,6 +27,11 @@ webpki-roots = "1"
 # lives in the audited unsafe core and this crate receives DER blobs. px-net
 # stays forbid(unsafe_code) and never names an OS type.
 px-sandbox = { path = "../px-sandbox", version = "0.0.0" }
+# Phase 12: the fetch path calls the web security model at every point a
+# request or response is decided (`crate::secure`). px-websec is std-only and
+# does not depend on px-net, so there is no cycle; it is a workspace crate, not
+# a third-party dependency.
+px-websec = { path = "../px-websec", version = "0.0.0" }
 
 [dev-dependencies]
 # The anchor tests check px-net against px-sandbox directly, to catch a
@@ -38,7 +43,7 @@ webpki-roots = "1"
 # §14.4: a test-only trust anchor for the local server the Phase 3 gate
 # fetches from. Scanned for in release artifacts — an extra trust anchor in a
 # shipping binary would be a universal man-in-the-middle.
-testing = []
+testing = ["px-websec/trace"]
 
 # build-spec §4.3: this crate handles hostile input.
 [lints]

@@ -672,7 +672,7 @@ pub(crate) fn layout_lines(
                 continue;
             };
             let record = TextRun::new(
-                range.style.font,
+                r.font,
                 range.style.size,
                 r.rtl,
                 range.node,

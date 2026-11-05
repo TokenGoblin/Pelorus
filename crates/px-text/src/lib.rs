@@ -23,6 +23,7 @@ pub mod font;
 pub mod glyf;
 pub mod registry;
 pub mod sfnt;
+pub mod sysfonts;
 
 // Phase 9 units 2, 6 and 7 (ADR 036).
 pub mod bidi;

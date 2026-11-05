@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! test262 subset threshold                       -> unit 5 (landed: script_test262_)
-//! event ordering tests                           -> units 2 and 6
+//! event ordering tests                           -> units 2 and 6 (script_order_, script_fixture_)
 //! no unbounded task-queue growth, stress page    -> units 2, 4 and 6
 //! timer resolution asserted                      -> unit 3
 //! script runs only in the sandboxed content proc -> unit 1 (and 4 for survival)
@@ -16,9 +16,8 @@
 //! are in [`REMAINING`], and are reported by unit rather than omitted: a gate
 //! that silently drops what is not built yet passes for the wrong reason.
 //!
-//! This gate does not run the test262 runner or the stress
-//! fixtures of units 5 and 6; it names them so the phase's open work is visible
-//! in its own output.
+//! This gate does not run the test262 runner (`cargo xtask test262` does); the
+//! fixture table of unit 6 runs inside `cargo test`, like every other suite.
 
 use super::suites::{self, Suite};
 use crate::Gate;
@@ -109,6 +108,13 @@ pub const SUITES: &[Suite] = &[
         "script_test262_",
         "crates/px-script/tests/test262.rs",
     ),
+    // Unit 6: the fixture table (spec-derived rows), in-process and, for a
+    // subset, through the real content binary.
+    (
+        "ordering-and-stress-fixture-table",
+        "script_fixture_",
+        "crates/px-script/tests/fixtures.rs",
+    ),
     // Unit 3: the coarse clock.
     (
         "timer-resolution-properties",
@@ -155,13 +161,10 @@ pub const SUITES: &[Suite] = &[
 ];
 
 /// What is still to be built, and the unit that owns it: `(item, unit, filter,
-/// home file)`. The same three conditions apply the day the file appears.
-pub const REMAINING: &[(&str, &str, &str, &str)] = &[(
-    "ordering-and-stress-fixture-table",
-    "unit 6",
-    "script_fixture_",
-    "tests/script/fixtures.rs",
-)];
+/// home file)`. The same three conditions apply the day the file appears. Empty
+/// since unit 6 landed; the type and the checks stay so a unit that is added
+/// later is reported by its owner rather than omitted.
+pub const REMAINING: &[(&str, &str, &str, &str)] = &[];
 
 /// Files that must exist for the phase to be closed, and the unit that writes
 /// them.
@@ -320,13 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn units_six_and_seven_are_named_not_omitted() {
-        let units: Vec<&str> = REMAINING.iter().map(|r| r.1).collect();
-        assert!(
-            units.contains(&"unit 6"),
-            "no remaining item owned by unit 6"
-        );
+    fn unit_seven_is_named_not_omitted_and_unit_six_has_landed() {
         assert!(REQUIRED_FILES.iter().any(|f| f.1 == "unit 7"));
+        assert!(
+            SUITES.iter().any(|s| s.1 == "script_fixture_"),
+            "unit 6 (the fixture table) is not in SUITES"
+        );
+        assert!(REMAINING.is_empty());
     }
 
     #[test]

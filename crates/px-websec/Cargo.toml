@@ -17,6 +17,12 @@ publish.workspace = true
 # public suffix list, the cookie jar's SameSite handling) this crate takes
 # the answer through a small trait or a plain bool instead of re-deriving it.
 
+[features]
+# Records which enforcement points ran, per thread, so px-net's integration
+# tests can show each one is reached through a real fetch. No dependency, and
+# no behaviour change: `origin::trace::hit` only appends to a thread-local.
+trace = []
+
 # build-spec §4.3 / §10: this crate parses attacker-controlled headers.
 [lints]
 workspace = true
