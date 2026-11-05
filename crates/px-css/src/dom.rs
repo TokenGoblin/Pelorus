@@ -406,13 +406,26 @@ impl<'a> StyleElement<'a> {
             .map(|a| &*a.value)
     }
 
+    /// As [`Self::new`], but generated content (`px-before`, `px-after`,
+    /// `px-marker`) is invisible to selectors: it must not change what
+    /// `:first-child`, `+` or `:empty` mean for the real elements around it.
+    fn selectable(node: StyleNode<'a>) -> Option<Self> {
+        Self::new(node).filter(|e| {
+            !e.node
+                .arena()
+                .get(e.node.id())
+                .and_then(px_dom::Node::element_name)
+                .is_some_and(|q| crate::generated::is_generated_name(&q.local))
+        })
+    }
+
     /// The nearest preceding sibling that is an element.
     pub(crate) fn prev_element(self) -> Option<Self> {
         let mut cursor = self.node;
         loop {
             let prev = cursor.arena().get(cursor.id())?.prev_sibling()?;
             cursor = cursor.resolve(prev)?;
-            if let Some(el) = Self::new(cursor) {
+            if let Some(el) = Self::selectable(cursor) {
                 return Some(el);
             }
         }
@@ -424,7 +437,7 @@ impl<'a> StyleElement<'a> {
         loop {
             let next = cursor.arena().get(cursor.id())?.next_sibling()?;
             cursor = cursor.resolve(next)?;
-            if let Some(el) = Self::new(cursor) {
+            if let Some(el) = Self::selectable(cursor) {
                 return Some(el);
             }
         }
@@ -491,7 +504,7 @@ impl<'a> selectors::Element for StyleElement<'a> {
         use style::dom::TNode as _;
         let mut child = self.node.first_child();
         while let Some(node) = child {
-            if let Some(el) = Self::new(node) {
+            if let Some(el) = Self::selectable(node) {
                 return Some(el);
             }
             child = node.next_sibling();
@@ -590,7 +603,7 @@ impl<'a> selectors::Element for StyleElement<'a> {
         let mut child = self.node.first_child();
         while let Some(node) = child {
             if let Some(n) = node.arena().get(node.id()) {
-                if n.element_name().is_some() {
+                if n.element_name().is_some() && !crate::generated::is_generated_name(&n.element_name().map_or("", |q| &q.local)) {
                     return false;
                 }
                 if n.text().is_some_and(|t| !t.is_empty()) {

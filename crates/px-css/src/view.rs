@@ -118,6 +118,12 @@ impl StyleRoot {
         self.quirks_mode
     }
 
+    /// Make room for nodes added to `arena` since the table was sized, which
+    /// is what generated content does (see [`crate::generated`]).
+    pub fn grow_for(&mut self, arena: &Arena) {
+        self.data.grow_for(arena);
+    }
+
     /// Per-element style data (ADR 026).
     #[must_use]
     pub fn data(&self) -> &StyleData {

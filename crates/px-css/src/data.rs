@@ -227,6 +227,18 @@ impl StyleData {
         table
     }
 
+    /// Extend the table to cover slots added to `arena` after it was sized.
+    ///
+    /// Only for nodes created between style and layout (generated content),
+    /// whose `ElementData` the caller installs directly; they have no `id`,
+    /// `class` or `style` to intern.
+    pub fn grow_for(&mut self, arena: &Arena) {
+        let want = arena.slot_count();
+        if self.slots.len() < want {
+            self.slots.resize_with(want, Slot::default);
+        }
+    }
+
     /// `TElement::style_attribute`.
     #[must_use]
     pub fn style_attribute_of(
@@ -493,7 +505,7 @@ impl<'a> StyleAttributeParser<'a> {
     /// discarded and the rest applies, which is what CSS Syntax requires — an
     /// attribute that failed as a unit would drop working declarations because of
     /// a neighbour using a property this engine has not implemented.
-    fn parse(&self, value: &str) -> style::servo_arc::Arc<Locked<PropertyDeclarationBlock>> {
+    pub fn parse(&self, value: &str) -> style::servo_arc::Arc<Locked<PropertyDeclarationBlock>> {
         let block = style::properties::declaration_block::parse_style_attribute(
             value,
             self.url_data,
