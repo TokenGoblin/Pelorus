@@ -1210,10 +1210,12 @@ follows.
   SIGABRT with its address space never past the cap, and the broker, a broker-held frame
   and a second content process are untouched. **What is contained:** a content process
   cannot map more than 1 GiB on Linux. **What is not:**
-  - **Windows has no memory cap.** The job-object limit (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`)
-    cannot be built or run in the container this was written in; `SandboxedChild::
-    memory_limit()` returns `None` there and the cap is not in `applied()`. Do not read the
-    Linux result as the Windows one. Phase 17's gate is still open on Windows.
+  - **Windows: written, never run (ADR 044).** The job's `JOB_OBJECT_LIMIT_PROCESS_MEMORY`
+    commit cap, kill-on-close, one-process limit and UI restrictions are applied before the
+    process exists and read back by the parent; `memory_limit()` is `Some` only after that.
+    It cross-compiles and has Windows tests, but has not been executed, and the runaway-tab
+    test (`sandbox_memory_*`) is Linux-only. See `docs/research/phase-17-windows-unverified.md`.
+    Phase 17's gate is not met on Windows until CI shows it.
   - **The cap is address space, not resident memory.** A tab that maps 1 GiB and touches
     little of it is within policy; a host short of RAM can still OOM before the cap. The
     cgroup `memory.max` the spec also names is not done (unprivileged cgroup delegation is
@@ -1312,7 +1314,9 @@ follows.
     aborts itself and cannot be denied by number. The user-namespace rung (separate PID
     namespace) would close it and is not applied. The suite prints `KNOWN GAP` there.
 - **Not done:**
-  - **Windows.** There is no stage two, no memory cap and no escape suite on Windows; the
+  - **Windows.** Creation-time profile written, unrun (ADR 044: job limits, low integrity,
+    mitigation policies; no AppContainer, so file reads and network are NOT blocked). There is
+    no stage two and no escape suite on Windows; the
     Phase 17 gate ("fails every attempt on both OSes") is NOT met. `enter_content_profile`
     refuses there, so the content binary does not call it on Windows.
   - **An allow list.** The gate wants one; the profile is still two deny lists
