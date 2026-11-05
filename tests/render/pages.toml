@@ -125,3 +125,11 @@ source = "tests/render/pages/text-center-wrap.html"
 [[page]]
 id = "text-mixed-direction"
 source = "tests/render/pages/text-mixed-direction.html"
+
+[[page]]
+id = "inline-spans"
+source = "tests/render/pages/inline-spans.html"
+
+[[page]]
+id = "inline-link-wrap"
+source = "tests/render/pages/inline-link-wrap.html"

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<title>Coloured spans and an inline-block row</title>
+<style>
+body { margin: 8px; font: 20px/1.5 Ahem; color: #333 }
+p { width: 360px; margin: 0 0 12px 0 }
+.r { color: #c00 }
+.g { color: #080 }
+.b { color: #00c; font-size: 30px }
+.box { display: inline-block; width: 40px; height: 30px; margin: 0 6px; background: #f80 }
+.tall { height: 50px; background: #08f }
+</style>
+<p>aa <span class="r">bb cc</span> dd <span class="g">ee</span> <span class="b">ff</span> gg hh</p>
+<p>x<span class="box"></span>y<span class="box tall"></span>z<span class="box"></span></p>
