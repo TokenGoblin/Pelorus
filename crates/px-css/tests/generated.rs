@@ -222,7 +222,7 @@ fn markers(html: &str, css: &str) -> Vec<String> {
 fn ordered_list_markers() {
     assert_eq!(
         markers("<ol><li>a</li><li>b</li><li>c</li></ol>", "ol { list-style-type: decimal }"),
-        vec!["1. ", "2. ", "3. "]
+        vec!["1.", "2.", "3."]
     );
 }
 
@@ -235,14 +235,14 @@ fn bullets_have_no_text() {
 #[test]
 fn list_style_types() {
     for (ty, want) in [
-        ("lower-alpha", "b. "),
-        ("upper-alpha", "B. "),
-        ("lower-roman", "ii. "),
-        ("upper-roman", "II. "),
-        ("lower-latin", "b. "),
-        ("lower-greek", "\u{3b2}. "),
-        ("decimal-leading-zero", "02. "),
-        ("'- '", "- "),
+        ("lower-alpha", "b."),
+        ("upper-alpha", "B."),
+        ("lower-roman", "ii."),
+        ("upper-roman", "II."),
+        ("lower-latin", "b."),
+        ("lower-greek", "\u{3b2}."),
+        ("decimal-leading-zero", "02."),
+        ("'- '", "-"),
     ] {
         let m = markers(
             "<ol><li>a</li><li>b</li></ol>",
@@ -250,6 +250,35 @@ fn list_style_types() {
         );
         assert_eq!(m.get(1).map(String::as_str), Some(want), "{ty}");
     }
+}
+
+#[test]
+fn marker_pseudo_content_and_colour() {
+    assert_eq!(
+        markers("<ul><li>a</li></ul>", "li::marker { content: '>> ' }"),
+        vec![">> "]
+            .into_iter()
+            .map(|s: &str| s.trim_end().to_string())
+            .collect::<Vec<_>>()
+    );
+    assert!(markers("<ul><li>a</li></ul>", "li::marker { content: none }").is_empty());
+    let (arena, root) = styled("<ul><li>a</li></ul>", "li::marker { color: rgb(255, 0, 0) }");
+    let m = arena
+        .descendants(arena.document())
+        .find(|id| px_css::generated::is_generated(&arena, *id))
+        .unwrap();
+    px_css::view::with_dom(&arena, &root, |dom| {
+        let el = px_css::dom::StyleElement::new(dom.node(m).unwrap()).unwrap();
+        let data = style::dom::TElement::borrow_data(&el).unwrap();
+        let c = data
+            .styles
+            .primary()
+            .get_inherited_text()
+            .clone_color()
+            .into_srgb_legacy();
+        assert!(c.components.0 > 0.99 && c.components.1 < 0.01, "{c:?}");
+    })
+    .unwrap();
 }
 
 #[test]
@@ -262,19 +291,19 @@ fn list_style_none_has_no_marker() {
 fn ol_start_reversed_and_li_value() {
     assert_eq!(
         markers("<ol start=5><li>a</li><li>b</li></ol>", ""),
-        vec!["5. ", "6. "]
+        vec!["5.", "6."]
     );
     assert_eq!(
         markers("<ol reversed><li>a</li><li>b</li><li>c</li></ol>", ""),
-        vec!["3. ", "2. ", "1. "]
+        vec!["3.", "2.", "1."]
     );
     assert_eq!(
         markers("<ol reversed start=10><li>a</li><li>b</li></ol>", ""),
-        vec!["10. ", "9. "]
+        vec!["10.", "9."]
     );
     assert_eq!(
         markers("<ol><li>a</li><li value=7>b</li><li>c</li></ol>", ""),
-        vec!["1. ", "7. ", "8. "]
+        vec!["1.", "7.", "8."]
     );
 }
 
@@ -285,7 +314,7 @@ fn nested_lists_count_separately() {
             "<ol><li>a<ol><li>x</li><li>y</li></ol></li><li>b</li></ol>",
             ""
         ),
-        vec!["1. ", "1. ", "2. ", "2. "]
+        vec!["1.", "1.", "2.", "2."]
     );
 }
 
@@ -296,7 +325,7 @@ fn author_counter_increment_of_list_item() {
             "<ol><li>a</li><li>b</li></ol>",
             "li { counter-increment: list-item 10 }"
         ),
-        vec!["10. ", "20. "]
+        vec!["10.", "20."]
     );
 }
 

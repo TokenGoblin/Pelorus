@@ -107,7 +107,12 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 /// picture is the same and the rectangles are not. The oracle's blind spot; the
 /// old result was the grid being laid out as a block, which is wrong for any
 /// page that puts an `inline-grid` beside text.
-const MATCH_FLOOR: usize = 67;
+///
+/// **70 once an inline-block's own margin stopped being counted in its
+/// shrink-to-fit width** (the intrinsic figures include the box's margin, border and
+/// padding; only border and padding were subtracted), found while laying out list
+/// markers: three pairs gained, none lost.
+const MATCH_FLOOR: usize = 70;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 405).
 const MIN_PAIRS: usize = 400;

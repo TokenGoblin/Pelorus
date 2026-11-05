@@ -670,10 +670,10 @@ pub fn layout_document_in(
                                 let available = containing - resolved.inline_surround();
                                 let available = available.max(Au(0));
                                 let intrinsic = intrinsic_inline_size(dom, arena, node);
-                                // The intrinsic figures are border-box, and this box's
-                                // own surround is already counted in `available`.
-                                let surround =
-                                    resolved.border.inline_sum() + resolved.padding.inline_sum();
+                                // The intrinsic figures include this box's own margin, border
+                                // and padding (the walk counts the root's surround like any
+                                // other box's), and all three are already counted in `available`.
+                                let surround = resolved.inline_surround();
                                 shrink_to_fit(
                                     Intrinsic {
                                         min: (intrinsic.min - surround).max(Au(0)),

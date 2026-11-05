@@ -637,10 +637,39 @@ impl<'e, 'd> Planner<'e, 'd> {
         use style::computed_values::list_style_position::T as Pos;
         let outside = style.clone_list_style_position() == Pos::Outside;
         let value = self.value_of("list-item");
-        let Some(shape) = marker_shape(&style.clone_list_style_type().0, value) else {
-            return;
+        // `li::marker` rules: its `content` replaces the generated text and its
+        // `color` colours the marker; `None` when no rule matched.
+        let own = self.marker_pseudo(li, style);
+        let content = own.as_ref().and_then(|ms| {
+            use style::values::generics::counters::GenericContent as C;
+            match ms.clone_content() {
+                C::Items(items) => Some(self.content_text(li, style, &items.items[..items.alt_start.min(items.items.len())])),
+                C::None => Some(String::new()),
+                C::Normal => None,
+            }
+        });
+        let shape = match content {
+            Some(t) if t.is_empty() => return,
+            Some(t) => MarkerShape::Text(t),
+            None => {
+                let Some(s) = marker_shape(&style.clone_list_style_type().0, value) else {
+                    return;
+                };
+                s
+            }
         };
-        let (css, text) = shape.css_and_text(outside);
+        let (mut css, text) = shape.css_and_text(outside);
+        if let Some(ms) = &own {
+            let c = ms.get_inherited_text().clone_color().into_srgb_legacy();
+            let ch = |v: f32| (if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) } * 255.0).round() as u8;
+            css.push_str(&format!(
+                ";color:rgba({},{},{},{})",
+                ch(c.components.0),
+                ch(c.components.1),
+                ch(c.components.2),
+                c.alpha.clamp(0.0, 1.0)
+            ));
+        }
         let Some(computed) = self.compute_marker(style, &css) else {
             return;
         };
@@ -658,6 +687,22 @@ impl<'e, 'd> Planner<'e, 'd> {
             outside,
             style: computed,
         });
+    }
+
+    /// The `::marker` style of a list item, if any rule matches it.
+    fn marker_pseudo(&self, li: NodeId, style: &ComputedValues) -> Option<Arc<ComputedValues>> {
+        let element = StyleElement::new(self.dom.node(li)?)?;
+        let guard = self.engine.shared_lock().read();
+        let guards = style::shared_lock::StylesheetGuards::same(&guard);
+        self.engine.stylist().lazily_compute_pseudo_element_style(
+            &guards,
+            element,
+            &style::selector_parser::PseudoElement::Marker,
+            style::stylist::RuleInclusion::All,
+            style,
+            true,
+            None,
+        )
     }
 
     fn compute_marker(&self, parent: &ComputedValues, css: &str) -> Option<Arc<ComputedValues>> {

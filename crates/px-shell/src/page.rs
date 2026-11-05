@@ -37,6 +37,7 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      pre { margin: 1em 0; white-space: pre } \
      dl { margin: 1em 0 } dd { margin-left: 40px } \
      a { color: #0b57d0 } \
+     li { display: list-item } \
      head, style, script, noscript, template, title, meta, link, source, track { display: none }";
 
 /// A clickable region of the document, in CSS pixels from its top-left.
@@ -306,15 +307,14 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
         return Err("parse abandoned".into());
     }
     let quirks = px_css::engine::quirks_mode_of(&dom);
-    let arena = dom.arena;
+    let mut arena = dom.arena;
     let mut engine = px_css::engine::StyleEngine::new(width as f32, height as f32, quirks);
     engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
     for (css, base) in stylesheets(page, &arena) {
         engine.add_author_stylesheet(&css, &base);
     }
-    let style_root = engine.style_root_for(&arena);
-    engine
-        .resolve(&arena, &style_root)
+    let style_root = engine
+        .style_document(&mut arena)
         .ok_or("style resolve failed")?;
     let (images, sizes) = image_tables(&arena, &style_root, page, width);
     let tree = px_layout::replaced::layout_document_with_images(

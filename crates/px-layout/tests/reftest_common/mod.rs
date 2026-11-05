@@ -348,7 +348,7 @@ fn layout_file_inner(suite: &Suite, path: &Path) -> Option<Laid> {
         return None;
     }
     let quirks = px_css::engine::quirks_mode_of(&dom);
-    let arena = dom.arena;
+    let mut arena = dom.arena;
 
     let mut engine = px_css::engine::StyleEngine::new(VIEWPORT_PX as f32, 600.0, quirks);
     engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
@@ -357,8 +357,7 @@ fn layout_file_inner(suite: &Suite, path: &Path) -> Option<Laid> {
         engine.add_author_stylesheet(&css, "https://wpt.invalid/test.css");
     }
 
-    let style_root = engine.style_root_for(&arena);
-    engine.resolve(&arena, &style_root)?;
+    let style_root = engine.style_document(&mut arena)?;
     let tree = layout_document(&arena, &style_root, px(VIEWPORT_PX))?;
     Some(Laid {
         scripted: needs_script(&arena),
