@@ -252,6 +252,9 @@ impl Laid {
                 | Item::TextRun { rect, .. }
                 | Item::Border { rect, .. }
                 | Item::PushClip { rect } => rect.y = shift(rect.y),
+                Item::FillRoundedRect { shape, .. }
+                | Item::RoundedBorder { shape, .. }
+                | Item::PushRoundedClip { shape } => shape.rect.y = shift(shape.rect.y),
                 Item::GlyphRun { .. } | Item::PopClip => {}
             }
         }

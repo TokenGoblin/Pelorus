@@ -18,7 +18,7 @@
 //! and its containing block.
 //!
 //! Not done, and not approximated: `opacity` contexts, transforms, `outline`,
-//! `text-decoration`, shadows, background images, `border-radius`. `position:
+//! `text-decoration`, shadows, background images. `position:
 //! sticky` counts as positioned. A page using them paints without them.
 //!
 //! # Inline content
@@ -46,6 +46,15 @@
 //!   any side is drawn with a width. `none` and `hidden` become width zero and
 //!   style `None`. Every other style (dashed, double, ...) is emitted as `Solid`
 //!   until the rasterizer has them.
+//! - `border-radius` and `corner-shape` (CSS Backgrounds 3 section 5, CSS Borders
+//!   4): a box with a rounded corner emits [`Item::FillRoundedRect`] for its
+//!   background, [`Item::RoundedBorder`] for its border and
+//!   [`Item::PushRoundedClip`] for its `overflow` clip, in place of the plain
+//!   items; radii are resolved against the border box (percentages included),
+//!   clamped so adjacent curves never overlap, and reduced by the border widths
+//!   for the padding edge (a `padding-box` background, the clip). A box without a
+//!   rounded corner emits exactly the plain items. A piece of an inline box does
+//!   not round the edges it does not own.
 //! - `overflow` other than `visible` (including `clip`): [`Item::PushClip`] at the
 //!   padding box after the box's own background and border, [`Item::PopClip`]
 //!   after its last descendant.
@@ -64,14 +73,17 @@
 //! One explicit stack, no recursion: a 100,000-deep document builds on a small
 //! thread stack, as layout does.
 
-use px_css::paint::{BackgroundClip, PaintStyle, Rgba, paint_style};
+use px_css::paint::{
+    BackgroundClip, CornerKind, PaintCorner, PaintStyle, RadiusLen, Rgba, paint_style,
+};
 use px_css::view::StyleRoot;
 use px_dom::{Arena, NodeId};
 use px_layout::fragment::{FragmentId, FragmentKind, FragmentTree};
 use px_layout::geom::Au;
 
 use crate::display_list::{
-    BorderSide, BorderStyle, Color, DisplayList, FontId, Item, PositionedGlyph, Rect,
+    BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, Item,
+    PositionedGlyph, Rect, RoundedRect,
 };
 
 fn color(c: Rgba) -> Color {
@@ -388,9 +400,15 @@ fn emit_ops(
         }
         for g in want.iter().skip(common) {
             if let (Some(gf), Some(gs)) = (tree.get(*g), facts.style[g.index()]) {
-                list.push(Item::PushClip {
-                    rect: padding_box(frag_rect(gf), &gs),
-                });
+                let border_box = frag_rect(gf);
+                match border_shape(border_box, &gs, (true, true)) {
+                    Some(shape) => list.push(Item::PushRoundedClip {
+                        shape: shape.inset(border_widths(&gs)),
+                    }),
+                    None => list.push(Item::PushClip {
+                        rect: padding_box(border_box, &gs),
+                    }),
+                }
                 open.push(*g);
             }
         }
@@ -425,6 +443,47 @@ fn frag_rect(fragment: &px_layout::fragment::Fragment) -> Rect {
         width: fragment.size.inline,
         height: fragment.size.block,
     }
+}
+
+fn border_widths(style: &PaintStyle) -> [Au; 4] {
+    style.borders.map(|b| b.width)
+}
+
+fn resolve_radius(r: RadiusLen, basis: Au) -> Au {
+    let pct = (i64::from(r.pct) * i64::from(basis.0.max(0)) + (1 << 19)) >> 20;
+    let total = i64::from(r.abs.0).saturating_add(pct);
+    Au(i32::try_from(total).unwrap_or(i32::MAX))
+}
+
+fn corner(c: &PaintCorner, rect: Rect) -> Corner {
+    Corner {
+        rx: resolve_radius(c.x, rect.width),
+        ry: resolve_radius(c.y, rect.height),
+        shape: match c.kind {
+            CornerKind::Convex(n) => CornerShape::Convex(n),
+            CornerKind::Concave(n) => CornerShape::Concave(n),
+        },
+    }
+}
+
+/// The border box as a rounded rectangle (`border-radius`, `corner-shape`,
+/// percentages against the box, radii clamped by CSS Backgrounds 3 section 5.5),
+/// or `None` when no corner is rounded, so that an unrounded box emits exactly
+/// the items it always did. A piece of an inline box that does not own an edge
+/// (`box-decoration-break: slice`) has square corners on that edge.
+fn border_shape(
+    rect: Rect,
+    style: &PaintStyle,
+    (left, right): (bool, bool),
+) -> Option<RoundedRect> {
+    let mut corners = style.corners.map(|c| corner(&c, rect));
+    for (i, owned) in [(0, left), (1, right), (2, right), (3, left)] {
+        if !owned {
+            corners[i] = Corner::SQUARE_CORNER;
+        }
+    }
+    let shape = RoundedRect::new(rect, corners);
+    shape.is_rounded().then_some(shape)
 }
 
 /// Build the display list for a laid-out document.
@@ -524,16 +583,28 @@ fn paint_box(
     skip_background: bool,
     (left, right): (bool, bool),
 ) {
+    let shape = border_shape(rect, style, (left, right));
     if !skip_background && style.background[3] > 0 {
-        let filled = match style.background_clip {
-            BackgroundClip::BorderBox => rect,
-            // Content-box is painted as padding-box; see the module docs.
-            BackgroundClip::PaddingBox | BackgroundClip::ContentBox => padding_box(rect, style),
-        };
-        list.push(Item::FillRect {
-            rect: filled,
-            color: color(style.background),
-        });
+        let border_box = matches!(style.background_clip, BackgroundClip::BorderBox);
+        // Content-box is painted as padding-box; see the module docs.
+        match shape {
+            Some(shape) => list.push(Item::FillRoundedRect {
+                shape: if border_box {
+                    shape
+                } else {
+                    shape.inset(border_widths(style))
+                },
+                color: color(style.background),
+            }),
+            None => list.push(Item::FillRect {
+                rect: if border_box {
+                    rect
+                } else {
+                    padding_box(rect, style)
+                },
+                color: color(style.background),
+            }),
+        }
     }
     let drawn = |i: usize| {
         style.borders[i].drawn
@@ -558,10 +629,11 @@ fn paint_box(
                 }
             }
         };
-        list.push(Item::Border {
-            rect,
-            sides: [side(0), side(1), side(2), side(3)],
-        });
+        let sides = [side(0), side(1), side(2), side(3)];
+        match shape {
+            Some(shape) => list.push(Item::RoundedBorder { shape, sides }),
+            None => list.push(Item::Border { rect, sides }),
+        }
     }
 }
 

@@ -537,4 +537,9 @@ fn mark_thread_as_layout() {
 fn enable_the_css_this_engine_claims_to_support() {
     stylo_static_prefs::set_pref!("layout.grid.enabled", true);
     stylo_static_prefs::set_pref!("layout.writing-mode.enabled", true);
+    // Gates `corner-shape` and its longhands (CSS Borders 4), which paint reads.
+    // The same pref gates other properties stylo does not lay out (`zoom`,
+    // `contain`, counters, ...); see `the_pref_that_enables_corner_shape_also_enables_zoom` in
+    // `px-paint`'s `tests/radius.rs`.
+    stylo_static_prefs::set_pref!("layout.unimplemented", true);
 }

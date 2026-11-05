@@ -173,7 +173,7 @@ pub fn serve<R: Read, W: Write>(
                         return fail(channel, GpuFailure::BadCoordinate);
                     };
                     match item {
-                        Item::PushClip { .. } => {
+                        Item::PushClip { .. } | Item::PushRoundedClip { .. } => {
                             frame.clip_depth += 1;
                             if frame.clip_depth > MAX_CLIP_DEPTH {
                                 return fail(channel, GpuFailure::BadClips);

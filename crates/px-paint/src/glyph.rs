@@ -472,6 +472,20 @@ pub fn composite_mask_clipped(
     color: Color,
     clip: (i64, i64, i64, i64),
 ) {
+    composite_mask_shaped(canvas, mask, x, y, color, clip, None);
+}
+
+/// As [`composite_mask_clipped`], also multiplying each pixel's coverage by
+/// `shape(x, y)` (`0..=255`), the coverage of the rasterizer's rounded clips.
+pub fn composite_mask_shaped(
+    canvas: &mut Canvas,
+    mask: &Mask,
+    x: i32,
+    y: i32,
+    color: Color,
+    clip: (i64, i64, i64, i64),
+    shape: Option<&dyn Fn(i64, i64) -> u32>,
+) {
     if color.a == 0 || mask.width == 0 || mask.height == 0 {
         return;
     }
@@ -494,7 +508,14 @@ pub fn composite_mask_clipped(
             if cov == 0 {
                 continue;
             }
-            let a = (u32::from(color.a) * u32::from(cov) + 127) / 255;
+            let cov = match shape {
+                Some(f) => (u32::from(cov) * f(px, py) + 127) / 255,
+                None => u32::from(cov),
+            };
+            if cov == 0 {
+                continue;
+            }
+            let a = (u32::from(color.a) * cov + 127) / 255;
             let i = ((py * cw + px) * 4) as usize;
             if let Some(px4) = canvas.pixels.get_mut(i..i + 4) {
                 crate::raster::blend_px(

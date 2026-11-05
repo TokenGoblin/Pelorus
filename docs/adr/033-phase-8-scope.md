@@ -222,3 +222,14 @@ Wrong if: the 25 pages cannot detect a deliberate one-pixel rasterizer change
 and Windows software renders differ by a single byte (then "integer-only" was not
 true, and the cause is the finding); or the stricter profile cannot be made to
 coexist with process startup, in which case (e)1 is revised, not the gate.
+
+## Addendum (2026-11-05): rounded corners are anti-aliased
+
+(b) said the rasterizer has no anti-aliasing. That stays true for rectangles,
+borders and glyph-free fills: their edges are on pixel boundaries. `border-radius`
+and `corner-shape` (the "every window is a squircle" directive) have curved edges,
+so a rounded item is covered with 8 x 8 samples per pixel on a fixed grid,
+integers only (`crates/px-paint/src/round.rs`), and the tolerance stays 0: the same
+bytes on both OSes. No float, no libm: the superellipse `u^n + v^n = 1` is evaluated
+in 20-bit fixed point with an integer square root. A shape with no rounded corner
+is pixel-identical to its plain rectangle.

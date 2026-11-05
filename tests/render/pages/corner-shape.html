@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<title>corner-shape</title>
+<style>
+body { margin: 16px; background: #fff }
+div { display: inline-block; width: 100px; height: 100px; margin: 0 14px 14px 0; background: #36c; border-radius: 40px }
+#a { corner-shape: round }
+#b { corner-shape: squircle; background: #c33 }
+#c { corner-shape: bevel; background: #393 }
+#d { corner-shape: scoop; background: #c60 }
+#e { corner-shape: notch; background: #639 }
+#f { corner-shape: square; background: #069 }
+#g { corner-shape: superellipse(3); background: #996 }
+#h { corner-shape: superellipse(0.5); background: #c33 }
+#i { corner-shape: squircle round bevel scoop; background: #393 }
+#j { corner-shape: squircle; border: 8px solid #333; background: #eef }
+#k { corner-shape: squircle; border-radius: 50%; background: #c60 }
+#l { corner-shape: scoop; border: 6px solid #906; background: #eef }
+#m { corner-shape: squircle; overflow: hidden; background: #ddd }
+#m div { width: 140px; height: 60px; margin: 0; border-radius: 0; background: #c33 }
+</style>
+<div id="a"></div><div id="b"></div><div id="c"></div><div id="d"></div><div id="e"></div><div id="f"></div><div id="g"></div><div id="h"></div><div id="i"></div><div id="j"></div><div id="k"></div><div id="l"></div><div id="m"><div></div></div>

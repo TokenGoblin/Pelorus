@@ -201,3 +201,23 @@ source = "crates/px-pages/pages/error.html"
 [[page]]
 id = "ui-page-error-dark"
 source = "crates/px-pages/pages/error.html#dark"
+
+[[page]]
+id = "radius-backgrounds"
+source = "tests/render/pages/radius-backgrounds.html"
+
+[[page]]
+id = "radius-borders"
+source = "tests/render/pages/radius-borders.html"
+
+[[page]]
+id = "radius-overflow"
+source = "tests/render/pages/radius-overflow.html"
+
+[[page]]
+id = "radius-clamp"
+source = "tests/render/pages/radius-clamp.html"
+
+[[page]]
+id = "corner-shape"
+source = "tests/render/pages/corner-shape.html"

@@ -1435,9 +1435,8 @@ follows.
 - **Belongs to:** phase 8 (paint), phase 9 (text), phase 18 (chrome)
 - **What:** the pages are authored for the final look and degrade in our
   renderer; nothing was faked to hide it.
-  - `border-radius` is not painted (px-paint), so the squircle cards, chips,
-    progress bars and the mark's ring draw as rectangles. The CSS carries the
-    radii; the baselines will change when paint gains rounded borders.
+  - ~~`border-radius` is not painted~~ Done in phase 8 (rounded-rect items,
+    `corner-shape`); the pages' baselines were re-blessed with squircle corners.
   - Inline `<svg>` is not drawn, so the mark is built from CSS boxes (a
     simplified small-size mark, not `packaging/logo/pelorus.svg`; the guide
     asks for a small-size mark anyway). Replace with the real logo once images
@@ -1478,3 +1477,34 @@ follows.
   `set_shape` seam).
 - **Window shadows** are not drawn on either OS (a compositor may add its own;
   an ARGB shadow margin is a layout change).
+
+## Soft corners: what the engine still cannot draw (phase 8 follow-up)
+
+- **Found in:** phase 8, `border-radius` / `corner-shape` paint
+- **Belongs to:** phase 8 (paint), phase 18 (chrome), later form-control work
+- **What:** the user directive is that nothing in the app is a hard-edged box.
+  Done: backgrounds, borders and `overflow` clips follow `border-radius` and
+  `corner-shape` (integer 8x8-sample coverage); the built-in pages use
+  `corner-shape: squircle`; the product UA sheet in `px-fetch` gives `input`,
+  `button`, `select`, `textarea`, `meter` and `progress` a 10px squircle that
+  authored CSS overrides. Not possible yet, because the thing itself does not
+  exist in the engine:
+  - `outline` is not painted at all (no `:focus-visible` ring, so no rounded
+    one); when it is, it must follow the border shape (`outline-offset` adds
+    to the radii).
+  - Form controls have no native rendering (no box for a checkbox, a caret, a
+    select arrow); only their CSS box paints, now with soft corners.
+  - Scrollbars and thumbs do not exist (`overflow` clips, never scrolls); the
+    thumb and track are to be squircles when scrolling lands.
+  - Text selection highlight rects do not exist (no selection model); the
+    highlight, when it lands, should be a rounded rect per line box.
+  - `box-shadow`, `background-image`, `border-style` other than solid, and
+    `border-image` do not paint, so they cannot follow the shape yet; a future
+    shadow must be drawn from the same `RoundedRect`.
+  - `layout.unimplemented` is switched on to get `corner-shape` out of stylo;
+    it also enables `zoom` (applies correctly, pinned by a test), `contain`,
+    counters, `user-select`, `mask-*` parse. None other changes a used value
+    today.
+  - Radii of an inline box piece are resolved against the piece, not the whole
+    inline box, and a corner shared across line fragments is square on the cut
+    edge (`box-decoration-break: slice` only).
