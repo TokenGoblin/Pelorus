@@ -1,11 +1,36 @@
 # Phase 14 plan: out-of-process iframes
 
-Design: ADR 045 (proposed; nothing starts until the user decides, except units 0 to 2).
+Design: ADR 045 (proposed; nothing starts until the user decides, except units 0 to 2;
+the first slice below follows its recommended options and is revisable if the user
+decides otherwise).
 This file is units, gate mapping and what only hardware proves.
 
 Gate (build-spec section 9): a cross-origin iframe is in a different process; a
 compromised-frame simulation cannot reach the parent's memory or cookies; nested
 cross-origin frames work to depth 5.
+
+## STATUS (branch `phase14/oopif-core`, first slice)
+
+Implemented ADR 045's recommended options (full `PartitionKey` as the process key,
+refuse-with-placeholder at the cap). Nothing here is the gate: no process is
+spawned for a cross-origin frame, so **no gate item is proven**.
+
+| Unit | State |
+|---|---|
+| 0 gate tests + `cargo xtask frames` | **Not done.** No `frames` gate; the tests below are ordinary broker/ipc tests, not a gate. No testing-only commit stub. |
+| 1 frame tree, key, vocabulary | **Mostly done.** `FrameTree` has parent, depth (`MAX_FRAME_DEPTH` 8), group, committed origin, `Live`/`Crashed`, owner transfer. `ProcessKey` (px-broker `site.rs`) is built from `px_websec::Origin` + `SiteResolver`; `cargo tree -p px-broker` has no rustls (tested). `px-ipc::frames`: `FrameRequest { CreateChildFrame, Navigate }`, `FrameResponse { Denied, Created, NavigationAuthorised }`, `FrameEvent { FrameReplaced, FrameCrashed, SetViewport }`, all `non_exhaustive`, bounded URL, canonical-encoding and hostile tests, three fuzz targets (compiled by `cargo xtask ipc`, **not run**). Missing: nothing sends `SetViewport` yet, and no code delivers `FrameReplaced`/`FrameCrashed` events to a process (the broker returns them to its caller). |
+| 2 process pool | **Bookkeeping only.** `ProcessPool` `(group, key) -> channel`, `MAX_CONTENT_PROCESSES` 64 (unmeasured), fail-closed at the cap. No spawning, no hidden-tab discard, no restart accounting per key, **no measurements** (spawn latency, idle RSS). |
+| 3 navigation and swap | **Partial, against a stub.** `Broker::commit_document` records an origin the caller supplies (Phase 13 is not built), plans `InPlace`/`Transferred`/`NeedsProcess`/`AtCap`, and `attach_process` transfers the frame. `Navigate` only authorises (frame or ancestor hosted by the channel, URL parses); nothing fetches. No COOP/frame-ancestors verdicts wired; no "old document shown until first paint"; no teardown of an emptied process. |
+| 4 compositor | Not started. |
+| 5 input routing | Not started (needs 4). |
+| 6 `postMessage`, opener, popups | Not started. |
+| 7 crash isolation | **Tree half done.** `Broker::channel_died` crashes the dead channel's frames, destroys their subtrees, returns `FrameCrashed` events for surviving embedders. Not done: placeholder drawing, kill-a-real-pid tests, `MAX_RESTARTS` interaction (the existing `close_channel`/restart path still frees rather than crashes; `ContentProcess` does not call `channel_died` yet). |
+| 8 compromised-frame simulation | Not started. |
+| 9 depth-5 integration | Tree and key only: `oopif_depth_nine_is_refused_and_depth_five_chains` gives six keys and six channels in the broker's tables. These are channel ids, not pids; no real processes. |
+
+Tests: `crates/px-broker/tests/oopif_frames.rs`, `crates/px-ipc/tests/hostile_frames.rs`,
+`canonical.rs`. The `ipc` gate lists the frame wire suite. Facts taken as given:
+a "process" in these tests is an open channel.
 
 ## Starting state (read, not assumed)
 - Built: `px-broker` (`Broker`, flat `FrameTree`, `ChannelCaps { hosts, visible }`,
