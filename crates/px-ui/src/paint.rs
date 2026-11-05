@@ -596,7 +596,7 @@ mod tests {
             let c = chrome(k);
             let mut list = DisplayList::new();
             paint(&c, &Mono, Theme::Dark, Point::default(), &mut list);
-            let canvas = px_paint::rasterize(&list, (920 * k) as u32, (568 * k) as u32).unwrap();
+            let canvas = px_paint::rasterize(&list, 920 * k, 568 * k).unwrap();
             let hair = crate::theme::Theme::Dark.colors().surfaces.hairline;
             let want = [hair.0, hair.1, hair.2, 255];
             let y0 = ((lay::CHROME_H - 1) * k as i32) as u32;

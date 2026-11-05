@@ -861,4 +861,237 @@ mod tests {
                 .any(|e| matches!(e, Effect::Platform(PlatformEffect::Window(_))))
         );
     }
+    fn key(k: Key) -> Event {
+        Event::Key(KeyEvent::new(k))
+    }
+
+    fn shift_tab() -> Event {
+        Event::Key(KeyEvent::with(
+            Key::Tab,
+            Modifiers {
+                shift: true,
+                ..Modifiers::NONE
+            },
+        ))
+    }
+
+    fn platform(e: &[Effect]) -> Vec<PlatformEffect> {
+        e.iter()
+            .filter_map(|e| match e {
+                Effect::Platform(p) => Some(p.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tab_walks_the_chrome_in_order_and_leaves_at_the_ends() {
+        let mut c = chrome();
+        let m = Mono;
+        // Not in the chrome yet: Tab is the page's.
+        assert!(!c.event(key(Key::Tab), &m).consumed);
+        // F6 puts focus in the address field; Tab goes on to the menu button.
+        c.event(key(Key::F(6)), &m);
+        assert!(c.address().is_editing());
+        c.event(key(Key::Tab), &m);
+        assert!(!c.address().is_editing());
+        assert_eq!(c.focus_stop(), Some(Stop::Overflow));
+        // Enter presses the focused button.
+        let o = c.event(key(Key::Enter), &m);
+        assert!(matches!(
+            apps(&o.effects).as_slice(),
+            [AppRequest::OpenMenu(_)]
+        ));
+        // Past the last stop focus leaves; the page has the key.
+        let o = c.event(key(Key::Tab), &m);
+        assert!(!o.consumed && c.focus_stop().is_none());
+        // Backwards from the field walks to the first stop, then leaves.
+        let mut seen = Vec::new();
+        c.event(key(Key::F(6)), &m);
+        loop {
+            let stop = if c.address().is_editing() {
+                Stop::Field
+            } else {
+                match c.focus_stop() {
+                    Some(s) => s,
+                    None => break,
+                }
+            };
+            seen.push(stop);
+            c.event(shift_tab(), &m);
+        }
+        // Back and forward are disabled in this fixture, so they are no stops.
+        assert_eq!(
+            seen,
+            vec![Stop::Field, Stop::Reload, Stop::NewTab, Stop::ActiveTab]
+        );
+    }
+
+    #[test]
+    fn disabled_buttons_are_skipped_and_enabled_ones_are_stops() {
+        let mut c = chrome();
+        c.set_nav_state(true, false, false);
+        let m = Mono;
+        c.event(key(Key::F(6)), &m);
+        c.event(shift_tab(), &m);
+        assert_eq!(c.focus_stop(), Some(Stop::Reload));
+        c.event(shift_tab(), &m);
+        assert_eq!(c.focus_stop(), Some(Stop::Back));
+        let o = c.event(key(Key::Char(' ')), &m);
+        assert_eq!(apps(&o.effects), vec![AppRequest::Back]);
+    }
+
+    #[test]
+    fn escape_drops_chrome_focus_and_a_click_does_too() {
+        let mut c = chrome();
+        let m = Mono;
+        c.event(key(Key::F(6)), &m);
+        c.event(key(Key::Tab), &m);
+        assert!(c.focus_stop().is_some());
+        c.event(key(Key::Escape), &m);
+        assert!(c.focus_stop().is_none());
+        c.event(key(Key::F(6)), &m);
+        c.event(key(Key::Tab), &m);
+        let p = c.layout().field.center();
+        c.event(ptr(p.x, p.y, PointerKind::Down(Button::Primary)), &m);
+        assert!(c.focus_stop().is_none());
+    }
+
+    #[test]
+    fn arrows_on_the_tab_stop_switch_tabs() {
+        let mut c = chrome();
+        let m = Mono;
+        c.event(key(Key::F(6)), &m);
+        for _ in 0..3 {
+            c.event(shift_tab(), &m);
+        }
+        assert_eq!(c.focus_stop(), Some(Stop::ActiveTab));
+        let o = c.event(key(Key::Right), &m);
+        assert_eq!(apps(&o.effects), vec![AppRequest::ActivateTab(TabId(2))]);
+    }
+
+    #[test]
+    fn pressing_the_bar_moves_and_a_grip_resizes_only_when_frameless() {
+        let mut c = chrome();
+        let m = Mono;
+        let down = |c: &mut Chrome, x, y| {
+            platform(
+                &c.event(ptr(x, y, PointerKind::Down(Button::Primary)), &m)
+                    .effects,
+            )
+        };
+        assert!(down(&mut c, 700, 20).contains(&PlatformEffect::BeginMove));
+        assert!(
+            down(&mut c, 2, 300)
+                .contains(&PlatformEffect::BeginResize(crate::input::ResizeEdge::West))
+        );
+        assert!(
+            down(&mut c, 917, 565).contains(&PlatformEffect::BeginResize(
+                crate::input::ResizeEdge::SouthEast
+            ))
+        );
+        // Hovering a grip says which cursor.
+        let o = c.event(ptr(400, 1, PointerKind::Move), &m);
+        assert!(
+            platform(&o.effects).contains(&PlatformEffect::SetCursor(CursorShape::Resize(
+                crate::input::ResizeEdge::North
+            )))
+        );
+        // The OS draws the frame: nothing of ours moves or resizes the window.
+        let mut cfg = PlatformConfig::desktop();
+        cfg.controls = ControlsPlacement::None;
+        c.set_config(cfg);
+        let e = down(&mut c, 700, 20);
+        assert!(!e.contains(&PlatformEffect::BeginMove));
+        assert!(down(&mut c, 2, 300).is_empty());
+        // So does a maximised window (no corners, no grips).
+        let mut cfg = PlatformConfig::desktop();
+        cfg.window_radius = 0;
+        c.set_config(cfg);
+        assert!(!down(&mut c, 700, 20).contains(&PlatformEffect::BeginMove));
+    }
+
+    fn many_tabs(n: u64, active: u64) -> Chrome {
+        let mut c = chrome();
+        c.set_tabs(
+            (1..=n).map(|i| Tab::new(TabId(i), "tab", false)).collect(),
+            Some(TabId(active)),
+        );
+        c
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_strip_and_leaves_the_page_alone() {
+        use crate::input::WheelEvent;
+        let mut c = many_tabs(30, 1);
+        let m = Mono;
+        assert_eq!(c.layout().scroll, 0);
+        let wheel = |x, y, dx, dy| Event::Wheel(WheelEvent::new(x, y, dx, dy));
+        let o = c.event(wheel(400, 20, 0, 90), &m);
+        assert!(o.consumed);
+        assert_eq!(c.layout().scroll, 90);
+        // Horizontal deltas win; scrolling back clamps at zero.
+        c.event(wheel(400, 20, -500, 10), &m);
+        assert_eq!(c.layout().scroll, 0);
+        c.event(wheel(400, 20, 100_000, 0), &m);
+        assert_eq!(c.layout().scroll, c.layout().scroll_max);
+        // A later hover does not snap it back to the active tab.
+        c.event(ptr(400, 20, PointerKind::Move), &m);
+        assert_eq!(c.layout().scroll, c.layout().scroll_max);
+        // Over the page the wheel is the page's; over the toolbar it is nobody's.
+        assert!(!c.event(wheel(400, 300, 0, 50), &m).consumed);
+        let before = c.layout().scroll;
+        assert!(c.event(wheel(600, 70, 0, 50), &m).consumed);
+        assert_eq!(c.layout().scroll, before);
+    }
+
+    #[test]
+    fn activating_a_tab_scrolls_it_into_view_once() {
+        let mut c = many_tabs(30, 1);
+        let m = Mono;
+        assert_eq!(c.layout().scroll, 0);
+        c.set_tabs(
+            (1..=30).map(|i| Tab::new(TabId(i), "tab", false)).collect(),
+            Some(TabId(30)),
+        );
+        let l = c.layout();
+        assert_eq!(l.scroll, l.scroll_max);
+        assert_eq!(l.tabs[29].rect, l.tabs[29].full, "fully visible");
+        // Ctrl+Shift+Tab back round: the strip follows the active tab.
+        c.event(
+            Event::Key(KeyEvent::with(
+                Key::Tab,
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::NONE
+                },
+            )),
+            &m,
+        );
+        // The browser confirms with the new tab list; wrapping to the first tab
+        // brings the strip back.
+        c.set_tabs(
+            (1..=30).map(|i| Tab::new(TabId(i), "tab", false)).collect(),
+            Some(TabId(1)),
+        );
+        assert_eq!(c.layout().scroll, 0);
+    }
+
+    #[test]
+    fn the_scale_event_is_clamped_and_changes_the_frame_size() {
+        let mut c = chrome();
+        let m = Mono;
+        c.event(Event::Scale(2), &m);
+        assert_eq!(c.scale(), 2);
+        assert_eq!(c.physical_size(), Size::new(1840, 1136));
+        c.event(Event::Scale(0), &m);
+        assert_eq!(c.scale(), 1);
+        c.event(Event::Scale(9), &m);
+        assert_eq!(c.scale(), 3);
+        // Pointer positions stay logical: a click on the reload button is the
+        // same click at every scale.
+        let p = c.layout().reload.center();
+        let e = click(&mut c, p);
+        assert_eq!(apps(&e), vec![AppRequest::Reload]);
+    }
 }

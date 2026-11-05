@@ -161,6 +161,31 @@ mod tests {
         fn request_redraw(&mut self) {
             self.calls.push("redraw".into());
         }
+        fn begin_move(&mut self) {
+            self.calls.push("move".into());
+        }
+        fn begin_resize(&mut self, e: crate::input::ResizeEdge) {
+            self.calls.push(format!("resize {e:?}"));
+        }
+    }
+
+    #[test]
+    fn move_and_resize_requests_reach_the_window_and_scale_defaults_to_one() {
+        let mut w = Recording::default();
+        assert_eq!(w.scale_factor(), 1);
+        let mut chrome = Chrome::new(w.config(), w.size());
+        let m = Mono;
+        let ev = |x, y| {
+            Event::Pointer(crate::input::PointerEvent::new(
+                x,
+                y,
+                crate::input::PointerKind::Down(crate::input::Button::Primary),
+            ))
+        };
+        pump(&mut w, &mut chrome, &m, ev(700, 20));
+        pump(&mut w, &mut chrome, &m, ev(917, 300));
+        assert!(w.calls.contains(&"move".to_string()));
+        assert!(w.calls.contains(&"resize East".to_string()));
     }
 
     #[test]
