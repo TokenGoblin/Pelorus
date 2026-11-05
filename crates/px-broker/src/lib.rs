@@ -36,8 +36,10 @@
 //! [`ContentProcess::next_request`].
 
 mod script;
+pub mod site;
 pub mod system_fonts;
 pub use script::{DeathCause, OPENING_DEADLINE, ScriptOutcome, ScriptSession, fresh_seed};
+pub use site::{GroupId, MAX_CONTENT_PROCESSES, PoolError, PoolLookup, ProcessKey, ProcessPool};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, BufWriter};
@@ -45,7 +47,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::time::Duration;
 
+use px_ipc::frames::{FrameEvent, FrameRequest, FrameResponse};
 use px_ipc::{Channel, FrameHost, FrameId, IpcError, Request, Response};
+use px_websec::origin::{Origin, SiteResolver, Url};
 
 /// Messages queued in either direction before a peer is considered
 /// uncooperative.
@@ -105,9 +109,45 @@ pub enum DenyReason {
     NoSuchFrame,
     /// The channel is not open.
     UnknownChannel,
+    /// The new frame would be deeper than `MAX_FRAME_DEPTH`.
+    TooDeep,
+    /// A frame-count cap or an ordinal collision refused the new child.
+    FrameLimit,
+    /// The channel neither hosts the frame nor any ancestor of it.
+    NotAncestor,
+    /// The document has no process key: its top-level site has no
+    /// registrable domain (an IP literal, `localhost`) or is opaque.
+    NoProcessKey,
+    /// The navigation target did not parse.
+    BadUrl,
     /// The broker failed while handling the request and refused rather than
     /// guessing.
     Internal,
+}
+
+/// What committing a document in a frame requires of the process pool.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommitPlan {
+    /// The frame's process already serves this key; nothing moves.
+    InPlace,
+    /// The frame moved to an existing process in the pool.
+    Transferred(Transfer),
+    /// No process serves this key: spawn one, then call
+    /// [`Broker::attach_process`].
+    NeedsProcess(ProcessKey),
+    /// No process serves this key and the cap forbids another. Show a
+    /// placeholder; share nothing.
+    AtCap,
+}
+
+/// The result of moving a frame between processes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transfer {
+    /// The previous owner and the `FrameReplaced` event it is owed, if the
+    /// frame actually changed hands.
+    pub replaced: Option<(ChannelId, FrameEvent)>,
+    /// The new owner.
+    pub to: ChannelId,
 }
 
 /// What the broker decided, and what the audit log should record about it.
@@ -138,49 +178,161 @@ impl Decision {
     }
 }
 
+/// Deepest nesting the broker will create. Top-level frames are depth 0, so a
+/// chain of top-level plus five nested origins (the Phase 14 gate) is depth 5.
+/// Proposed in ADR 045; a self-embedding page hits this and the process cap,
+/// not the machine.
+pub const MAX_FRAME_DEPTH: u8 = 8;
+
+/// Most live child frames one frame may have. Bounds the scan in
+/// [`FrameTree::create_child`] and what one hostile document can allocate.
+pub const MAX_CHILDREN_PER_FRAME: usize = 256;
+
+/// Whether a frame's document is running.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FrameState {
+    /// Hosted by a live channel.
+    Live,
+    /// The process that hosted it died. The id stays valid so the embedding
+    /// document can draw a placeholder; nothing hosts it.
+    Crashed,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Lifecycle {
+    Free,
+    Live,
+    Crashed,
+}
+
+/// Why [`FrameTree::create_child`] refused.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TreeError {
+    /// No handle can be minted.
+    Full,
+    /// The parent does not exist, is not live, or is not the caller's.
+    NoParent,
+    /// The child would be deeper than [`MAX_FRAME_DEPTH`].
+    TooDeep,
+    /// The parent already has [`MAX_CHILDREN_PER_FRAME`] children.
+    TooManyChildren,
+    /// The parent already has a child at this element ordinal.
+    OrdinalTaken,
+}
+
 /// One frame's slot in the tree.
 #[derive(Debug)]
 struct FrameSlot {
     /// Bumped every time the slot is reused. A stale [`FrameId`] carries the
     /// old value and stops resolving.
     generation: u32,
-    /// `None` once the frame is gone and before the slot is reused.
+    /// `Some` only while `lifecycle` is `Live`.
     owner: Option<ChannelId>,
     /// Retired slots are never handed out again. §14.3: on generation
-    /// overflow, retire rather than wrap — wrapping makes a stale handle valid
+    /// overflow, retire rather than wrap -- wrapping makes a stale handle valid
     /// again, which is the bug the generation exists to prevent.
     retired: bool,
+    lifecycle: Lifecycle,
+    /// The embedding frame, `None` for a top-level frame.
+    parent: Option<FrameId>,
+    /// Distance from the top-level frame.
+    depth: u8,
+    /// Element ordinal in the parent, `None` for a top-level frame.
+    ordinal: Option<u32>,
+    /// The browsing context group, shared by a whole frame tree.
+    group: GroupId,
+    /// The origin of the committed document, set by the broker from a
+    /// navigation it performed. Never from a message.
+    origin: Option<Origin>,
 }
 
 /// The frame tree, and the authority over it.
 ///
-/// Flat in Phase 1. Parent/child structure arrives with real navigation; what
-/// this phase needs is that a `FrameId` resolves through the broker and may
-/// name a frame in another process, so that Phase 14 is a change of answer
-/// rather than a change of shape.
+/// Phase 14 gives it parents, depth, a browsing-context group, a committed
+/// origin, a crashed state and owner transfer. Every accessor still returns
+/// `Option`; there is no infallible index API.
 #[derive(Debug, Default)]
 pub struct FrameTree {
     slots: Vec<FrameSlot>,
+    next_group: u64,
 }
 
 impl FrameTree {
-    /// Create a frame owned by `owner`, or `None` if no handle can be minted.
+    /// Create a top-level frame owned by `owner`, in a new browsing context
+    /// group, or `None` if no handle can be minted.
     ///
     /// Returns `Option` for the same reason every accessor here does. The
-    /// failure needs more than `u32::MAX` live slots and is remote — but the
+    /// failure needs more than `u32::MAX` live slots and is remote -- but the
     /// alternative was `u32::try_from(index).unwrap_or(u32::MAX)`, which
     /// silently mints the *same* `FrameId` for two different slots. In a
     /// function whose entire purpose is that handles are unambiguous, that is
     /// capability confusion rather than a rounding error.
     pub fn create(&mut self, owner: ChannelId) -> Option<FrameId> {
+        let group = GroupId(self.next_group);
+        let next = self.next_group.checked_add(1)?;
+        let frame = self.alloc(owner, None, 0, None, group)?;
+        self.next_group = next;
+        Some(frame)
+    }
+
+    /// Create a child of `parent`, owned by `owner`, which must own `parent`.
+    /// The child joins the parent's group.
+    pub fn create_child(
+        &mut self,
+        owner: ChannelId,
+        parent: FrameId,
+        ordinal: u32,
+    ) -> Result<FrameId, TreeError> {
+        let parent_index = self.resolve(parent).ok_or(TreeError::NoParent)?;
+        let (depth, group) = {
+            let slot = self.slots.get(parent_index).ok_or(TreeError::NoParent)?;
+            if slot.lifecycle != Lifecycle::Live || slot.owner != Some(owner) {
+                return Err(TreeError::NoParent);
+            }
+            (slot.depth, slot.group)
+        };
+        let depth = depth.checked_add(1).ok_or(TreeError::TooDeep)?;
+        if depth > MAX_FRAME_DEPTH {
+            return Err(TreeError::TooDeep);
+        }
+        let mut children = 0usize;
+        for slot in &self.slots {
+            if slot.lifecycle != Lifecycle::Free && slot.parent == Some(parent) {
+                if slot.ordinal == Some(ordinal) {
+                    return Err(TreeError::OrdinalTaken);
+                }
+                children += 1;
+            }
+        }
+        if children >= MAX_CHILDREN_PER_FRAME {
+            return Err(TreeError::TooManyChildren);
+        }
+        self.alloc(owner, Some(parent), depth, Some(ordinal), group)
+            .ok_or(TreeError::Full)
+    }
+
+    fn alloc(
+        &mut self,
+        owner: ChannelId,
+        parent: Option<FrameId>,
+        depth: u8,
+        ordinal: Option<u32>,
+        group: GroupId,
+    ) -> Option<FrameId> {
         // Reuse a free, non-retired slot before growing.
         for (index, slot) in self.slots.iter_mut().enumerate() {
-            if slot.owner.is_none() && !slot.retired {
+            if slot.lifecycle == Lifecycle::Free && !slot.retired {
                 match slot.generation.checked_add(1) {
                     Some(next) => {
                         let index = u32::try_from(index).ok()?;
                         slot.generation = next;
                         slot.owner = Some(owner);
+                        slot.lifecycle = Lifecycle::Live;
+                        slot.parent = parent;
+                        slot.depth = depth;
+                        slot.ordinal = ordinal;
+                        slot.group = group;
+                        slot.origin = None;
                         return Some(FrameId::new(index, slot.generation));
                     }
                     None => {
@@ -197,21 +349,33 @@ impl FrameTree {
             generation: 0,
             owner: Some(owner),
             retired: false,
+            lifecycle: Lifecycle::Live,
+            parent,
+            depth,
+            ordinal,
+            group,
+            origin: None,
         });
         Some(FrameId::new(index, 0))
     }
 
-    /// Destroy a frame, if `owner` is the channel that holds it.
+    /// Destroy a frame and everything embedded in it, if `owner` is the
+    /// channel that holds it.
     ///
     /// The owner argument is not decoration. `create` takes one and an earlier
     /// `destroy` did not, so the moment a `Request::DestroyFrame` arrives the
     /// obvious one-line implementation would let any channel free any other
-    /// channel's frame — and it would read as correct. Closing the asymmetry
+    /// channel's frame -- and it would read as correct. Closing the asymmetry
     /// costs nothing now and removes the trap.
     pub fn destroy(&mut self, owner: ChannelId, frame: FrameId) -> bool {
-        match self.slot_mut(frame) {
-            Some(slot) if slot.owner == Some(owner) => {
-                slot.owner = None;
+        match self.resolve(frame) {
+            Some(index)
+                if self
+                    .slots
+                    .get(index)
+                    .is_some_and(|s| s.lifecycle == Lifecycle::Live && s.owner == Some(owner)) =>
+            {
+                self.free_with_descendants(&HashSet::from([index]));
                 true
             }
             _ => false,
@@ -219,36 +383,211 @@ impl FrameTree {
     }
 
     /// Owner of a live frame, or `None` if the handle is stale, forged, or the
-    /// frame is gone.
+    /// frame is gone or crashed.
     ///
     /// Returns `Option`, like every accessor over a generational arena. There
     /// is no infallible variant, not even a private one.
     pub fn owner(&self, frame: FrameId) -> Option<ChannelId> {
-        let index = usize::try_from(frame.index()).ok()?;
-        let slot = self.slots.get(index)?;
-        if slot.generation != frame.generation() {
-            return None;
-        }
+        let slot = self.slots.get(self.resolve(frame)?)?;
         slot.owner
     }
 
-    /// Drop every frame owned by a channel. Called when a process dies: a
-    /// restarted process begins with zero authority.
+    /// Whether the frame is live or crashed, `None` if it is gone, stale or
+    /// forged.
+    pub fn state(&self, frame: FrameId) -> Option<FrameState> {
+        match self.slots.get(self.resolve(frame)?)?.lifecycle {
+            Lifecycle::Live => Some(FrameState::Live),
+            Lifecycle::Crashed => Some(FrameState::Crashed),
+            Lifecycle::Free => None,
+        }
+    }
+
+    /// The embedding frame, `None` for a top-level frame or a dead handle.
+    pub fn parent(&self, frame: FrameId) -> Option<FrameId> {
+        self.slots.get(self.resolve(frame)?)?.parent
+    }
+
+    /// Distance from the top-level frame.
+    pub fn depth(&self, frame: FrameId) -> Option<u8> {
+        Some(self.slots.get(self.resolve(frame)?)?.depth)
+    }
+
+    /// The browsing context group.
+    pub fn group(&self, frame: FrameId) -> Option<GroupId> {
+        Some(self.slots.get(self.resolve(frame)?)?.group)
+    }
+
+    /// The committed origin, if a document has committed.
+    pub fn origin(&self, frame: FrameId) -> Option<&Origin> {
+        self.slots.get(self.resolve(frame)?)?.origin.as_ref()
+    }
+
+    /// Whether `ancestor` is a proper ancestor of `frame`. Bounded by
+    /// [`MAX_FRAME_DEPTH`] steps.
+    pub fn is_ancestor(&self, ancestor: FrameId, frame: FrameId) -> bool {
+        let mut at = frame;
+        for _ in 0..=MAX_FRAME_DEPTH {
+            match self.parent(at) {
+                Some(p) if p == ancestor => return self.state(ancestor).is_some(),
+                Some(p) => at = p,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// Record the origin of a document the broker committed in a live frame.
+    pub fn commit_origin(&mut self, frame: FrameId, origin: Origin) -> bool {
+        match self.resolve(frame).and_then(|i| self.slots.get_mut(i)) {
+            Some(slot) if slot.lifecycle == Lifecycle::Live => {
+                slot.origin = Some(origin);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The process key of a frame's committed document, given the committed
+    /// origin of its top-level frame. `None` if either has not committed, or
+    /// the top-level site has no registrable domain.
+    pub fn process_key(&self, frame: FrameId, resolver: &dyn SiteResolver) -> Option<ProcessKey> {
+        if self.state(frame)? != FrameState::Live {
+            return None;
+        }
+        let origin = self.origin(frame)?;
+        let mut root = frame;
+        for _ in 0..=MAX_FRAME_DEPTH {
+            match self.parent(root) {
+                Some(p) => root = p,
+                None => break,
+            }
+        }
+        if self.parent(root).is_some() {
+            return None;
+        }
+        ProcessKey::new(self.origin(root)?, origin, resolver)
+    }
+
+    /// Hand a live frame from `from` to `to` (a process swap). No generation
+    /// bump: authority is set membership, and a bump would invalidate every
+    /// reference to the frame.
+    pub fn transfer(&mut self, frame: FrameId, from: ChannelId, to: ChannelId) -> bool {
+        match self.resolve(frame).and_then(|i| self.slots.get_mut(i)) {
+            Some(slot) if slot.lifecycle == Lifecycle::Live && slot.owner == Some(from) => {
+                slot.owner = Some(to);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether the handle names a live or crashed frame.
+    pub fn exists(&self, frame: FrameId) -> bool {
+        self.resolve(frame).is_some()
+    }
+
+    /// Drop every frame owned by a channel, and everything embedded in them.
+    /// Called on orderly teardown: a restarted process begins with zero
+    /// authority.
     pub fn release_all(&mut self, channel: ChannelId) {
-        for slot in &mut self.slots {
-            if slot.owner == Some(channel) {
-                slot.owner = None;
+        let roots = self.owned_by(channel);
+        self.free_with_descendants(&roots);
+    }
+
+    /// A channel died. Its frames become [`FrameState::Crashed`] (the id stays
+    /// valid, so the embedding document can draw a placeholder), except frames
+    /// embedded in another of its dead frames, which are freed with their
+    /// subtree: a child without an embedding document has nothing to show.
+    ///
+    /// Returns `(owner of the embedding frame, crashed frame)` for each crashed
+    /// frame whose embedder survives in another channel: the notices the broker
+    /// owes as `FrameCrashed`.
+    pub fn crash_channel(&mut self, channel: ChannelId) -> Vec<(ChannelId, FrameId)> {
+        let roots = self.owned_by(channel);
+        let doomed = self.descendants(&roots);
+        let mut notices = Vec::new();
+        for &index in roots.difference(&doomed) {
+            let parent_owner = self
+                .slots
+                .get(index)
+                .and_then(|s| s.parent)
+                .and_then(|p| self.owner(p))
+                .filter(|o| *o != channel);
+            let Some(slot) = self.slots.get_mut(index) else {
+                continue;
+            };
+            let Ok(i) = u32::try_from(index) else {
+                continue;
+            };
+            slot.owner = None;
+            slot.lifecycle = Lifecycle::Crashed;
+            if let Some(owner) = parent_owner {
+                notices.push((owner, FrameId::new(i, slot.generation)));
+            }
+        }
+        notices.sort_by_key(|(o, f)| (o.as_u64(), f.index()));
+        self.free_indices(&doomed);
+        notices
+    }
+
+    fn owned_by(&self, channel: ChannelId) -> HashSet<usize> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.lifecycle == Lifecycle::Live && s.owner == Some(channel))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Strict descendants of `seed`.
+    fn descendants(&self, seed: &HashSet<usize>) -> HashSet<usize> {
+        let mut found: HashSet<usize> = HashSet::new();
+        loop {
+            let mut grew = false;
+            for (index, slot) in self.slots.iter().enumerate() {
+                if slot.lifecycle == Lifecycle::Free || found.contains(&index) {
+                    continue;
+                }
+                let Some(parent) = slot.parent.and_then(|p| self.resolve(p)) else {
+                    continue;
+                };
+                if seed.contains(&parent) || found.contains(&parent) {
+                    found.insert(index);
+                    grew = true;
+                }
+            }
+            if !grew {
+                return found;
             }
         }
     }
 
-    fn slot_mut(&mut self, frame: FrameId) -> Option<&mut FrameSlot> {
+    fn free_with_descendants(&mut self, roots: &HashSet<usize>) {
+        let mut all = self.descendants(roots);
+        all.extend(roots.iter().copied());
+        self.free_indices(&all);
+    }
+
+    fn free_indices(&mut self, indices: &HashSet<usize>) {
+        for &index in indices {
+            if let Some(slot) = self.slots.get_mut(index) {
+                slot.owner = None;
+                slot.lifecycle = Lifecycle::Free;
+                slot.parent = None;
+                slot.ordinal = None;
+                slot.origin = None;
+            }
+        }
+    }
+
+    /// Slot index of a handle that names a non-free slot at its generation.
+    fn resolve(&self, frame: FrameId) -> Option<usize> {
         let index = usize::try_from(frame.index()).ok()?;
-        let slot = self.slots.get_mut(index)?;
-        if slot.generation != frame.generation() {
+        let slot = self.slots.get(index)?;
+        if slot.generation != frame.generation() || slot.lifecycle == Lifecycle::Free {
             return None;
         }
-        Some(slot)
+        Some(index)
     }
 }
 
@@ -275,6 +614,7 @@ pub struct Broker {
     next_channel: u64,
     capabilities: HashMap<ChannelId, ChannelCaps>,
     frames: FrameTree,
+    pool: ProcessPool,
     /// Denials, oldest dropped first.
     ///
     /// §7.3 makes the broker the writer of the audit log, and it has to be the
@@ -322,19 +662,277 @@ impl Broker {
     pub fn close_channel(&mut self, channel: ChannelId) {
         self.capabilities.remove(&channel);
         self.frames.release_all(channel);
+        self.pool.forget(channel);
+        self.purge_dead_frames();
+    }
 
-        // Purge everyone else's references to the frames that just died.
-        // Leaving them is not a capability confusion — generations make a
-        // stale handle unresolvable — but nothing ever removed them, so a
-        // long-lived channel's set grew without bound.
-        let live: HashSet<FrameId> = self
-            .capabilities
-            .values()
-            .flat_map(|caps| caps.hosts.iter().copied())
-            .collect();
-        for caps in self.capabilities.values_mut() {
-            caps.visible.retain(|frame| live.contains(frame));
+    /// A content process died (as opposed to an orderly close). Its frames
+    /// become `Crashed` rather than free, so an embedding document keeps its
+    /// id and can draw a placeholder; frames embedded in its dead frames are
+    /// destroyed with them. Returns the `FrameCrashed` events owed, each with
+    /// the channel to deliver it to.
+    pub fn channel_died(&mut self, channel: ChannelId) -> Vec<(ChannelId, FrameEvent)> {
+        self.capabilities.remove(&channel);
+        self.pool.forget(channel);
+        let notices = self.frames.crash_channel(channel);
+        self.purge_dead_frames();
+        notices
+            .into_iter()
+            .map(|(owner, frame)| (owner, FrameEvent::FrameCrashed { frame }))
+            .collect()
+    }
+
+    /// Purge every channel's references to frames that no longer exist.
+    /// Leaving them is not a capability confusion -- generations make a stale
+    /// handle unresolvable -- but nothing else removes them, so a long-lived
+    /// channel's sets would grow without bound. A crashed frame stays visible
+    /// to the channels that could see it, and is hosted by nobody.
+    fn purge_dead_frames(&mut self) {
+        for (channel, caps) in &mut self.capabilities {
+            caps.hosts
+                .retain(|frame| self.frames.owner(*frame) == Some(*channel));
+            caps.visible.retain(|frame| self.frames.exists(*frame));
         }
+    }
+
+    /// The frame tree, read-only. Mutation goes through the broker so that the
+    /// capability sets and the tree cannot disagree.
+    pub fn frames(&self) -> &FrameTree {
+        &self.frames
+    }
+
+    /// The process pool, read-only.
+    pub fn pool(&self) -> &ProcessPool {
+        &self.pool
+    }
+
+    /// Create a child frame for `channel` under `parent`, which it must host.
+    pub fn create_child_frame(
+        &mut self,
+        channel: ChannelId,
+        parent: FrameId,
+        ordinal: u32,
+    ) -> Result<FrameId, DenyReason> {
+        if !self.capabilities.contains_key(&channel) {
+            return Err(DenyReason::UnknownChannel);
+        }
+        if !self.holds_frame(channel, parent) {
+            return Err(match self.frames.owner(parent) {
+                None => DenyReason::NoSuchFrame,
+                Some(_) => DenyReason::NotYourFrame,
+            });
+        }
+        let frame = self
+            .frames
+            .create_child(channel, parent, ordinal)
+            .map_err(|e| match e {
+                TreeError::TooDeep => DenyReason::TooDeep,
+                TreeError::TooManyChildren | TreeError::OrdinalTaken => DenyReason::FrameLimit,
+                TreeError::NoParent => DenyReason::NoSuchFrame,
+                TreeError::Full => DenyReason::Internal,
+            })?;
+        let caps = self
+            .capabilities
+            .get_mut(&channel)
+            .ok_or(DenyReason::UnknownChannel)?;
+        caps.hosts.insert(frame);
+        caps.visible.insert(frame);
+        Ok(frame)
+    }
+
+    /// Record the origin of a document the broker committed in `frame` and say
+    /// what the commit needs. The origin comes from the navigation the broker
+    /// performed (Phase 13), never from a message; this is the entry point
+    /// that phase calls, and until it lands tests call it directly.
+    ///
+    /// The first commit in a process that serves no key claims the key for it.
+    /// A commit whose key differs from the serving process's needs another
+    /// process: [`CommitPlan::Transferred`] if the pool has one,
+    /// [`CommitPlan::NeedsProcess`] if the caller must spawn one,
+    /// [`CommitPlan::AtCap`] if the cap forbids it. The broker never shares a
+    /// process across keys to stay under the cap.
+    pub fn commit_document(
+        &mut self,
+        frame: FrameId,
+        origin: Origin,
+        resolver: &dyn SiteResolver,
+    ) -> Result<CommitPlan, DenyReason> {
+        let current = self.frames.owner(frame).ok_or(DenyReason::NoSuchFrame)?;
+        if !self.frames.commit_origin(frame, origin) {
+            return Err(DenyReason::NoSuchFrame);
+        }
+        // No key (IP-literal top level, opaque top level) fails closed.
+        let Some(key) = self.frames.process_key(frame, resolver) else {
+            // Fail closed: the load is refused.
+            return Err(DenyReason::NoProcessKey);
+        };
+        let group = self.frames.group(frame).ok_or(DenyReason::NoSuchFrame)?;
+        match self.pool.key_of(current) {
+            Some((g, k)) if *g == group && *k == key => Ok(CommitPlan::InPlace),
+            Some(_) => self.plan_other_process(frame, group, key),
+            None => match self.pool.lookup(group, &key) {
+                PoolLookup::Share(to) => {
+                    self.transfer_frame(frame, to).map(CommitPlan::Transferred)
+                }
+                _ => self
+                    .pool
+                    .register(group, key, current)
+                    .map(|()| CommitPlan::InPlace)
+                    .map_err(|_| DenyReason::FrameLimit),
+            },
+        }
+    }
+
+    fn plan_other_process(
+        &mut self,
+        frame: FrameId,
+        group: GroupId,
+        key: ProcessKey,
+    ) -> Result<CommitPlan, DenyReason> {
+        match self.pool.lookup(group, &key) {
+            PoolLookup::Share(to) => self.transfer_frame(frame, to).map(CommitPlan::Transferred),
+            PoolLookup::Spawn => Ok(CommitPlan::NeedsProcess(key)),
+            PoolLookup::AtCap => Ok(CommitPlan::AtCap),
+        }
+    }
+
+    /// Register a freshly spawned process for the key a [`CommitPlan::NeedsProcess`]
+    /// named, and move `frame` to it.
+    pub fn attach_process(
+        &mut self,
+        frame: FrameId,
+        key: ProcessKey,
+        process: ChannelId,
+    ) -> Result<Transfer, DenyReason> {
+        let group = self.frames.group(frame).ok_or(DenyReason::NoSuchFrame)?;
+        if !self.capabilities.contains_key(&process) {
+            return Err(DenyReason::UnknownChannel);
+        }
+        self.pool
+            .register(group, key, process)
+            .map_err(|_| DenyReason::FrameLimit)?;
+        self.transfer_frame(frame, process)
+    }
+
+    /// Move a frame to another channel (a process swap). `FrameId` is stable.
+    ///
+    /// The previous owner loses `hosts` and, unless it hosts the frame's
+    /// parent (in which case it must keep seeing the frame as `Remote`),
+    /// `visible`, so its next `FrameHost` for the frame is `Denied`. The new
+    /// owner hosts it; the parent's owner is granted sight.
+    fn transfer_frame(&mut self, frame: FrameId, to: ChannelId) -> Result<Transfer, DenyReason> {
+        let from = self.frames.owner(frame).ok_or(DenyReason::NoSuchFrame)?;
+        if from == to {
+            return Ok(Transfer { replaced: None, to });
+        }
+        if !self.capabilities.contains_key(&to) {
+            return Err(DenyReason::UnknownChannel);
+        }
+        let parent_owner = self.frames.parent(frame).and_then(|p| self.frames.owner(p));
+        if !self.frames.transfer(frame, from, to) {
+            return Err(DenyReason::Internal);
+        }
+        if let Some(caps) = self.capabilities.get_mut(&from) {
+            caps.hosts.remove(&frame);
+            if parent_owner != Some(from) {
+                caps.visible.remove(&frame);
+            }
+        }
+        if let Some(caps) = self.capabilities.get_mut(&to) {
+            caps.hosts.insert(frame);
+            caps.visible.insert(frame);
+        }
+        if let Some(owner) = parent_owner
+            && let Some(caps) = self.capabilities.get_mut(&owner)
+        {
+            caps.visible.insert(frame);
+        }
+        Ok(Transfer {
+            replaced: Some((from, FrameEvent::FrameReplaced { frame })),
+            to,
+        })
+    }
+
+    /// Handle one frame-vocabulary request from one channel.
+    ///
+    /// Same rule as [`Broker::dispatch`]: the channel comes from the
+    /// transport. Every refusal is the bare `Denied`, with the reason in the
+    /// audit log only. Unknown variants (the enum is `non_exhaustive`) are
+    /// refused.
+    pub fn dispatch_frame(
+        &mut self,
+        channel: ChannelId,
+        request: FrameRequest,
+    ) -> (FrameResponse, Option<DenyReason>) {
+        let outcome = match request {
+            FrameRequest::CreateChildFrame {
+                parent,
+                element_ordinal,
+            } => self
+                .create_child_frame(channel, parent, element_ordinal)
+                .map(|frame| FrameResponse::Created { frame }),
+            FrameRequest::Navigate { frame, url, kind } => {
+                let _ = kind;
+                self.authorise_navigation(channel, frame, url.as_str())
+                    .map(|()| FrameResponse::NavigationAuthorised)
+            }
+            _ => Err(DenyReason::Internal),
+        };
+        match outcome {
+            Ok(response) => (response, None),
+            Err(reason) => {
+                self.record_reason(channel, reason);
+                (FrameResponse::Denied, Some(reason))
+            }
+        }
+    }
+
+    /// A channel may navigate a frame it hosts or one embedded in a frame it
+    /// hosts. The fetch is Phase 13's; this decides only whether to start it.
+    fn authorise_navigation(
+        &self,
+        channel: ChannelId,
+        frame: FrameId,
+        url: &str,
+    ) -> Result<(), DenyReason> {
+        if !self.capabilities.contains_key(&channel) {
+            return Err(DenyReason::UnknownChannel);
+        }
+        if self.frames.state(frame) != Some(FrameState::Live) {
+            return Err(DenyReason::NoSuchFrame);
+        }
+        let allowed = self.holds_frame(channel, frame) || {
+            let mut at = frame;
+            let mut found = false;
+            for _ in 0..=MAX_FRAME_DEPTH {
+                match self.frames.parent(at) {
+                    Some(p) if self.holds_frame(channel, p) => {
+                        found = true;
+                        break;
+                    }
+                    Some(p) => at = p,
+                    None => break,
+                }
+            }
+            found
+        };
+        if !allowed {
+            return Err(match self.frames.owner(frame) {
+                None => DenyReason::NoSuchFrame,
+                Some(_) => DenyReason::NotAncestor,
+            });
+        }
+        if Url::parse(url).is_none() {
+            return Err(DenyReason::BadUrl);
+        }
+        Ok(())
+    }
+
+    fn record_reason(&mut self, channel: ChannelId, reason: DenyReason) {
+        if self.audit.len() >= AUDIT_CAPACITY {
+            self.audit.pop_front();
+        }
+        self.audit.push_back((channel, reason));
     }
 
     /// Whether a channel is open. Callers on the IPC path need this because

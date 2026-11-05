@@ -131,3 +131,39 @@ fn every_message_type_decodes_injectively() {
         .is_some()
     );
 }
+
+#[test]
+fn frame_vocabulary_decodes_injectively() {
+    use px_ipc::FrameId;
+    use px_ipc::frames::{FrameEvent, FrameRequest, FrameResponse, NavigateUrl, NavigationKind};
+    let frame = FrameId::new(3, 1);
+    let url = NavigateUrl::new("https://a.example/".to_string()).expect("short url");
+    assert!(
+        assert_injective(FrameRequest::CreateChildFrame {
+            parent: frame,
+            element_ordinal: 2,
+        })
+        .is_some()
+    );
+    assert!(
+        assert_injective(FrameRequest::Navigate {
+            frame,
+            url,
+            kind: NavigationKind::Replace,
+        })
+        .is_some()
+    );
+    assert!(assert_injective(FrameResponse::Denied).is_some());
+    assert!(assert_injective(FrameResponse::Created { frame }).is_some());
+    assert!(assert_injective(FrameResponse::NavigationAuthorised).is_some());
+    assert!(assert_injective(FrameEvent::FrameReplaced { frame }).is_some());
+    assert!(assert_injective(FrameEvent::FrameCrashed { frame }).is_some());
+    assert!(
+        assert_injective(FrameEvent::SetViewport {
+            frame,
+            width: 800,
+            height: 600,
+        })
+        .is_some()
+    );
+}

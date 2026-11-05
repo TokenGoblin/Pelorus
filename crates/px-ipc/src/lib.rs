@@ -49,6 +49,7 @@ use std::io::{Read, Write};
 
 use serde::{Serialize, de::DeserializeOwned};
 
+pub mod frames;
 pub mod gpu;
 pub mod gpu_fonts;
 pub mod message;
