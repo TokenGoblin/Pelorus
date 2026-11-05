@@ -1547,3 +1547,42 @@ sites showed, none of it fixed here:
   `<code>` whitespace, form controls, positioned headers, media queries, `calc`)
   are listed per site in `docs/brand/ui-live-web-*.png` review notes in the branch
   report.
+
+## Phase 15 images (branch phase15/images)
+
+- **GPU wire carries no images.** `px_gpu::wire::item_to_wire` turns an
+  `Item::Image` into a transparent fill: the image table of a `DisplayList` is not
+  part of the frame message. Only the in-process software rasterizer (what
+  `px-shell` and the render corpus use) draws pictures. Needs an image table in
+  the wire format and a size cap there before the GPU path can show them.
+- **Formats.** WebP and AVIF are not decoded (ADR 042 leaves WebP to a later ADR):
+  `<picture><source type=image/webp>` is skipped as a browser without it would, a
+  bare `<img>` of one shows its `alt`. SVG is refused by `Loader::image` and by the
+  `<source type>` rule. An animated GIF or APNG shows its first frame (no frame
+  clock yet). EXIF orientation and ICC profiles are ignored (ADR 042).
+- **`data:` URLs** in `src`, `srcset` and `url()` are not fetched or decoded (the
+  loader is for `http(s)`); inline pictures show their `alt`.
+- **`srcset`/`sizes`** are evaluated at a device pixel ratio of 1; `sizes` knows
+  `px`, `vw`, `em` and `(min|max)-width` conditions, not `calc()`. A page resized
+  after load falls back on what was fetched for the plan width (1024 px).
+  `loading=lazy`, `decoding`, `crossorigin`, `referrerpolicy` and `image-set()` are
+  not honoured; `<img>` with `usemap` and `<input type=image>` are not images.
+- **Images are fetched one after another** on the UI thread, before the first
+  frame (Phase 19 moves the loader off it). There is no image cache across loads.
+- **Background images.** `background-origin: content-box` and
+  `background-clip: content-box` are treated as the padding box (padding is not in
+  `PaintStyle`); gradients are not painted (such a layer is skipped); a layer that
+  expands to more than 20,000 tiles paints nothing; `background-attachment:
+  fixed` scrolls like `scroll`; the canvas background image is placed against the
+  whole canvas, not the root element's box.
+- **Replaced sizing** is the simplified min/max form of CSS 2.1 10.4 (see
+  `px_layout::replaced`); `aspect-ratio`, percentage heights against a definite
+  containing height, flex stretch of an image item and `<img>` as a grid item are
+  not specialised. A broken image with `width`/`height` attributes and `alt`
+  shows only the alt text, not a sized box.
+- **WPT image tests.** `grid-abspos-staticpos-align-self-img-001` passes only
+  because the render corpus renders vendored WPT pages without pictures: with its
+  `colors-8x16.png` loaded the test and reference differ, because `align-self` for
+  an absolutely positioned grid child is not implemented. Revisit when that lands,
+  then let WPT pages load pictures (`px-paint/examples/render_pages.rs`, `own`).
+- **`px-paint` still has its own PNG decoder** next to `px-image` (ADR 042).

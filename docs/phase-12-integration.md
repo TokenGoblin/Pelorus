@@ -141,8 +141,11 @@ the navigation's CSP and Referrer-Policy (`DocumentFacts`). Every step of the
 enforcement order above runs; redirects follow `redirect::Chain`. The shell only
 decodes (BOM, `Content-Type` charset, `<meta>` prescan; UTF-8, UTF-16, Latin-1 /
 windows-1252), finds `<link rel=stylesheet>`, vets inline `<style>` with the
-document's CSP (`Loader::allows_inline_style`), lays out and paints. Scripts,
-images, fonts, frames and forms are never requested. A denial or transport
+document's CSP (`Loader::allows_inline_style`), lays out and paints. Phase 15
+adds pictures: `Loader::image` is a `Destination::Image` subresource on the same
+path (CSP `img-src`, mixed content, referrer, redirects), refuses what is not a
+picture by content type and by signature, and caps the body at 8 MiB; the shell
+decodes with `px-image`. Scripts, fonts, frames and forms are never requested. A denial or transport
 failure becomes `px_pages::error_page(address, reason)`.
 
 Process model: in-process on the UI thread. Moving the loader into the network
