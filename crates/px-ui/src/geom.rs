@@ -69,6 +69,19 @@ impl Rect {
         )
     }
 
+    /// The overlap, or an empty rectangle when there is none.
+    pub fn intersect(&self, o: Rect) -> Rect {
+        let x0 = self.x.max(o.x);
+        let y0 = self.y.max(o.y);
+        let x1 = self.right().min(o.right());
+        let y1 = self.bottom().min(o.bottom());
+        if x1 <= x0 || y1 <= y0 {
+            Rect::default()
+        } else {
+            Rect::new(x0, y0, x1 - x0, y1 - y0)
+        }
+    }
+
     pub fn center(&self) -> Point {
         Point {
             x: self.x + self.w / 2,

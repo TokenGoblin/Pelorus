@@ -11,13 +11,36 @@ use crate::address::{AddressBar, UrlDisplay};
 use crate::geom::{Point, Rect, Size};
 use crate::input::{
     AppRequest, Button, CursorShape, Effect, Event, Key, KeyEvent, Outcome, PlatformEffect,
-    PointerEvent, PointerKind, PrimaryModifier, WindowAction,
+    PointerEvent, PointerKind, PrimaryModifier, WheelEvent, WindowAction,
 };
 use crate::layout::{self, ControlsPlacement, Layout, LayoutInput, Region};
 use crate::shortcuts::{self, Command};
 use crate::tabs::{Tab, TabId, TabStrip};
 use crate::text::{AU_PER_PX, TextShaper};
 use crate::toolbar::Toolbar;
+
+/// How the window-control dots are drawn at rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlDots {
+    /// Grey until the pointer is over the group, then red, amber and teal.
+    #[default]
+    Neutral,
+    /// Always coloured.
+    Coloured,
+}
+
+/// A place keyboard focus can rest in the chrome, in Tab order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stop {
+    ActiveTab,
+    NewTab,
+    Back,
+    Forward,
+    Reload,
+    /// The address field: focused means editing.
+    Field,
+    Overflow,
+}
 
 /// What the platform layer tells the chrome once, at start (and again if it
 /// changes, e.g. the window is maximised and loses its corners).
@@ -27,6 +50,7 @@ pub struct PlatformConfig {
     pub primary: PrimaryModifier,
     /// Window corner radius in px; 0 when maximised or fullscreen.
     pub window_radius: i32,
+    pub control_dots: ControlDots,
 }
 
 impl PlatformConfig {
@@ -37,6 +61,7 @@ impl PlatformConfig {
             controls: ControlsPlacement::Left,
             primary: PrimaryModifier::Ctrl,
             window_radius: layout::WINDOW_RADIUS,
+            control_dots: ControlDots::Neutral,
         }
     }
 }
@@ -63,6 +88,10 @@ pub struct Chrome {
     hover_control: Option<usize>,
     capture: Capture,
     cursor: CursorShape,
+    scale: i32,
+    tab_scroll: i32,
+    revealed: Option<usize>,
+    focus: Option<Stop>,
 }
 
 impl Chrome {
@@ -77,6 +106,10 @@ impl Chrome {
             hover_control: None,
             capture: Capture::None,
             cursor: CursorShape::Default,
+            scale: 1,
+            tab_scroll: 0,
+            revealed: None,
+            focus: None,
         }
     }
 
@@ -84,6 +117,7 @@ impl Chrome {
 
     pub fn set_tabs(&mut self, tabs: Vec<Tab>, active: Option<TabId>) {
         self.tabs.set_tabs(tabs, active);
+        self.reveal_active();
     }
 
     pub fn set_url(&mut self, display: UrlDisplay) {
@@ -114,6 +148,31 @@ impl Chrome {
         self.size
     }
 
+    /// Integer display scale in effect (1 to 3). Layout stays logical; the
+    /// painter multiplies.
+    pub fn scale(&self) -> i32 {
+        self.scale
+    }
+
+    pub fn set_scale(&mut self, scale: u32) {
+        self.scale = scale.clamp(1, 3) as i32;
+    }
+
+    /// Size of the frame to paint, in physical pixels.
+    pub fn physical_size(&self) -> Size {
+        Size::new(self.size.w * self.scale, self.size.h * self.scale)
+    }
+
+    /// Keyboard focus resting on a chrome control (not the address field).
+    pub fn focus_stop(&self) -> Option<Stop> {
+        self.focus
+    }
+
+    /// Our window is frameless: the chrome supplies move and resize.
+    pub fn frameless(&self) -> bool {
+        self.config.controls != ControlsPlacement::None && self.config.window_radius > 0
+    }
+
     pub fn tabs(&self) -> &TabStrip {
         &self.tabs
     }
@@ -141,7 +200,99 @@ impl Chrome {
             tab_count: self.tabs.tabs().len(),
             active: self.tabs.active_index(),
             isolated: self.address.is_isolated(),
+            scroll: self.tab_scroll,
+            grips: self.frameless(),
         })
+    }
+
+    /// Bring the active tab into view, once per change of the active tab.
+    fn reveal_active(&mut self) {
+        let active = self.tabs.active_index();
+        if active == self.revealed {
+            return;
+        }
+        self.revealed = active;
+        if let Some(i) = active {
+            self.tab_scroll = self.layout().scroll_to_reveal(i);
+        }
+    }
+
+    fn wheel(&mut self, w: WheelEvent) -> Outcome {
+        let layout = self.layout();
+        match layout.hit(w.pos) {
+            Region::Page | Region::Outside => Outcome::default(),
+            _ => {
+                if w.pos.y < layout::STRIP_H {
+                    let d = if w.dx != 0 { w.dx } else { w.dy };
+                    self.tab_scroll = (layout.scroll + d).clamp(0, layout.scroll_max);
+                }
+                consumed(Vec::new())
+            }
+        }
+    }
+
+    /// The Tab-order stops that exist now.
+    fn stops(&self) -> Vec<Stop> {
+        let mut v = Vec::new();
+        if self.tabs.active_index().is_some() {
+            v.push(Stop::ActiveTab);
+        }
+        v.push(Stop::NewTab);
+        if self.toolbar.enabled(crate::toolbar::ToolButton::Back) {
+            v.push(Stop::Back);
+        }
+        if self.toolbar.enabled(crate::toolbar::ToolButton::Forward) {
+            v.push(Stop::Forward);
+        }
+        v.extend([Stop::Reload, Stop::Field, Stop::Overflow]);
+        v
+    }
+
+    /// Tab (or Shift+Tab) through the chrome. Past either end focus leaves the
+    /// chrome and the key is the page's.
+    fn traverse(&mut self, backwards: bool) -> Outcome {
+        let stops = self.stops();
+        let cur = if self.address.is_editing() {
+            Some(Stop::Field)
+        } else {
+            self.focus
+        };
+        let mut e = Vec::new();
+        if self.address.is_editing() {
+            e.extend(self.address.blur());
+        }
+        let at = cur.and_then(|c| stops.iter().position(|s| *s == c));
+        let next = match (at, backwards) {
+            (Some(i), false) => stops.get(i + 1),
+            (Some(i), true) => i.checked_sub(1).and_then(|j| stops.get(j)),
+            (None, false) => stops.first(),
+            (None, true) => stops.last(),
+        }
+        .copied();
+        self.focus = None;
+        match next {
+            Some(Stop::Field) => e.extend(self.address.focus()),
+            Some(s) => self.focus = Some(s),
+            None => {}
+        }
+        e.push(Effect::Platform(PlatformEffect::Redraw));
+        Outcome {
+            consumed: next.is_some(),
+            effects: e,
+        }
+    }
+
+    fn activate_stop(&mut self, s: Stop) -> Vec<Effect> {
+        use crate::toolbar::ToolButton as B;
+        let layout = self.layout();
+        match s {
+            Stop::NewTab => vec![Effect::App(AppRequest::NewTab)],
+            Stop::Back => self.toolbar.activate(B::Back, &layout),
+            Stop::Forward => self.toolbar.activate(B::Forward, &layout),
+            Stop::Reload => self.toolbar.activate(B::Reload, &layout),
+            Stop::Overflow => self.toolbar.activate(B::Overflow, &layout),
+            Stop::ActiveTab | Stop::Field => Vec::new(),
+        }
     }
 
     /// Where the compositor may put the page surface.
@@ -188,7 +339,13 @@ impl Chrome {
                 }
             }
             Event::Pointer(p) => self.pointer(p, shaper),
+            Event::Scale(f) => {
+                self.set_scale(f);
+                consumed(Vec::new())
+            }
+            Event::Wheel(w) => self.wheel(w),
         };
+        self.reveal_active();
         if out.consumed {
             if self.address.is_editing() {
                 out.effects
@@ -212,8 +369,28 @@ impl Chrome {
         {
             return consumed(self.run(Command::Stop));
         }
+        let plain = !k.mods.ctrl && !k.mods.alt && !k.mods.meta;
+        if k.key == Key::Tab && plain && (self.address.is_editing() || self.focus.is_some()) {
+            return self.traverse(k.mods.shift);
+        }
         if self.address.is_editing() {
             return consumed(self.address.key(k, self.config.primary));
+        }
+        if let (Some(stop), true) = (self.focus, plain) {
+            match k.key {
+                Key::Escape => {
+                    self.focus = None;
+                    return consumed(Vec::new());
+                }
+                Key::Enter | Key::Char(' ') => return consumed(self.activate_stop(stop)),
+                Key::Left if stop == Stop::ActiveTab => {
+                    return consumed(self.tabs.select_relative(-1));
+                }
+                Key::Right if stop == Stop::ActiveTab => {
+                    return consumed(self.tabs.select_relative(1));
+                }
+                _ => {}
+            }
         }
         Outcome::default()
     }
@@ -224,7 +401,10 @@ impl Chrome {
         let tool = |t: &Toolbar, b| t.activate(b, &layout);
         use crate::toolbar::ToolButton as B;
         match cmd {
-            Command::FocusAddress => self.address.focus(),
+            Command::FocusAddress => {
+                self.focus = None;
+                self.address.focus()
+            }
             Command::NewTab => vec![Effect::App(AppRequest::NewTab)],
             Command::CloseTab => self.tabs.close_active(),
             Command::NextTab => self.tabs.select_relative(1),
@@ -288,6 +468,7 @@ impl Chrome {
                     | Region::Reload
                     | Region::Overflow
                     | Region::Control(_) => CursorShape::Pointer,
+                    Region::Edge(e) => CursorShape::Resize(e),
                     _ => CursorShape::Default,
                 };
                 e.extend(self.set_cursor(if self.capture == Capture::Field {
@@ -314,7 +495,14 @@ impl Chrome {
                     };
                 }
                 self.capture = Capture::None;
+                self.focus = None;
                 match region {
+                    Region::Edge(edge) if button == Button::Primary => {
+                        e.push(Effect::Platform(PlatformEffect::BeginResize(edge)));
+                    }
+                    Region::Bar if button == Button::Primary && self.frameless() => {
+                        e.push(Effect::Platform(PlatformEffect::BeginMove));
+                    }
                     Region::Field if button == Button::Primary => {
                         if self.address.is_editing() {
                             let idx = self.index_at(ev.pos.x, &layout, shaper);
@@ -376,8 +564,8 @@ impl Chrome {
     /// Byte index in the address text nearest to window x.
     fn index_at(&self, x: i32, layout: &Layout, shaper: &dyn TextShaper) -> usize {
         let text = self.address.text();
-        let shaped = shaper.shape(text, layout::TEXT_ADDRESS);
-        let rel = (x - layout.text_x).saturating_mul(AU_PER_PX);
+        let shaped = shaper.shape(text, layout::TEXT_ADDRESS * self.scale);
+        let rel = (x - layout.text_x).saturating_mul(AU_PER_PX * self.scale);
         shaped.boundary_at(text, rel)
     }
 
@@ -385,8 +573,8 @@ impl Chrome {
     pub fn caret_rect(&self, shaper: &dyn TextShaper) -> Rect {
         let layout = self.layout();
         let (visible, caret) = self.address.visible_text();
-        let shaped = shaper.shape(&visible, layout::TEXT_ADDRESS);
-        let x = layout.text_x + shaped.x_at(caret) / AU_PER_PX;
+        let shaped = shaper.shape(&visible, layout::TEXT_ADDRESS * self.scale);
+        let x = layout.text_x + shaped.x_at(caret) / (AU_PER_PX * self.scale);
         Rect::new(x, layout.field.y + 6, 1, layout.field.h - 12)
     }
 

@@ -338,6 +338,8 @@ mod tests {
             tab_count: s.tabs().len(),
             active: s.active_index(),
             isolated: true,
+            scroll: 0,
+            grips: false,
         })
     }
 

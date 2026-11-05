@@ -610,7 +610,9 @@ impl PlatformWindow for X11Window {
     fn set_cursor(&mut self, shape: CursorShape) {
         let [default, text, pointer] = self.cursors;
         let c = match shape {
-            CursorShape::Default => default,
+            // Resize cursors need the X cursor font; the arrow stands in until
+            // the frameless-window work in this crate lands.
+            CursorShape::Default | CursorShape::Resize(_) => default,
             CursorShape::Text => text,
             CursorShape::Pointer => pointer,
         };

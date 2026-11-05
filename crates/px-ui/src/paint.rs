@@ -1,11 +1,18 @@
 //! Chrome to display list.
 //!
 //! [`paint`] appends the window's contents (everything inside the window outline)
-//! to a [`DisplayList`] in window coordinates shifted by `origin`;
-//! [`paint_preview`] adds the backdrop and the soft shadow around it, which is
-//! what the render baselines and the mockups show. Only `FillRect`, `PushClip`,
-//! `PopClip` and `GlyphRun` come out, so the list rasterizes identically on every
-//! platform with the integer software rasterizer.
+//! to a [`DisplayList`]; [`paint_preview`] adds the backdrop and the soft shadow
+//! around it, which is what the render baselines and the mockups show. Only
+//! `FillRect`, `PushClip`, `PopClip` and `GlyphRun` come out, so the list
+//! rasterizes identically on every platform with the integer software
+//! rasterizer.
+//!
+//! **Scale.** Layout is in logical pixels; the painter multiplies by the
+//! chrome's integer scale (1, 2 or 3) and draws in physical pixels, `origin`
+//! included. Shape sizes, stroke widths, radii, font sizes and baselines are all
+//! computed at the physical size, so 2x is not a blown-up 1x: a 1 px hairline is
+//! 2 device pixels, text is shaped at 26 px and its baseline is placed from the
+//! 26 px metrics.
 //!
 //! No page-controlled pixel is drawn: tab titles are sanitised text, and a
 //! favicon is never fetched or shown (the dot is the chrome's own).
@@ -15,7 +22,7 @@ use px_layout::geom::px;
 use px_paint::{Color, DisplayList, Item, Rect as PaintRect};
 
 use crate::address::Emphasis;
-use crate::chrome::Chrome;
+use crate::chrome::{Chrome, ControlDots, Stop};
 use crate::geom::{Point, Rect};
 use crate::layout::{self as lay, Layout};
 use crate::shape::{self, Circle, Path, SUB, Squircle, color, fill};
@@ -24,25 +31,41 @@ use crate::text::{self, AU_PER_PX, TextShaper};
 use crate::theme::{Colors, Theme};
 use crate::toolbar::ToolButton;
 
+mod icons;
+
+/// Takes logical coordinates, draws physical ones.
 struct Painter<'a> {
     list: &'a mut DisplayList,
+    /// Physical pixels.
     origin: Point,
+    s: i32,
     c: Colors,
     shaper: &'a dyn TextShaper,
 }
 
 impl Painter<'_> {
+    /// A logical rectangle in physical pixels, origin applied.
     fn at(&self, r: Rect) -> Rect {
-        Rect::new(r.x + self.origin.x, r.y + self.origin.y, r.w, r.h)
+        Rect::new(
+            r.x * self.s + self.origin.x,
+            r.y * self.s + self.origin.y,
+            r.w * self.s,
+            r.h * self.s,
+        )
     }
 
     fn squircle(&mut self, r: Rect, radius: i32, col: Color) {
-        let s = Squircle::new(self.at(r), radius);
-        fill(self.list, &s, col);
+        let sq = Squircle::new(self.at(r), radius * self.s);
+        fill(self.list, &sq, col);
     }
 
     fn rect(&mut self, r: Rect, col: Color) {
         let r = self.at(r);
+        self.rect_px(r, col);
+    }
+
+    /// A rectangle already in physical pixels.
+    fn rect_px(&mut self, r: Rect, col: Color) {
         if r.is_empty() {
             return;
         }
@@ -58,44 +81,61 @@ impl Painter<'_> {
     }
 
     fn stroke(&mut self, r: Rect, radius: i32, width: i32, col: Color) {
-        let s = Squircle::new(self.at(r), radius).stroke(width);
-        fill(self.list, &s, col);
+        let st = Squircle::new(self.at(r), radius * self.s).stroke(width * self.s);
+        fill(self.list, &st, col);
     }
 
+    /// Centre and radius in 1/8 logical px.
     fn circle(&mut self, cx8: i32, cy8: i32, r8: i32, col: Color) {
-        let c = Circle::disc(cx8 + self.origin.x * SUB, cy8 + self.origin.y * SUB, r8);
+        let c = Circle::disc(
+            cx8 * self.s + self.origin.x * SUB,
+            cy8 * self.s + self.origin.y * SUB,
+            r8 * self.s,
+        );
         fill(self.list, &c, col);
     }
 
     fn ring(&mut self, cx8: i32, cy8: i32, r8: i32, thick8: i32, col: Color) {
         let c = Circle::ring(
-            cx8 + self.origin.x * SUB,
-            cy8 + self.origin.y * SUB,
-            r8,
-            thick8,
+            cx8 * self.s + self.origin.x * SUB,
+            cy8 * self.s + self.origin.y * SUB,
+            r8 * self.s,
+            thick8 * self.s,
         );
         fill(self.list, &c, col);
     }
 
-    /// Polyline with points in 1/8 px relative to `(cx8, cy8)`.
+    /// Polyline with points in 1/8 logical px relative to `(cx8, cy8)`.
     fn path(&mut self, cx8: i32, cy8: i32, pts: &[(i32, i32)], half8: i32, col: Color) {
-        let ox = cx8 + self.origin.x * SUB;
-        let oy = cy8 + self.origin.y * SUB;
-        let abs: Vec<(i32, i32)> = pts.iter().map(|(x, y)| (ox + x, oy + y)).collect();
-        fill(self.list, &Path::polyline(&abs, half8), col);
+        let ox = cx8 * self.s + self.origin.x * SUB;
+        let oy = cy8 * self.s + self.origin.y * SUB;
+        let abs: Vec<(i32, i32)> = pts
+            .iter()
+            .map(|(x, y)| (ox + x * self.s, oy + y * self.s))
+            .collect();
+        fill(self.list, &Path::polyline(&abs, half8 * self.s), col);
     }
 
+    /// Draw `s` at logical `x`, centred in `band`, at logical `size`. Returns
+    /// the advance in logical pixels, rounded up.
     fn text(&mut self, s: &str, size: i32, x: i32, band: Rect, col: Color) -> i32 {
-        let shaped = self.shaper.shape(s, size);
-        let base = text::baseline_in(self.shaper, size, band.y, band.h);
+        let shaped = self.shaper.shape(s, size * self.s);
+        let base = text::baseline_in(self.shaper, size * self.s, band.y * self.s, band.h * self.s);
         text::push(
             self.list,
             &shaped,
-            x + self.origin.x,
+            x * self.s + self.origin.x,
             base + self.origin.y,
             col,
         );
-        shaped.width
+        (shaped.width + AU_PER_PX * self.s - 1) / (AU_PER_PX * self.s)
+    }
+
+    /// Where `text` at logical `size` has its baseline, physical, origin applied.
+    #[cfg(test)]
+    fn baseline(&self, size: i32, band: Rect) -> i32 {
+        text::baseline_in(self.shaper, size * self.s, band.y * self.s, band.h * self.s)
+            + self.origin.y
     }
 
     fn clip(&mut self, r: Rect) {
@@ -119,23 +159,6 @@ fn rgb(c: Rgb, a: u8) -> Color {
     color(c, a)
 }
 
-/// `(cos, sin)` of 0, 30, ..., 330 degrees, times 1000. Exact table: no trig at
-/// run time, so the reload arc is the same bytes everywhere.
-const UNIT: [(i32, i32); 12] = [
-    (1000, 0),
-    (866, 500),
-    (500, 866),
-    (0, 1000),
-    (-500, 866),
-    (-866, 500),
-    (-1000, 0),
-    (-866, -500),
-    (-500, -866),
-    (0, -1000),
-    (500, -866),
-    (866, -500),
-];
-
 /// Paint the window's contents. See the module docs.
 pub fn paint(
     chrome: &Chrome,
@@ -148,19 +171,21 @@ pub fn paint(
     let mut p = Painter {
         list,
         origin,
+        s: chrome.scale(),
         c: theme.colors(),
         shaper,
     };
     let s = p.c.surfaces;
     let win = Rect::new(0, 0, layout.size.w, layout.size.h);
     let r = chrome.config().window_radius;
+    let rp = r * p.s;
 
     // Surfaces: window body, then the three bands with the window's corners.
     p.squircle(win, r, rgb(s.window, 255));
-    let strip = Squircle::with_radii(p.at(layout.strip), [r, r, 0, 0]);
+    let strip = Squircle::with_radii(p.at(layout.strip), [rp, rp, 0, 0]);
     fill(p.list, &strip, rgb(s.bar, 255));
     p.rect(layout.toolbar, rgb(s.bar, 255));
-    let page = Squircle::with_radii(p.at(layout.page), [0, 0, r, r]);
+    let page = Squircle::with_radii(p.at(layout.page), [0, 0, rp, rp]);
     fill(p.list, &page, rgb(s.page, 255));
     p.rect(
         Rect::new(0, lay::CHROME_H - 1, layout.size.w, 1),
@@ -171,23 +196,24 @@ pub fn paint(
     paint_tabs(&mut p, chrome, &layout);
     paint_toolbar(&mut p, chrome, &layout);
     paint_address(&mut p, chrome, &layout);
+    paint_focus(&mut p, chrome, &layout);
 
     // The one hairline round the window.
     p.stroke(win, r, 1, rgb(s.hairline, 255));
 }
 
-/// Backdrop, soft shadow, then the window at `(margin, margin_top)`. The
-/// returned canvas size is `size + 2 * margin` wide and `size + margin +
-/// margin_top` tall; with the mockups' 40/36 margins and a 920 x 568 window this
-/// is their 1000 x 640.
+/// Backdrop, soft shadow, then the window at `margin` (logical). The returned
+/// canvas size is physical: `(size + 2 * margin) * scale`; with the mockups'
+/// 40/36 margins, a 920 x 568 window and scale 1 this is their 1000 x 640.
 pub fn paint_preview(
     chrome: &Chrome,
     shaper: &dyn TextShaper,
     theme: Theme,
     margin: Point,
 ) -> (DisplayList, crate::geom::Size) {
+    let k = chrome.scale();
     let size = chrome.size();
-    let canvas = crate::geom::Size::new(size.w + 2 * margin.x, size.h + 2 * margin.y);
+    let canvas = crate::geom::Size::new((size.w + 2 * margin.x) * k, (size.h + 2 * margin.y) * k);
     let mut list = DisplayList::new();
     let c = theme.colors();
     list.push(Item::FillRect {
@@ -199,57 +225,79 @@ pub fn paint_preview(
         },
         color: rgb(c.surfaces.backdrop, 255),
     });
+    let win = Rect::new(margin.x * k, margin.y * k, size.w * k, size.h * k);
+    let radius = chrome.config().window_radius * k;
+    let peak = u32::from(c.surfaces.shadow_alpha);
+    // Two layers: a wide, low key shadow that falls away from the window, and
+    // a tight ambient one that keeps the edge from floating.
     shape::shadow(
         &mut list,
-        Rect::new(margin.x, margin.y, size.w, size.h),
-        chrome.config().window_radius,
-        14,
-        18,
-        c.surfaces.shadow_alpha,
+        win,
+        radius,
+        14 * k,
+        36 * k,
+        (peak * 9 / 10) as u8,
     );
-    paint(chrome, shaper, theme, margin, &mut list);
+    shape::shadow(&mut list, win, radius, 2 * k, 10 * k, (peak / 2) as u8);
+    paint(
+        chrome,
+        shaper,
+        theme,
+        Point {
+            x: margin.x * k,
+            y: margin.y * k,
+        },
+        &mut list,
+    );
     (list, canvas)
 }
 
 fn paint_controls(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
     let cols = [p.c.red, p.c.amber, p.c.teal];
+    let group_hover = chrome.hover_control().is_some();
+    let coloured = chrome.config().control_dots == ControlDots::Coloured;
     for (i, r) in layout.controls.iter().enumerate() {
         if r.is_empty() {
             continue;
         }
-        let strong = chrome.hover_control() == Some(i) || !chrome.window_focused();
-        // The mockups draw them at 90%; an unfocused window dims them to 40%.
-        let a = if !chrome.window_focused() {
-            102
-        } else if strong {
-            255
+        let col = if !chrome.window_focused() {
+            // An unfocused window dims them whatever they are.
+            if coloured {
+                rgb(cols[i], 102)
+            } else {
+                rgb(p.c.muted, 56)
+            }
+        } else if group_hover {
+            rgb(cols[i], 255)
+        } else if coloured {
+            rgb(cols[i], 230)
         } else {
-            230
+            // Neutral: one grey, no meaning, until the pointer is over them.
+            rgb(p.c.muted, 105)
         };
-        p.squircle(*r, 5, rgb(cols[i], a));
+        p.squircle(*r, 5, col);
     }
 }
 
 fn paint_tabs(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
     let strip = chrome.tabs();
     let c = p.c;
+    p.clip(layout.tab_view);
     for (i, (tab, slot)) in strip.tabs().iter().zip(&layout.tabs).enumerate() {
         if slot.rect.is_empty() {
             continue;
         }
+        let full = slot.full;
         let active = strip.active_index() == Some(i);
         let hovered = matches!(strip.hover(), Hover::Tab(j) | Hover::Close(j) if j == i);
         if active {
-            p.squircle(slot.rect, lay::TAB_RADIUS, rgb(c.surfaces.raised, 255));
-            p.stroke(slot.rect, lay::TAB_RADIUS, 1, rgb(c.surfaces.hairline, 255));
+            p.squircle(full, lay::TAB_RADIUS, rgb(c.surfaces.raised, 255));
+            p.stroke(full, lay::TAB_RADIUS, 1, rgb(c.surfaces.hairline, 255));
         } else if hovered {
-            p.squircle(slot.rect, lay::TAB_RADIUS, rgb(c.surfaces.raised, 150));
+            p.squircle(full, lay::TAB_RADIUS, rgb(c.surfaces.raised, 150));
         }
         // The favicon slot: the chrome's own dot, a ring while loading.
-        let (cx, cy) = (
-            (slot.rect.x + 16) * SUB,
-            (slot.rect.y + lay::TAB_H / 2) * SUB,
-        );
+        let (cx, cy) = ((full.x + 16) * SUB, (full.y + lay::TAB_H / 2) * SUB);
         let dot = if active {
             rgb(c.teal, 255)
         } else {
@@ -265,45 +313,58 @@ fn paint_tabs(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         let right = if show_close {
             slot.close.x - 4
         } else {
-            slot.rect.right() - 12
+            full.right() - 12
         };
-        let tx = slot.rect.x + 30;
+        let tx = full.x + 30;
         let room = right - tx;
         if room >= 8 {
-            let title = text::fit(p.shaper, tab.display_title(), lay::TEXT_CHROME, room);
+            let title = text::fit(
+                p.shaper,
+                tab.display_title(),
+                lay::TEXT_CHROME * p.s,
+                room * p.s,
+            );
             let col = if active { c.text } else { c.muted };
-            p.text(&title, lay::TEXT_CHROME, tx, slot.rect, rgb(col, 255));
+            p.text(&title, lay::TEXT_CHROME, tx, full, rgb(col, 255));
         }
         if show_close {
             let close_hover = strip.hover() == Hover::Close(i);
             if close_hover {
                 p.squircle(slot.close, 7, rgb(c.surfaces.hairline, 255));
             }
-            let m = slot.close.center();
-            let (cx, cy) = (m.x * SUB, m.y * SUB);
-            let d = 4 * SUB; // arm length
             let col = rgb(if close_hover { c.text } else { c.muted }, 255);
-            p.path(cx, cy, &[(-d, -d), (d, d)], 7, col);
-            p.path(cx, cy, &[(-d, d), (d, -d)], 7, col);
+            icons::close(p, slot.close, col);
         }
     }
+    // Overflow cues: the tabs fade into the strip where more lie beyond.
+    let v = layout.tab_view;
+    let fade = [255u8, 200, 130, 60];
+    if layout.scroll > 0 {
+        for (k, a) in fade.iter().enumerate() {
+            let w = 4;
+            p.rect(
+                Rect::new(v.x + k as i32 * w, 0, w, lay::STRIP_H),
+                rgb(c.surfaces.bar, *a),
+            );
+        }
+    }
+    if layout.scroll < layout.scroll_max {
+        for (k, a) in fade.iter().enumerate() {
+            let w = 4;
+            p.rect(
+                Rect::new(v.right() - (k as i32 + 1) * w, 0, w, lay::STRIP_H),
+                rgb(c.surfaces.bar, *a),
+            );
+        }
+    }
+    p.pop();
     // New tab.
     let nt = layout.new_tab;
-    if strip.hover() == Hover::NewTab {
+    let hot = strip.hover() == Hover::NewTab;
+    if hot {
         p.squircle(nt, lay::BUTTON_RADIUS, rgb(c.surfaces.raised, 255));
     }
-    let m = nt.center();
-    let (cx, cy) = (m.x * SUB, m.y * SUB);
-    let col = rgb(
-        if strip.hover() == Hover::NewTab {
-            c.text
-        } else {
-            c.muted
-        },
-        255,
-    );
-    p.path(cx, cy, &[(-5 * SUB, 0), (5 * SUB, 0)], 8, col);
-    p.path(cx, cy, &[(0, -5 * SUB), (0, 5 * SUB)], 8, col);
+    icons::new_tab(p, nt, rgb(if hot { c.text } else { c.muted }, 255));
 }
 
 fn paint_toolbar(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
@@ -328,56 +389,51 @@ fn paint_toolbar(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         } else {
             rgb(c.muted, 255)
         };
-        let m = r.center();
-        let (cx, cy) = (m.x * SUB, m.y * SUB);
-        let u = SUB;
         match b {
-            ToolButton::Back => p.path(
-                cx,
-                cy,
-                &[(3 * u, -6 * u), (-3 * u, 0), (3 * u, 6 * u)],
-                8,
-                col,
-            ),
-            ToolButton::Forward => p.path(
-                cx,
-                cy,
-                &[(-3 * u, -6 * u), (3 * u, 0), (-3 * u, 6 * u)],
-                8,
-                col,
-            ),
-            ToolButton::Reload if tb.is_loading() => {
-                let d = 5 * u;
-                p.path(cx, cy, &[(-d, -d), (d, d)], 8, col);
-                p.path(cx, cy, &[(-d, d), (d, -d)], 8, col);
-            }
-            ToolButton::Reload => {
-                // 300 degrees of a 6.5 px circle, then an arrowhead at its start.
-                let rad = 13; // 6.5 px in half-pixels
-                let pts: Vec<(i32, i32)> = (1..=11)
-                    .rev()
-                    .map(|k| {
-                        let (cs, sn) = UNIT[k];
-                        (rad * u / 2 * cs / 1000, rad * u / 2 * sn / 1000)
-                    })
-                    .collect();
-                p.path(cx, cy, &pts, 8, col);
-                if let Some(&(hx, hy)) = pts.first() {
-                    p.path(
-                        cx,
-                        cy,
-                        &[(hx + u, hy - 5 * u), (hx, hy), (hx - 5 * u, hy - u)],
-                        8,
-                        col,
-                    );
-                }
-            }
-            ToolButton::Overflow => {
-                for dy in [-7, 0, 7] {
-                    p.circle(cx, cy + dy * u, 14, col);
-                }
-            }
+            ToolButton::Back => icons::back(p, r, col),
+            ToolButton::Forward => icons::forward(p, r, col),
+            ToolButton::Reload if tb.is_loading() => icons::stop(p, r, col),
+            ToolButton::Reload => icons::reload(p, r, col),
+            ToolButton::Overflow => icons::menu(p, r, col),
         }
+    }
+}
+
+/// The keyboard focus ring: 2 px of the focus blue, one pixel clear of the
+/// control, on any control Tab has reached. The address field draws its own
+/// (it is the editing state).
+fn paint_focus(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
+    let Some(stop) = chrome.focus_stop() else {
+        return;
+    };
+    let (r, radius) = match stop {
+        Stop::ActiveTab => {
+            let Some(slot) = chrome
+                .tabs()
+                .active_index()
+                .and_then(|i| layout.tabs.get(i))
+            else {
+                return;
+            };
+            if slot.rect.is_empty() {
+                return;
+            }
+            (slot.full, lay::TAB_RADIUS)
+        }
+        Stop::NewTab => (layout.new_tab, lay::BUTTON_RADIUS),
+        Stop::Back => (layout.back, lay::BUTTON_RADIUS),
+        Stop::Forward => (layout.forward, lay::BUTTON_RADIUS),
+        Stop::Reload => (layout.reload, lay::BUTTON_RADIUS),
+        Stop::Overflow => (layout.overflow, lay::BUTTON_RADIUS),
+        Stop::Field => return,
+    };
+    let blue = rgb(p.c.blue, 255);
+    if stop == Stop::ActiveTab {
+        p.clip(Rect::new(0, 0, layout.size.w, lay::STRIP_H));
+    }
+    p.stroke(r.inset(-3), radius + 3, 2, blue);
+    if stop == Stop::ActiveTab {
+        p.pop();
     }
 }
 
@@ -416,14 +472,18 @@ fn paint_address(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         return;
     }
     p.clip(band);
+    let k = p.s;
     if a.is_editing() {
         let (visible, caret) = a.visible_text();
-        let shaped = p.shaper.shape(&visible, lay::TEXT_ADDRESS);
-        let x_of = |i: usize| layout.text_x + shaped.x_at(i) / AU_PER_PX;
-        let inner = Rect::new(0, f.y + 7, 0, f.h - 14);
+        let shaped = p.shaper.shape(&visible, lay::TEXT_ADDRESS * k);
+        // Physical x of a byte index.
+        let ox = p.origin.x;
+        let x_of = |i: usize| (layout.text_x * k) + shaped.x_at(i) / AU_PER_PX + ox;
+        let iy = (f.y + 7) * k + p.origin.y;
+        let ih = (f.h - 14) * k;
         if let (Some((s0, s1)), None) = (a.selection(), a.preedit_range()) {
             let (x0, x1) = (x_of(s0), x_of(s1));
-            p.rect(Rect::new(x0, inner.y, x1 - x0, inner.h), rgb(c.blue, 90));
+            p.rect_px(Rect::new(x0, iy, x1 - x0, ih), rgb(c.blue, 90));
         }
         if visible.is_empty() {
             p.text(
@@ -444,13 +504,13 @@ fn paint_address(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
         }
         if let Some((a0, a1)) = a.preedit_range() {
             let (x0, x1) = (x_of(a0), x_of(a1));
-            p.rect(Rect::new(x0, f.y + f.h - 9, x1 - x0, 1), rgb(c.text, 255));
-        }
-        if chrome.window_focused() {
-            p.rect(
-                Rect::new(x_of(caret), inner.y, 1, inner.h),
+            p.rect_px(
+                Rect::new(x0, (f.y + f.h - 9) * k + p.origin.y, x1 - x0, k),
                 rgb(c.text, 255),
             );
+        }
+        if chrome.window_focused() {
+            p.rect_px(Rect::new(x_of(caret), iy, k, ih), rgb(c.text, 255));
         }
     } else if a.display().is_empty() {
         p.text(
@@ -461,17 +521,124 @@ fn paint_address(p: &mut Painter, chrome: &Chrome, layout: &Layout) {
             rgb(c.muted, 255),
         );
     } else {
-        let mut x = layout.text_x;
+        // Segments abut in physical pixels; track the pen in 1/60 px so no
+        // sub-pixel remainder is lost between them.
+        let mut pen_au = layout.text_x * k * AU_PER_PX;
+        let base = text::baseline_in(p.shaper, lay::TEXT_ADDRESS * k, f.y * k, f.h * k);
         for seg in &a.display().segments {
             let col = match seg.emphasis {
                 Emphasis::Strong => c.text,
                 Emphasis::Muted => c.muted,
             };
-            let w = p.text(&seg.text, lay::TEXT_ADDRESS, x, f, rgb(col, 255));
-            x += w / AU_PER_PX;
-            // Keep sub-pixel remainders honest across segments.
-            let _ = w;
+            let shaped = p.shaper.shape(&seg.text, lay::TEXT_ADDRESS * k);
+            let glyph_x = pen_au / AU_PER_PX;
+            text::push(
+                p.list,
+                &shaped,
+                glyph_x + p.origin.x,
+                base + p.origin.y,
+                rgb(col, 255),
+            );
+            pen_au += shaped.width;
         }
     }
     p.pop();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chrome::PlatformConfig;
+    use crate::geom::Size;
+    use crate::tabs::{Tab, TabId};
+    use crate::text::testing::Mono;
+
+    fn chrome(scale: u32) -> Chrome {
+        let mut c = Chrome::new(PlatformConfig::desktop(), Size::new(920, 568));
+        c.set_scale(scale);
+        c.set_tabs(vec![Tab::new(TabId(1), "One", false)], Some(TabId(1)));
+        c
+    }
+
+    #[test]
+    fn baselines_are_exact_per_scale() {
+        // The baseline at scale k is the baseline of the k-times font in the
+        // k-times band: no rounding of the 1x answer up to k.
+        let band = Rect::new(0, 8, 190, 32);
+        for k in 1..=3 {
+            let mut list = DisplayList::new();
+            let p = Painter {
+                list: &mut list,
+                origin: Point::default(),
+                s: k,
+                c: Theme::Dark.colors(),
+                shaper: &Mono,
+            };
+            let want = text::baseline_in(&Mono, 13 * k, 8 * k, 32 * k);
+            assert_eq!(p.baseline(13, band), want, "scale {k}");
+        }
+    }
+
+    #[test]
+    fn the_frame_is_scale_times_the_window_and_still_balanced() {
+        for k in 1..=3u32 {
+            let c = chrome(k);
+            let (list, size) = paint_preview(&c, &Mono, Theme::Light, Point { x: 40, y: 36 });
+            assert_eq!(size.w, 1000 * k as i32);
+            assert_eq!(size.h, 640 * k as i32);
+            assert!(list.clips_balanced());
+        }
+    }
+
+    #[test]
+    fn a_hairline_is_scale_device_pixels_thick() {
+        for k in 1..=3u32 {
+            let c = chrome(k);
+            let mut list = DisplayList::new();
+            paint(&c, &Mono, Theme::Dark, Point::default(), &mut list);
+            let canvas = px_paint::rasterize(&list, (920 * k) as u32, (568 * k) as u32).unwrap();
+            let hair = crate::theme::Theme::Dark.colors().surfaces.hairline;
+            let want = [hair.0, hair.1, hair.2, 255];
+            let y0 = ((lay::CHROME_H - 1) * k as i32) as u32;
+            let x = 600 * k;
+            for dy in 0..k {
+                assert_eq!(canvas.pixel(x, y0 + dy), Some(want), "scale {k} row {dy}");
+            }
+            assert_ne!(canvas.pixel(x, y0 + k), Some(want));
+        }
+    }
+
+    #[test]
+    fn controls_are_neutral_until_hovered() {
+        use crate::input::{Event, PointerEvent, PointerKind};
+        let render = |c: &Chrome| {
+            let mut list = DisplayList::new();
+            paint(c, &Mono, Theme::Dark, Point::default(), &mut list);
+            px_paint::rasterize(&list, 920, 568).unwrap()
+        };
+        let mut c = chrome(1);
+        let dot = c.layout().controls[0].center();
+        let idle = render(&c).pixel(dot.x as u32, dot.y as u32).unwrap();
+        let red = Theme::Dark.colors().red;
+        // Neutral: blue is not far below red as it is for the coloured dot.
+        assert!(
+            i32::from(idle[0]) - i32::from(idle[2]) < 40,
+            "grey at rest: {idle:?}"
+        );
+        c.event(
+            Event::Pointer(PointerEvent::new(dot.x, dot.y, PointerKind::Move)),
+            &Mono,
+        );
+        let hot = render(&c).pixel(dot.x as u32, dot.y as u32).unwrap();
+        assert_eq!([hot[0], hot[1], hot[2]], [red.0, red.1, red.2]);
+        let mut cfg = PlatformConfig::desktop();
+        cfg.control_dots = ControlDots::Coloured;
+        let mut c2 = chrome(1);
+        c2.set_config(cfg);
+        let always = render(&c2).pixel(dot.x as u32, dot.y as u32).unwrap();
+        assert!(
+            i32::from(always[0]) - i32::from(always[2]) > 40,
+            "{always:?}"
+        );
+    }
 }

@@ -97,6 +97,64 @@ fn editing() -> Chrome {
     c
 }
 
+/// Keyboard focus on the reload button (F6, then Shift+Tab out of the field),
+/// and a strip with too many tabs to fit: it scrolls, the active one in view.
+fn focus_and_scroll() -> Chrome {
+    let n = Noto::load();
+    let mut c = base();
+    let titles = [
+        "news.example",
+        "Notes",
+        "Docs",
+        "Weather",
+        "Maps",
+        "Mail",
+        "Calendar",
+        "Reader",
+        "Recipes",
+        "Library",
+        "Transit",
+        "Photos",
+    ];
+    let tabs = titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| Tab::new(TabId(i as u64 + 1), t, false))
+        .collect();
+    c.set_tabs(tabs, Some(TabId(9)));
+    let key = |k, shift| {
+        Event::Key(KeyEvent::with(
+            k,
+            px_ui::input::Modifiers {
+                shift,
+                ..px_ui::input::Modifiers::NONE
+            },
+        ))
+    };
+    c.event(key(Key::F(6), false), &n);
+    c.event(key(Key::Tab, true), &n);
+    c
+}
+
+/// The pointer over the window controls (they take their colours) at 2x.
+fn hover_controls_2x() -> Chrome {
+    let n = Noto::load();
+    let mut c = base();
+    c.set_scale(2);
+    let dot = c.layout().controls[1].center();
+    c.event(
+        Event::Pointer(PointerEvent::new(dot.x, dot.y, PointerKind::Move)),
+        &n,
+    );
+    c
+}
+
+fn idle_2x() -> Chrome {
+    let mut c = base();
+    c.set_scale(2);
+    c
+}
+
 struct Scene {
     id: &'static str,
     theme: Theme,
@@ -123,6 +181,26 @@ const SCENES: &[Scene] = &[
         id: "chrome-light-editing",
         theme: Theme::Light,
         build: editing,
+    },
+    Scene {
+        id: "chrome-dark-focus-scroll",
+        theme: Theme::Dark,
+        build: focus_and_scroll,
+    },
+    Scene {
+        id: "chrome-light-focus-scroll",
+        theme: Theme::Light,
+        build: focus_and_scroll,
+    },
+    Scene {
+        id: "chrome-dark-2x",
+        theme: Theme::Dark,
+        build: idle_2x,
+    },
+    Scene {
+        id: "chrome-light-hover-2x",
+        theme: Theme::Light,
+        build: hover_controls_2x,
     },
 ];
 
