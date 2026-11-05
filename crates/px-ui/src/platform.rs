@@ -1,7 +1,7 @@
-//! The seam for the window layer (ADR 044, proposed; nothing here depends on it).
+//! The seam for the window layer (ADR 044, accepted; `px-display` implements it).
 //!
-//! Whichever stack the user picks (hand-written Win32 + X11, or winit) implements
-//! [`PlatformWindow`] and runs the loop in [`pump`]. The chrome never learns what
+//! The hand-written Win32 and X11 backends in `px-display` implement
+//! [`PlatformWindow`] and run the loop in [`pump`]. The chrome never learns what
 //! is behind the trait. The surface follows the list in
 //! `docs/research/phase-18-window-stack.md` section 6; adding a method later
 //! changes every backend, so the ones the research says to include from the start
