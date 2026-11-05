@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<title>img: object-fit and object-position in a fixed box</title>
+<style>
+body { margin: 8px; font: 12px/1.2 "Noto Sans"; color: #222 }
+.b { display: inline-block; vertical-align: top; margin: 0 8px 8px 0 }
+img { display: block; width: 96px; height: 64px; background: #dde; image-rendering: pixelated }
+.f img { object-fit: fill }
+.c img { object-fit: contain }
+.v img { object-fit: cover }
+.n img { object-fit: none }
+.s img { object-fit: scale-down }
+.cl img { object-fit: contain; object-position: left top }
+.cr img { object-fit: contain; object-position: right bottom }
+.vl img { object-fit: cover; object-position: 0 50% }
+.nr img { object-fit: none; object-position: 100% 100% }
+.nl img { object-fit: none; object-position: 10px 20px }
+.sd img { object-fit: scale-down; width: 24px; height: 12px }
+</style>
+<div class="b f"><img src="img/wide.png">fill</div><div class="b c"><img src="img/wide.png">contain</div><div class="b v"><img src="img/wide.png">cover</div>
+<div class="b n"><img src="img/wide.png">none</div><div class="b s"><img src="img/quad8.png">scale-down (small)</div><div class="b sd"><img src="img/wide.png">scale-down (big)</div>
+<div class="b cl"><img src="img/wide.png">contain, left top</div><div class="b cr"><img src="img/wide.png">contain, right bottom</div><div class="b vl"><img src="img/wide.png">cover, 0 50%</div>
+<div class="b nr"><img src="img/wide.png">none, 100% 100%</div><div class="b nl"><img src="img/wide.png">none, 10px 20px</div>

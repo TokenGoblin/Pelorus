@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<title>background-image: size, position, repeat, layers, clipping, radius</title>
+<style>
+body { margin: 8px; font: 12px/1.2 "Noto Sans"; color: #222; background: #eee }
+.t { display: inline-block; vertical-align: top; width: 120px; height: 80px; margin: 0 8px 8px 0; border: 3px solid #36c; background-color: #fff; image-rendering: pixelated; background-image: url(img/tile.png) }
+.nr { background-repeat: no-repeat }
+.rx { background-repeat: repeat-x }
+.ry { background-repeat: repeat-y }
+.sp { background-repeat: space; background-size: 28px 28px }
+.ro { background-repeat: round; background-size: 28px 28px }
+.sz { background-size: 24px 12px }
+.sw { background-size: 40px auto; background-repeat: no-repeat }
+.co { background-image: url(img/wide.png); background-size: contain; background-repeat: no-repeat }
+.cv { background-image: url(img/wide.png); background-size: cover }
+.pp { background-position: right 10px bottom 5px; background-repeat: no-repeat; background-size: 32px 32px; background-image: url(img/quad8.png) }
+.pc { background-position: 50% 50%; background-repeat: no-repeat; background-size: 40px 40px; background-image: url(img/quad8.png) }
+.pn { background-position: -8px -8px; background-image: url(img/quad8.png); background-size: 32px 32px }
+.bo { background-origin: border-box; background-repeat: no-repeat; background-size: 40px 40px; background-image: url(img/quad8.png) }
+.bp { padding: 12px; background-clip: padding-box; background-origin: padding-box; background-size: 16px 16px }
+.bc { background-clip: border-box; background-size: 16px 16px; border-style: dashed }
+.ml { background-image: url(img/pixel4.png), url(img/alpha.png), url(img/tile.png); background-size: 32px 32px, 64px 64px, auto; background-repeat: no-repeat, no-repeat, repeat; background-position: 4px 4px, 40px 8px, 0 0 }
+.rd { border-radius: 24px; background-size: 16px 16px }
+.rd2 { border-radius: 40px 4px; background-image: url(img/wide.png); background-size: cover; background-clip: padding-box }
+</style>
+<div class="t">repeat</div><div class="t nr">no-repeat</div><div class="t rx">repeat-x</div><div class="t ry">repeat-y</div>
+<div class="t sp">space</div><div class="t ro">round</div><div class="t sz">24x12</div><div class="t sw">40 auto</div>
+<div class="t co">contain</div><div class="t cv">cover</div><div class="t pp">right 10 bottom 5</div><div class="t pc">center</div>
+<div class="t pn">-8 -8</div><div class="t bo">border-box origin</div><div class="t bp">padding-box</div><div class="t bc">border-box clip</div>
+<div class="t ml">three layers</div><div class="t rd">radius 24</div><div class="t rd2">radius cover</div>

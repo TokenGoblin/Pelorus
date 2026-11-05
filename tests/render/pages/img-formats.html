@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<title>img: PNG, BMP, GIF and JPEG decoded by the first-party decoders</title>
+<style>
+body { margin: 8px; font: 12px/1.2 "Noto Sans"; color: #222 }
+.b { display: inline-block; vertical-align: top; margin: 0 10px 10px 0 }
+img { display: block; width: 128px; height: 128px; background: #eee }
+.px img { image-rendering: pixelated }
+</style>
+<div class="b px"><img src="img/pixel4.png">png 4x4 nearest</div>
+<div class="b"><img src="img/pixel4.png">png 4x4 smooth</div>
+<div class="b px"><img src="img/pic.bmp">bmp 24-bit</div>
+<div class="b"><img src="img/pic.bmp">bmp smooth</div>
+<div class="b px"><img src="img/pic.gif">gif</div>
+<div class="b"><img src="img/photo.jpg">jpeg smooth</div>
+<div class="b px"><img src="img/photo.jpg" style="width: 33px; height: 25px">jpeg 1:1</div>
+<div class="b"><img src="img/photo.jpg" style="width: 16px; height: 12px">jpeg box-filtered</div>

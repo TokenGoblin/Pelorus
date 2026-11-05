@@ -20,6 +20,12 @@
 //! the bitmap, so a page that paints one flat colour has zero ink. With `--twice`
 //! each page is rendered a second time and a differing byte is a `FAIL`.
 //!
+//! Pictures: each `<img src>` and `background-image: url()` that names a file next
+//! to the page (no scheme, no leading `/`) is decoded with `px-image`; a missing or
+//! undecodable one is simply absent, so the page shows its `alt` text. Only pages
+//! under `tests/render/` get pictures; vendored WPT pages render without, as they
+//! always have (see `render`).
+//!
 //! The canvas is 800 px wide and `max(600, document height)` tall, capped at 2400
 //! (ADR 033 (a)).
 
@@ -27,7 +33,6 @@ use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use px_layout::block::layout_document;
 use px_layout::geom::px;
 use px_paint::FontId;
 use px_paint::glyph::{PathCmd, Pt};
@@ -96,6 +101,59 @@ fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
     out
 }
 
+/// Decode the file at `rel` next to the page; a scheme, a host or an absolute
+/// path is not read.
+fn picture(page: &Path, rel: &str) -> Option<std::sync::Arc<px_paint::ImageData>> {
+    let rel = rel.split(['#', '?']).next().unwrap_or("");
+    if rel.is_empty() || rel.contains(':') || rel.starts_with('/') {
+        return None;
+    }
+    let bytes = std::fs::read(page.parent()?.join(rel)).ok()?;
+    let decoded = px_image::decode(&bytes, &px_image::Limits::DEFAULT).ok()?;
+    let img = decoded.first_image()?;
+    Some(std::sync::Arc::new(px_paint::ImageData {
+        width: img.width,
+        height: img.height,
+        rgba: img.rgba.clone(),
+    }))
+}
+
+/// The pictures of a page: each `<img src>` and each `background-image` URL (the
+/// style sheets are given the base `https://corpus.invalid/`, so a relative URL
+/// resolves to a path under it, read from the page's directory).
+fn pictures(
+    page: &Path,
+    arena: &px_dom::Arena,
+    style_root: &px_css::view::StyleRoot,
+) -> (
+    px_paint::ImageSet,
+    std::collections::BTreeMap<px_dom::NodeId, (u32, u32)>,
+) {
+    let mut set = px_paint::ImageSet::default();
+    let mut sizes = std::collections::BTreeMap::new();
+    for id in arena.descendants(arena.document()) {
+        let Some(node) = arena.get(id) else { continue };
+        if node.element_name().is_some_and(|n| &*n.local == "img")
+            && let Some(img) = attr(node, "src").and_then(|s| picture(page, s))
+        {
+            sizes.insert(id, (img.width, img.height));
+            set.elements.insert(id, img);
+        }
+    }
+    px_css::view::with_dom(arena, style_root, |dom| {
+        for id in arena.descendants(arena.document()) {
+            for layer in px_css::image_style::background_layers(dom, id) {
+                if let Some(rel) = layer.url.strip_prefix("https://corpus.invalid/")
+                    && let Some(img) = picture(page, rel)
+                {
+                    set.urls.insert(layer.url, img);
+                }
+            }
+        }
+    });
+    (set, sizes)
+}
+
 fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, String> {
     let source = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
     let dom = px_dom::parse(&source);
@@ -118,7 +176,23 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     engine
         .resolve(&arena, &style_root)
         .ok_or("style resolve failed")?;
-    let tree = layout_document(&arena, &style_root, px(WIDTH as i32)).ok_or("layout failed")?;
+    // Only the corpus' own pages get pictures. A vendored WPT page that names an
+    // image (`grid-abspos-staticpos-align-self-img-001`) tests the layout mode
+    // around it, which does not place those boxes yet; it rendered picture-less
+    // (test and reference alike) before pictures existed, and still does.
+    let own = path.starts_with(root.join("tests/render"));
+    let (images, sizes) = if own {
+        pictures(path, &arena, &style_root)
+    } else {
+        Default::default()
+    };
+    let tree = px_layout::replaced::layout_document_with_images(
+        &arena,
+        &style_root,
+        px(WIDTH as i32),
+        &sizes,
+    )
+    .ok_or("layout failed")?;
 
     // Document height: the lowest fragment edge.
     let mut bottom: i64 = 0;
@@ -130,12 +204,13 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     let doc_px = ((bottom + AU_PER_PX as i64 - 1) / AU_PER_PX as i64).max(0) as u32;
     let height = doc_px.clamp(MIN_HEIGHT, MAX_HEIGHT);
 
-    let list = px_paint::build_with_viewport(
+    let list = px_paint::build_with_images(
         &arena,
         &style_root,
         &tree,
         px(WIDTH as i32),
         px(height as i32),
+        &images,
     );
     px_paint::raster::rasterize_with(&list, WIDTH, height, &LayoutFonts)
         .map_err(|e| format!("raster: {e}"))

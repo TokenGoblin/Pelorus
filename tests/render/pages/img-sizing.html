@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<title>img: intrinsic size, width/height attributes, ratio, CSS, min/max, inline baseline</title>
+<style>
+body { margin: 8px; font: 16px/1.2 "Noto Sans"; color: #222; background: #eef }
+img { image-rendering: pixelated }
+.row { margin: 0 0 6px 0 }
+.blk { display: block; margin: 0 0 6px 0 }
+.c { display: block; margin: 0 auto 6px auto }
+.fl { float: left; margin: 0 6px 6px 0 }
+.clear { overflow: hidden }
+</style>
+<div class="row">intrinsic 8x8 and attributes:
+  <img src="img/quad8.png"> <img src="img/quad8.png" width="24"> <img src="img/quad8.png" height="32">
+  <img src="img/quad8.png" width="40" height="16"></div>
+<img class="blk" src="img/wide.png" style="width: 128px">
+<img class="blk" src="img/wide.png" style="width: 50%; max-width: 200px">
+<img class="blk" src="img/wide.png" style="max-height: 20px">
+<img class="blk" src="img/wide.png" style="min-width: 160px">
+<img class="c" src="img/quad8.png" width="48">
+<div class="clear"><img class="fl" src="img/quad8.png" width="32"><img class="fl" src="img/tile.png" width="32"></div>
+<div class="row">baseline: text<img src="img/quad8.png" width="24">text<img src="img/quad8.png" width="40" style="vertical-align: middle">text<img src="img/quad8.png" width="16" style="vertical-align: top"></div>
+<img class="blk" src="img/quad8.png" width="40" style="box-sizing: border-box; padding: 4px; border: 3px solid #a40; background: #fc8">
