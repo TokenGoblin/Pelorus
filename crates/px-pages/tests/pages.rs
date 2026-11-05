@@ -16,11 +16,12 @@ fn lay_out(html: &str, dark: bool) -> usize {
     engine.add_author_stylesheet(UA, "about:ua");
     for id in arena.descendants(arena.document()) {
         let Some(node) = arena.get(id) else { continue };
-        if node.element_name().is_some_and(|n| n.local.as_ref() == "style") {
-            engine.add_author_stylesheet(
-                &px_layout::inline::collect_text(&arena, id),
-                "about:page",
-            );
+        if node
+            .element_name()
+            .is_some_and(|n| n.local.as_ref() == "style")
+        {
+            engine
+                .add_author_stylesheet(&px_layout::inline::collect_text(&arena, id), "about:page");
         }
     }
     let root = engine.style_root_for(&arena);
@@ -47,7 +48,10 @@ fn unknown_name_is_none() {
 fn every_page_lays_out_in_both_schemes() {
     for (name, html) in all() {
         for dark in [false, true] {
-            assert!(lay_out(html, dark) > 10, "{name} (dark={dark}) has too few boxes");
+            assert!(
+                lay_out(html, dark) > 10,
+                "{name} (dark={dark}) has too few boxes"
+            );
         }
     }
 }
@@ -57,8 +61,23 @@ fn pages_are_self_contained() {
     for (name, html) in all() {
         let lower = html.to_ascii_lowercase();
         for bad in [
-            "http:", "https:", "ftp:", "//", "<script", "<iframe", "<img", "<link", "<object",
-            "<embed", "url(", "@import", "javascript:", "onclick", "onload", "src=", "<form",
+            "http:",
+            "https:",
+            "ftp:",
+            "//",
+            "<script",
+            "<iframe",
+            "<img",
+            "<link",
+            "<object",
+            "<embed",
+            "url(",
+            "@import",
+            "javascript:",
+            "onclick",
+            "onload",
+            "src=",
+            "<form",
             "<input",
         ] {
             assert!(!lower.contains(bad), "{name} contains {bad:?}");
@@ -68,7 +87,10 @@ fn pages_are_self_contained() {
             assert!(part.starts_with("\"about:"), "{name}: href outside about:");
         }
         assert!(html.starts_with("<!DOCTYPE html>"), "{name}: no doctype");
-        assert!(lower.contains("<meta charset=\"utf-8\">"), "{name}: no charset");
+        assert!(
+            lower.contains("<meta charset=\"utf-8\">"),
+            "{name}: no charset"
+        );
     }
 }
 
@@ -83,8 +105,15 @@ fn pages_are_quiet_and_unbranded() {
             "{name}: exclamation mark in copy"
         );
         for word in [
-            "unhackable", "100% secure", "military-grade", "bulletproof", "impenetrable",
-            "guaranteed safe", "anonymous", "shield", "padlock",
+            "unhackable",
+            "100% secure",
+            "military-grade",
+            "bulletproof",
+            "impenetrable",
+            "guaranteed safe",
+            "anonymous",
+            "shield",
+            "padlock",
         ] {
             assert!(!lower.contains(word), "{name} uses {word:?}");
         }
@@ -107,7 +136,10 @@ fn colour_tokens_are_identical_in_every_page() {
         "#0B1226", "#E2E8F0", "#9FB0C8", "#5EEAD4", "#60A5FA", "#FBBF24", "#F87171", "#F4F7FB",
         "#475569", "#0F766E", "#1D4ED8", "#B45309", "#B91C1C",
     ] {
-        assert!(first.contains(hex), "token block lacks palette colour {hex}");
+        assert!(
+            first.contains(hex),
+            "token block lacks palette colour {hex}"
+        );
     }
 }
 
@@ -115,9 +147,16 @@ fn colour_tokens_are_identical_in_every_page() {
 fn version_page_charts_every_progress_row() {
     let html = page("version").expect("page");
     let mut rows = 0;
-    for line in PROGRESS.lines().filter(|l| !l.starts_with('#') && !l.is_empty()) {
+    for line in PROGRESS
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+    {
         let mut f = line.splitn(3, '|');
-        let (n, pct, name) = (f.next().unwrap_or(""), f.next().unwrap_or(""), f.next().unwrap_or(""));
+        let (n, pct, name) = (
+            f.next().unwrap_or(""),
+            f.next().unwrap_or(""),
+            f.next().unwrap_or(""),
+        );
         let name = name.replace('&', "&amp;");
         let row = format!(
             "<div class=\"n\">{n}</div><div class=\"name\">{name}</div><div class=\"track\"><div class=\"fill\" style=\"width: {pct}%\"></div></div><div class=\"pct\">{pct}%</div>"
@@ -132,7 +171,13 @@ fn version_page_charts_every_progress_row() {
 #[test]
 fn privacy_page_states_the_invariants() {
     let html = page("privacy").expect("page").to_ascii_lowercase();
-    for needle in ["no telemetry", "partitioned", "no jit", "sandbox", "quiet by default"] {
+    for needle in [
+        "no telemetry",
+        "partitioned",
+        "no jit",
+        "sandbox",
+        "quiet by default",
+    ] {
         assert!(html.contains(needle), "privacy page lacks {needle:?}");
     }
 }

@@ -546,7 +546,10 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         g.fail(f);
     }
     for p in &pages {
-        if !root.join(p.source.strip_suffix("#dark").unwrap_or(&p.source)).is_file() {
+        if !root
+            .join(p.source.strip_suffix("#dark").unwrap_or(&p.source))
+            .is_file()
+        {
             g.fail(format!("page {}: source {} does not exist", p.id, p.source));
         }
         if let Some(r) = &p.reference

@@ -104,7 +104,12 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     }
     let quirks = px_css::engine::quirks_mode_of(&dom);
     let arena = dom.arena;
-    let mut engine = px_css::engine::StyleEngine::new_with_color_scheme(WIDTH as f32, MIN_HEIGHT as f32, quirks, dark);
+    let mut engine = px_css::engine::StyleEngine::new_with_color_scheme(
+        WIDTH as f32,
+        MIN_HEIGHT as f32,
+        quirks,
+        dark,
+    );
     engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
     for css in stylesheets(root, path, &arena) {
         engine.add_author_stylesheet(&css, "https://corpus.invalid/page.css");
