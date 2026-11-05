@@ -1304,3 +1304,30 @@ follows.
     not applied by `spawn`; the grandchild-orphan case in `SandboxedChild::kill` stays open.
   - Clipboard: Linux has none without a display; a display-server connection is the
     `socket_unix` / `connect_unix_display` attempts. Windows clipboard attempts do not exist.
+
+## Phase 10 fixture table: findings and what it cannot see
+
+- **Found in:** phase 10 unit 6 (`crates/px-script/tests/fixtures/table.rs`)
+- **Fixed in the same commit (small, inside px-script):** `setTimeout(f, 2**31)` and
+  `setTimeout(f, Infinity)` were clamped to the 32-bit ceiling (about 24 days). The delay is a
+  WebIDL `long` with no `[Clamp]`, so it converts with `ToInt32`: `2**31` wraps to a negative
+  number, which the timer steps turn into zero, and `Infinity` becomes zero. Browsers agree.
+  `delay_ms` in `runtime.rs` now does `ToInt32`; the row `delay_two_to_the_31_wraps_to_zero`
+  pins it. (Found because the row's expectation was written from the spec before it was run.)
+- **Not reported anywhere: unhandled promise rejections.** `Promise.reject(x)` with no handler,
+  and an async function that throws with nobody awaiting it, are silent: the host has no
+  `promise_rejection_tracker` and no console. HTML would fire `unhandledrejection` on the
+  global and then report to the console. With no `EventTarget` and no console in Phase 10 the
+  difference is not script-visible, and the row
+  `unhandled_rejection_does_not_stop_the_loop_and_is_not_an_uncaught_error` pins what IS
+  required now (the page survives; it is not counted as an uncaught exception). **Belongs to
+  Phase 11** (events) and the devtools/console work: add the tracker when `unhandledrejection`
+  and `rejectionhandled` exist.
+- **Not covered by the table (Phase 11):** DOM event dispatch order, `<script>` parse-blocking
+  and `async`/`defer` order, `requestAnimationFrame` against rendering, `MutationObserver`
+  timing, `postMessage` and `MessageChannel` tasks, `fetch` task sources. Loop-level ordering
+  only.
+- **Process rows run on the real clock:** only rows whose gaps are large against scheduling
+  noise run through the content binary. The close-spaced timing rows (a 3 ms timer against a
+  5 ms one, the 4 ms nested clamp) run on the manual clock only, so the real-clock path has
+  not been shown to honour them under load.

@@ -28,7 +28,7 @@ use boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
 use boa_engine::property::Attribute;
 
 use crate::clock::{CoarseClock, RawClock, mix};
-use crate::queue::{Caps, LoopCore, MAX_DELAY_MS, Task, TerminateReason, TimerId};
+use crate::queue::{Caps, LoopCore, Task, TerminateReason, TimerId};
 use crate::watch::Heartbeat;
 
 /// The coarse clock as the host holds it: over a raw clock chosen at build.
@@ -372,20 +372,16 @@ fn not_callable(name: &str) -> boa_engine::JsError {
         .into()
 }
 
-/// WebIDL `long` conversion as HTML's timers use it, then HTML's clamp: NaN and
-/// negatives are zero, fractions truncate, and the 32-bit ceiling applies.
+/// WebIDL `long` conversion as HTML's timers use it. `setTimeout`'s timeout is
+/// an unannotated `long` (no `[Clamp]`, no `[EnforceRange]`), so the conversion
+/// is `ToInt32`: modulo 2^32, with NaN and the infinities becoming zero. Then
+/// the timer initialisation steps turn a negative into zero. So `2**31` is
+/// zero, not "as long as possible" (found by the Phase 10 fixture table; this
+/// function used to clamp to the 32-bit ceiling). The result is never above
+/// `i32::MAX`, which is the queue's own ceiling.
 fn delay_ms(value: &JsValue, context: &mut Context) -> JsResult<u64> {
-    if value.is_undefined() {
-        return Ok(0);
-    }
-    let number = value.to_number(context)?;
-    if number.is_nan() || number <= 0.0 {
-        return Ok(0);
-    }
-    if number >= MAX_DELAY_MS as f64 {
-        return Ok(MAX_DELAY_MS);
-    }
-    Ok(number as u64)
+    let long = value.to_i32(context)?;
+    Ok(u64::try_from(long).unwrap_or(0))
 }
 
 fn set_timer(
