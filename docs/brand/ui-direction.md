@@ -9,6 +9,13 @@ accent, no ornament.
 
 ## Shape
 
+**Rule (user directive): every window is a squircle.** That covers the main
+window, popups, dialogs, menus, tooltips, permission prompts and the page's own
+cards and panels. No window or surface in the browser has plain rounded or square
+corners. Where an OS cannot give a shaped window, the shape is drawn by us with
+per-pixel alpha, anti-aliased, and the fallback is recorded in `docs/backlog.md`
+rather than silently accepted.
+
 - Squircles (superellipse corners, exponent about 4.6), not plain rounded
   rectangles: window 22, address field 13, tab 11, buttons 10, search field 18.
 - Window controls are neutral squircle dots with no OS-specific glyphs, so the
