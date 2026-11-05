@@ -180,12 +180,12 @@ pub fn background_layers_of(style: &ComputedValues) -> Vec<BgLayer> {
             .background_position_x
             .0
             .get(at(bg.background_position_x.0.len()))
-            .map_or(LenPct::ZERO, |p| len_pct(p));
+            .map_or(LenPct::ZERO, len_pct);
         let py = bg
             .background_position_y
             .0
             .get(at(bg.background_position_y.0.len()))
-            .map_or(LenPct::ZERO, |p| len_pct(p));
+            .map_or(LenPct::ZERO, len_pct);
         let (rx, ry) = bg
             .background_repeat
             .0

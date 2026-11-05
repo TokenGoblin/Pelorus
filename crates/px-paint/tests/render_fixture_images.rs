@@ -83,7 +83,11 @@ fn wide() -> Vec<u8> {
 fn alpha() -> Vec<u8> {
     let rgba = image(16, 16, |x, y| {
         let hole = (6..10).contains(&x) && (6..10).contains(&y);
-        let a = if hole { 0 } else { ((x + y) * 8 + 7).min(255) as u8 };
+        let a = if hole {
+            0
+        } else {
+            ((x + y) * 8 + 7).min(255) as u8
+        };
         [255, 128, 0, a]
     });
     px_paint::png::encode(16, 16, &rgba).unwrap()
@@ -107,7 +111,12 @@ fn tile() -> Vec<u8> {
 fn pixel4() -> Vec<u8> {
     let rgba = image(4, 4, |x, y| {
         let i = y * 4 + x;
-        [(i * 16) as u8, (255 - i * 16) as u8, ((i * 7) % 16 * 16) as u8, 255]
+        [
+            (i * 16) as u8,
+            (255 - i * 16) as u8,
+            ((i * 7) % 16 * 16) as u8,
+            255,
+        ]
     });
     px_paint::png::encode(4, 4, &rgba).unwrap()
 }

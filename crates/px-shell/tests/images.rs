@@ -190,7 +190,7 @@ mod web {
                     body.len()
                 );
                 let _ = s.write_all(head.as_bytes());
-                let _ = s.write_all(&body);
+                let _ = s.write_all(body);
             }
         });
         (addr, seen)
