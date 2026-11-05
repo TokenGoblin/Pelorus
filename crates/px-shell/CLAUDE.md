@@ -20,17 +20,27 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   through `SecureFetcher` (partitioned state, HSTS, CSP, mixed content, CORS,
   referrer policy, SRI, redirect rules). This crate never opens a socket and has
   no TLS code; the symbol audit (`cargo xtask network`) keeps it so. Only the
-  navigation and its `<link rel=stylesheet>` files are fetched. Scripts, images,
-  fonts, frames and forms are never requested and never run. Nothing persists:
+  navigation, its `<link rel=stylesheet>` files and its pictures are fetched
+  (`<img>`, `<picture>`/`<source>`, `srcset`, `background-image`; see
+  `src/images.rs` for the selection rule and the caps: 64 images, 8 MiB each
+  compressed, 8 Mpx and 192 MiB of pixels decoded). Pictures go through
+  `Loader::image`, a `Destination::Image` fetch on the same secure path, and are
+  decoded by `px-image` (PNG/APNG, GIF, JPEG, BMP, ICO; first frame only; WebP
+  and SVG are refused). A picture that fails for any reason is skipped and the
+  page shows its `alt` text. Scripts, fonts, frames and forms are never
+  requested and never run. Nothing persists:
   the cookie jar lives for one page load, there is no cache and no history store.
   A local page cannot link out to the web. Any failure shows `px-pages`' error
   page. The loader is synchronous on the UI thread, in-process; the content /
   network process split and a non-blocking load are Phase 19.
+- A local page reads pictures only from its own directory or below (`Resources::key`:
+  no scheme, no absolute path, no `..`). A web page's pictures are `http(s)` URLs only;
+  `data:` and `file:` are never fetched.
 - The `testing` feature (`px-net/testing`) adds proxy support and an extra trust
   anchor file for sandboxes that only allow egress through a TLS-terminating
   proxy (`HTTPS_PROXY`, `PX_TEST_CA_BUNDLE`). It is scanned for in release
   artifacts and never enabled for a shipping build; verification is never off.
-- No script execution, no images, no forms: whatever the engine does not yet do
+- No script execution, no forms, no animation of images: whatever the engine does not yet do
   is simply absent from the picture.
 - Page-controlled text (titles) reaches the chrome only through `px_ui::tabs::Tab`,
   which sanitises it. The page never draws a pixel of chrome.
