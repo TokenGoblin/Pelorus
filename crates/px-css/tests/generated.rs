@@ -21,6 +21,20 @@ fn styled(html: &str, css: &str) -> (px_dom::Arena, px_css::view::StyleRoot) {
     (arena, root)
 }
 
+/// Only `li { display: list-item }`: everything else is the engine's own.
+fn styled_bare(html: &str) -> (px_dom::Arena, px_css::view::StyleRoot) {
+    let dom = px_dom::parse(html);
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let mut arena = dom.arena;
+    let mut engine = StyleEngine::new(800.0, 600.0, quirks);
+    engine.add_author_stylesheet(
+        "li { display: list-item } ol, ul { display: block } head { display: none }",
+        "about:ua",
+    );
+    let root = engine.style_document(&mut arena).expect("styled");
+    (arena, root)
+}
+
 fn text_of(arena: &px_dom::Arena, id: px_dom::NodeId) -> String {
     arena
         .child_ids(id)
@@ -250,6 +264,21 @@ fn list_style_types() {
         );
         assert_eq!(m.get(1).map(String::as_str), Some(want), "{ty}");
     }
+}
+
+#[test]
+fn list_defaults_and_type_attribute() {
+    // No UA rules here: the defaults come from the presentational hints.
+    let (arena, root) = styled_bare(
+        "<ol><li>a</li><li type=i>b</li></ol><ol type=A><li>c</li></ol><ul><li>d<ul><li>e<ul><li>f</li></ul></li></ul></li></ul><ul type=square><li>g</li></ul>",
+    );
+    let _ = (&arena, &root);
+    let ms: Vec<String> = arena
+        .descendants(arena.document())
+        .filter(|id| px_css::generated::is_generated(&arena, *id))
+        .map(|id| text_of(&arena, id))
+        .collect();
+    assert_eq!(ms, vec!["1.", "ii.", "A.", "", "", "", ""]);
 }
 
 #[test]

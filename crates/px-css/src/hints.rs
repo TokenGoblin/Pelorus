@@ -102,6 +102,45 @@ fn valign_keyword(value: &str) -> Option<&'static str> {
     }
 }
 
+/// How many `ul`, `ol` and `menu` elements enclose `id`.
+fn list_depth(arena: &Arena, id: NodeId) -> usize {
+    let mut depth = 0;
+    let mut cur = arena.get(id).and_then(px_dom::Node::parent);
+    while let Some(n) = cur {
+        let Some(node) = arena.get(n) else { break };
+        if node.element_name().is_some_and(|q| {
+            q.ns == html5ever::ns!(html) && matches!(&*q.local, "ul" | "ol" | "menu")
+        }) {
+            depth += 1;
+        }
+        cur = node.parent();
+    }
+    depth
+}
+
+/// HTML's `type` attribute on a list or list item, as a `list-style-type`.
+fn list_type(local: &str, value: &str) -> Option<&'static str> {
+    let numbered = match value {
+        "1" => Some("decimal"),
+        "a" => Some("lower-alpha"),
+        "A" => Some("upper-alpha"),
+        "i" => Some("lower-roman"),
+        "I" => Some("upper-roman"),
+        _ => None,
+    };
+    let bullet = match value.to_ascii_lowercase().as_str() {
+        "disc" => Some("disc"),
+        "circle" => Some("circle"),
+        "square" => Some("square"),
+        _ => None,
+    };
+    match local {
+        "ol" => numbered,
+        "ul" | "menu" => bullet,
+        _ => numbered.or(bullet),
+    }
+}
+
 /// The declarations for element `id`, or `None` when it has none.
 #[must_use]
 pub fn css_for(arena: &Arena, id: NodeId) -> Option<String> {
@@ -232,6 +271,30 @@ pub fn css_for(arena: &Arena, id: NodeId) -> Option<String> {
             if get("nowrap").is_some() {
                 css.push_str("white-space:nowrap;");
             }
+        }
+        // HTML section 15.3.6 (Lists): the default `list-style-type` of each list
+        // by nesting depth, and the legacy `type` attribute. At this level so
+        // every embedder gets them without carrying a rule table (as for tables);
+        // an author's `list-style` still wins.
+        "ol" | "ul" | "menu" | "li" => {
+            let depth = list_depth(arena, id);
+            let own = match &*name.local {
+                "ol" => "decimal",
+                "li" => "",
+                _ => match depth {
+                    0 => "disc",
+                    1 => "circle",
+                    _ => "square",
+                },
+            };
+            let typed = get("type").and_then(|t| list_type(&name.local, t));
+            let value = typed.unwrap_or(own);
+            if value.is_empty() {
+                return None;
+            }
+            css.push_str("list-style-type:");
+            css.push_str(value);
+            css.push(';');
         }
         _ => return None,
     }
