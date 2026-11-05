@@ -30,6 +30,7 @@ pub const ENFORCEMENT_POINTS: &[&str] = &[
     "coop::group_switch",
     "coop::corp_check",
     "coop::coep_response",
+    "coop::coep_navigation",
     "coop::secure_context",
 ];
 
@@ -145,15 +146,69 @@ fn parse_sf_token_item(input: &str) -> Option<SfItem> {
                     item.report_to = Some(val);
                 }
             } else {
-                // Bare item parameter value: token, number or boolean.
-                let vs = i;
-                while s.get(i).is_some_and(|&c| is_sf_token_char(c) || c == b'?') {
-                    i += 1;
+                // Bare item parameter value: boolean, number, token or byte
+                // sequence. Consume exactly one; whatever follows must be
+                // `;`, whitespace or the end (checked by the loop head).
+                match s.get(i) {
+                    Some(b'?') => {
+                        if !matches!(s.get(i + 1), Some(b'0' | b'1')) {
+                            return None;
+                        }
+                        i += 2;
+                    }
+                    Some(c) if c.is_ascii_digit() || *c == b'-' => {
+                        if *c == b'-' {
+                            i += 1;
+                        }
+                        let ds = i;
+                        while s.get(i).is_some_and(u8::is_ascii_digit) {
+                            i += 1;
+                        }
+                        let int_digits = i - ds;
+                        if int_digits == 0 || int_digits > 15 {
+                            return None;
+                        }
+                        if s.get(i) == Some(&b'.') {
+                            if int_digits > 12 {
+                                return None;
+                            }
+                            i += 1;
+                            let fs = i;
+                            while s.get(i).is_some_and(u8::is_ascii_digit) {
+                                i += 1;
+                            }
+                            if i == fs || i - fs > 3 {
+                                return None;
+                            }
+                        }
+                    }
+                    Some(c) if c.is_ascii_alphabetic() || *c == b'*' => {
+                        while s.get(i).is_some_and(|&c| is_sf_token_char(c)) {
+                            i += 1;
+                        }
+                    }
+                    Some(b':') => {
+                        i += 1;
+                        while s.get(i).is_some_and(|&c| {
+                            c.is_ascii_alphanumeric() || matches!(c, b'+' | b'/' | b'=')
+                        }) {
+                            i += 1;
+                        }
+                        if s.get(i) != Some(&b':') {
+                            return None;
+                        }
+                        i += 1;
+                    }
+                    _ => return None,
                 }
-                if vs == i {
-                    return None;
+                if key == "report-to" {
+                    // A later non-string value replaces the earlier string.
+                    item.report_to = None;
                 }
             }
+        } else if key == "report-to" {
+            // Bare key means boolean true: not a string endpoint name.
+            item.report_to = None;
         }
     }
 }
@@ -449,6 +504,21 @@ pub fn coep_check_response(
     match tainting {
         Tainting::Opaque => corp_check(origin, embedder, response, false, resolver),
         Tainting::Basic | Tainting::Cors => CorpVerdict::Allowed,
+    }
+}
+
+/// HTML "check a navigation response's adherence to its embedder policy":
+/// a nested document under a parent whose COEP is `require-corp` or
+/// `credentialless` must itself send a COEP that is isolation-compatible,
+/// otherwise the frame is blocked. A parent without COEP imposes nothing.
+/// (Only for child navigables; the caller passes top-level navigations
+/// through without calling this.)
+pub fn coep_navigation_check(parent: Coep, response: Coep) -> CorpVerdict {
+    trace::hit("coop::coep_navigation");
+    if parent.is_isolation_compatible() && !response.is_isolation_compatible() {
+        CorpVerdict::Blocked
+    } else {
+        CorpVerdict::Allowed
     }
 }
 
@@ -1084,6 +1154,7 @@ mod tests {
             &psl,
         );
         let _ = is_secure_context(&[node("https://a.example/")]);
+        let _ = coep_navigation_check(Coep::RequireCorp, Coep::UnsafeNone);
         trace::assert_all_hit(ENFORCEMENT_POINTS);
     }
 

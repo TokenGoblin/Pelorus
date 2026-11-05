@@ -304,13 +304,12 @@ fn parse_single_range_start(v: &[u8]) -> bool {
     let Ok(s) = std::str::from_utf8(v) else {
         return false;
     };
-    let s = s.trim();
-    let Some(eq) = s.find('=') else { return false };
-    let (unit, rest) = s.split_at(eq);
-    if !unit.eq_ignore_ascii_case("bytes") {
+    // Fetch "parse a single range header value" without whitespace: the
+    // `bytes=` prefix is case-sensitive and numbers are ASCII digits only
+    // (`str::parse` would also accept a leading `+`).
+    let Some(rest) = s.strip_prefix("bytes=") else {
         return false;
-    }
-    let rest = rest.get(1..).unwrap_or("");
+    };
     let Some((a, b)) = rest.split_once('-') else {
         return false;
     };
@@ -320,6 +319,9 @@ fn parse_single_range_start(v: &[u8]) -> bool {
     }
     if b.is_empty() {
         return true;
+    }
+    if !digits(b) {
+        return false;
     }
     match (a.parse::<u64>(), b.parse::<u64>()) {
         (Ok(a), Ok(b)) => a <= b,
@@ -453,6 +455,40 @@ pub fn serialize_request_origin(request: &CorsRequest) -> String {
 /// header").
 pub fn should_send_origin_header(request: &CorsRequest, taint: Tainting) -> bool {
     taint == Tainting::Cors || !matches!(request.method.as_str(), "GET" | "HEAD")
+}
+
+/// The value of the `Origin` header to send, or `None` for no header
+/// (Fetch "append a request `Origin` header"). CORS-tainted requests carry
+/// the real origin. Other non-GET/HEAD requests (e.g. a no-cors form POST)
+/// carry `null` where the request's referrer policy says the origin must not
+/// be revealed, so `Referrer-Policy: no-referrer` also hides the origin.
+pub fn origin_header_value(
+    request: &CorsRequest,
+    taint: Tainting,
+    policy: crate::referrer::ReferrerPolicy,
+) -> Option<String> {
+    use crate::referrer::ReferrerPolicy as P;
+    let serialized = serialize_request_origin(request);
+    if taint == Tainting::Cors {
+        return Some(serialized);
+    }
+    if !should_send_origin_header(request, taint) {
+        return None;
+    }
+    if request.mode != RequestMode::Cors {
+        let hide = match policy {
+            P::NoReferrer => true,
+            P::NoReferrerWhenDowngrade | P::StrictOrigin | P::StrictOriginWhenCrossOrigin => {
+                request.origin.scheme() == Some("https") && request.url.scheme() != "https"
+            }
+            P::SameOrigin => !request.origin.same_origin(&Origin::from_url(&request.url)),
+            P::Origin | P::OriginWhenCrossOrigin | P::UnsafeUrl => false,
+        };
+        if hide {
+            return Some("null".to_string());
+        }
+    }
+    Some(serialized)
 }
 
 // ------------------------------------------------------------ preflight

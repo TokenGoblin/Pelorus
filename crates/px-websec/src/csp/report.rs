@@ -107,8 +107,13 @@ impl Violation {
         let blocked_url = match ctx.blocked {
             BlockedResource::Url(u) => strip_url_for_report(u),
             BlockedResource::UrlAfterCrossOriginRedirect(u) => match u.origin() {
+                // Origin serialisation: the default port is omitted.
                 super::url::Origin::Tuple { scheme, host, port } => {
-                    format!("{scheme}://{host}:{port}")
+                    if super::url::default_port(&scheme) == Some(port) {
+                        format!("{scheme}://{host}")
+                    } else {
+                        format!("{scheme}://{host}:{port}")
+                    }
                 }
                 super::url::Origin::Opaque => u.scheme().to_string(),
             },
@@ -332,7 +337,7 @@ mod tests {
             mk(BlockedResource::UrlAfterCrossOriginRedirect(&url(
                 "https://a.test/secret/path?q"
             ))),
-            "https://a.test:443"
+            "https://a.test"
         );
     }
 

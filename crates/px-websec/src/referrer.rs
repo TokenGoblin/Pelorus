@@ -112,6 +112,32 @@ pub fn parse_attribute(value: &str) -> Option<ReferrerPolicy> {
     )
 }
 
+/// Parse `<meta name=referrer content>`: as [`parse_attribute`], plus the
+/// legacy keywords HTML still requires there (`never`, `always`,
+/// `origin-when-crossorigin`; legacy `default` is left unrecognised so the
+/// engine default applies, rather than guessing its mapping). Without them a page asking for `never` would
+/// silently fall back to the default policy and leak its origin.
+pub fn parse_meta_content(value: &str) -> Option<ReferrerPolicy> {
+    trace::hit("referrer::parse_attribute");
+    if value.len() > MAX_POLICY_INPUT {
+        return None;
+    }
+    let t = value.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}'));
+    let legacy = [
+        ("never", ReferrerPolicy::NoReferrer),
+        ("always", ReferrerPolicy::UnsafeUrl),
+        (
+            "origin-when-crossorigin",
+            ReferrerPolicy::OriginWhenCrossOrigin,
+        ),
+    ];
+    legacy
+        .into_iter()
+        .find(|(k, _)| t.eq_ignore_ascii_case(k))
+        .map(|(_, p)| p)
+        .or_else(|| ReferrerPolicy::from_token(t))
+}
+
 /// The policy that applies: the request's own (attribute) policy, else the
 /// document's, else the default.
 pub fn effective_policy(

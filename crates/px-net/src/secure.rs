@@ -1170,7 +1170,7 @@ impl<'a> SecureFetcher<'a> {
                     );
                     return HopResult::Denied;
                 }
-                Ok(md) if md.is_enforced() => {
+                Ok(md) if md.needs_check() => {
                     if let Err(e) = sri::verify(&md, taint, &body) {
                         out.deny("sri::verify", ViolationKind::Sri(e), url, format!("{e:?}"));
                         return HopResult::Denied;
@@ -1285,6 +1285,20 @@ impl<'a> SecureFetcher<'a> {
         };
         let embedder_policy = coop::parse_coep(one(coep_header).as_deref());
         let opener_policy = coop::parse_coop(one(coop_header).as_deref(), embedder_policy.value);
+        // A nested document under a COEP parent must itself opt in (HTML
+        // "check a navigation response's adherence to its embedder policy").
+        if ctx.destination == Destination::Iframe
+            && coop::coep_navigation_check(ctx.embedder_policy, embedder_policy.value)
+                == coop::CorpVerdict::Blocked
+        {
+            out.deny(
+                "coop::coep_navigation",
+                ViolationKind::Corp,
+                url,
+                "framed document lacks a compatible Cross-Origin-Embedder-Policy",
+            );
+            return Err(());
+        }
 
         let attr = frame::parse_sandbox_attribute(ctx.iframe_sandbox.as_deref());
         let from_csp = policies.sandbox_flags();

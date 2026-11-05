@@ -257,7 +257,20 @@ pub fn parse_source(token: &str) -> SourceExpr {
                 SourceExpr::Unrecognized
             };
         }
-        return HashValue::parse(inner).map_or(SourceExpr::Unrecognized, SourceExpr::Hash);
+        // CSP3 grammar: `hash-algorithm "-" base64-value`. A value of the
+        // wrong length (or undecodable) is still a hash-source: it never
+        // matches, but it still disables 'unsafe-inline'. Treating it as
+        // unrecognised would fail open.
+        let Some((alg, value)) = inner.split_once('-') else {
+            return SourceExpr::Unrecognized;
+        };
+        let (Some(alg), true) = (HashAlg::parse(alg), is_base64_value(value)) else {
+            return SourceExpr::Unrecognized;
+        };
+        return SourceExpr::Hash(HashValue::parse(inner).unwrap_or(HashValue {
+            alg,
+            digest: Vec::new(),
+        }));
     }
     if let Some(s) = token.strip_suffix(':') {
         return if is_scheme(s) {
@@ -644,11 +657,12 @@ mod tests {
         // hash of "" in SHA-256, base64.
         let h = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='";
         assert!(matches!(parse_source(h), SourceExpr::Hash(_)));
-        // wrong digest length for the algorithm
-        assert_eq!(
+        // wrong digest length: still a hash-source (never matches, but it
+        // disables 'unsafe-inline'); only non-grammar values are rejected.
+        assert!(matches!(
             parse_source("'sha512-47DEQpj8HBSa='"),
-            SourceExpr::Unrecognized
-        );
+            SourceExpr::Hash(_)
+        ));
         assert_eq!(parse_source("'md5-AAAA'"), SourceExpr::Unrecognized);
         // base64url alphabet and missing padding decode to the same digest
         let a = parse_source("'sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU'");
