@@ -51,3 +51,8 @@ selection is a record of one run of the rule: re-running `--select` after layout
 paint changes may choose differently, and doing so is a deliberate corpus change.
 
 Canvas: 800 px wide, max(600, document height) tall, capped at 2400.
+
+8 pages (ui-page-*): the browser's built-in pages from crates/px-pages/pages/,
+each in the light and the dark scheme (a `#dark` suffix on the source renders with
+prefers-color-scheme: dark). They are used in place, not copied. PNG copies for
+review are in docs/brand/ui-page-*.png.

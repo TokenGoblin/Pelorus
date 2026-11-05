@@ -93,6 +93,20 @@ impl StyleEngine {
     /// A style engine for a viewport of `width` × `height` CSS pixels.
     #[must_use]
     pub fn new(width: f32, height: f32, quirks_mode: QuirksMode) -> Self {
+        Self::new_with_color_scheme(width, height, quirks_mode, false)
+    }
+
+    /// As [`StyleEngine::new`], with `prefers-color-scheme` set to dark when
+    /// `dark` is true. The product path passes `false` (see the note in the
+    /// body); this exists so the render corpus can show the built-in pages in
+    /// both schemes, and so a future setting has a place to land.
+    #[must_use]
+    pub fn new_with_color_scheme(
+        width: f32,
+        height: f32,
+        quirks_mode: QuirksMode,
+        dark: bool,
+    ) -> Self {
         enable_the_css_this_engine_claims_to_support();
 
         let viewport = euclid::Size2D::new(width, height);
@@ -112,7 +126,11 @@ impl StyleEngine {
             // system theme is a fingerprinting surface (§1's threat model names
             // the cross-site tracker), so this is a deliberate constant until
             // there is a setting for it.
-            style::queries::values::PrefersColorScheme::Light,
+            if dark {
+                style::queries::values::PrefersColorScheme::Dark
+            } else {
+                style::queries::values::PrefersColorScheme::Light
+            },
             style::servo::media_features::PointerCapabilities::FINE,
             style::servo::media_features::PointerCapabilities::FINE,
         );

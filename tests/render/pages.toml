@@ -149,3 +149,35 @@ source = "tests/render/pages/text-script-arabic.html"
 [[page]]
 id = "text-script-devanagari"
 source = "tests/render/pages/text-script-devanagari.html"
+
+[[page]]
+id = "ui-page-newtab-light"
+source = "crates/px-pages/pages/newtab.html"
+
+[[page]]
+id = "ui-page-newtab-dark"
+source = "crates/px-pages/pages/newtab.html#dark"
+
+[[page]]
+id = "ui-page-privacy-light"
+source = "crates/px-pages/pages/privacy.html"
+
+[[page]]
+id = "ui-page-privacy-dark"
+source = "crates/px-pages/pages/privacy.html#dark"
+
+[[page]]
+id = "ui-page-version-light"
+source = "crates/px-pages/pages/version.html"
+
+[[page]]
+id = "ui-page-version-dark"
+source = "crates/px-pages/pages/version.html#dark"
+
+[[page]]
+id = "ui-page-error-light"
+source = "crates/px-pages/pages/error.html"
+
+[[page]]
+id = "ui-page-error-dark"
+source = "crates/px-pages/pages/error.html#dark"

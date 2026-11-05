@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>About</title>
+<style>
+/* tokens */
+:root {
+  --bg: #F4F7FB; --panel: #FFFFFF; --line: #D5DEEB; --field: #FFFFFF;
+  --text: #0B1226; --muted: #475569; --teal: #0F766E; --blue: #1D4ED8;
+  --amber: #B45309; --red: #B91C1C; --tint: #E3EEF0; --mark: #0B1630;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0B1226; --panel: #101A33; --line: #243357; --field: #101A33;
+    --text: #E2E8F0; --muted: #9FB0C8; --teal: #5EEAD4; --blue: #60A5FA;
+    --amber: #FBBF24; --red: #F87171; --tint: #14284A; --mark: #0B1630;
+  }
+}
+/* end tokens */
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font-family: "Noto Sans", sans-serif; font-size: 15px; line-height: 1.55; }
+main { display: block; width: 688px; margin: 0 auto; padding: 56px 0 64px; }
+h1 { margin: 0; font-size: 30px; line-height: 1.2; font-weight: 400; }
+.lede { margin: 12px 0 32px; color: var(--muted); font-size: 16px; }
+.card { box-sizing: border-box; margin: 0 0 16px; padding: 8px 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.card.chart { padding: 20px 22px 18px; }
+.card h2 { margin: 0 0 4px; font-size: 17px; line-height: 1.3; font-weight: 400; }
+.note { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+.info { display: flex; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.info.last { border-bottom: 0; }
+.info .k { width: 180px; color: var(--muted); font-size: 14px; }
+.info .v { flex: 1; font-size: 14px; }
+.row { display: flex; align-items: center; height: 28px; }
+.row .n { width: 28px; color: var(--muted); font-size: 12px; }
+.row .name { width: 188px; font-size: 13px; }
+.row .track { width: 360px; height: 8px; border-radius: 4px; background: var(--tint); }
+.row .fill { height: 8px; border-radius: 4px; background: var(--teal); }
+.row .pct { width: 56px; text-align: right; color: var(--muted); font-size: 12px; }
+nav { margin: 28px 0 0; font-size: 14px; color: var(--muted); }
+nav a { color: var(--blue); text-decoration: none; margin-right: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>About</h1>
+  <p class="lede">Version and build state. This build is for development and is not distributed.</p>
+  <section class="card">
+    <div class="info"><div class="k">Version</div><div class="v" data-field="version">Development build</div></div>
+    <div class="info"><div class="k">Script engine</div><div class="v">Interpreter only, no JIT</div></div>
+    <div class="info"><div class="k">Updates</div><div class="v">Signed check, weekly by default, no identifiers</div></div>
+    <div class="info last"><div class="k">Sandbox</div><div class="v" data-field="sandbox-status">Status not reported yet</div></div>
+  </section>
+  <section class="card chart">
+    <h2>Build progress by phase</h2>
+    <p class="note">Maintainers' estimates, not measurements.</p>
+    <div class="row"><div class="n">0</div><div class="name">Skeleton &amp; policy</div><div class="track"><div class="fill" style="width: 95%"></div></div><div class="pct">95%</div></div>
+    <div class="row"><div class="n">1</div><div class="name">Process &amp; IPC</div><div class="track"><div class="fill" style="width: 90%"></div></div><div class="pct">90%</div></div>
+    <div class="row"><div class="n">2</div><div class="name">Sandbox skeleton</div><div class="track"><div class="fill" style="width: 90%"></div></div><div class="pct">90%</div></div>
+    <div class="row"><div class="n">3</div><div class="name">Network core</div><div class="track"><div class="fill" style="width: 85%"></div></div><div class="pct">85%</div></div>
+    <div class="row"><div class="n">4</div><div class="name">DOM</div><div class="track"><div class="fill" style="width: 90%"></div></div><div class="pct">90%</div></div>
+    <div class="row"><div class="n">5</div><div class="name">Style</div><div class="track"><div class="fill" style="width: 80%"></div></div><div class="pct">80%</div></div>
+    <div class="row"><div class="n">6</div><div class="name">Block/inline layout</div><div class="track"><div class="fill" style="width: 70%"></div></div><div class="pct">70%</div></div>
+    <div class="row"><div class="n">7</div><div class="name">Flex &amp; grid</div><div class="track"><div class="fill" style="width: 45%"></div></div><div class="pct">45%</div></div>
+    <div class="row"><div class="n">8</div><div class="name">Paint &amp; compositing</div><div class="track"><div class="fill" style="width: 70%"></div></div><div class="pct">70%</div></div>
+    <div class="row"><div class="n">9</div><div class="name">Text &amp; input</div><div class="track"><div class="fill" style="width: 50%"></div></div><div class="pct">50%</div></div>
+    <div class="row"><div class="n">10</div><div class="name">Script host (Boa)</div><div class="track"><div class="fill" style="width: 60%"></div></div><div class="pct">60%</div></div>
+    <div class="row"><div class="n">11</div><div class="name">Bindings</div><div class="track"><div class="fill" style="width: 50%"></div></div><div class="pct">50%</div></div>
+    <div class="row"><div class="n">12</div><div class="name">Web security</div><div class="track"><div class="fill" style="width: 75%"></div></div><div class="pct">75%</div></div>
+    <div class="row"><div class="n">13</div><div class="name">Navigation &amp; storage</div><div class="track"><div class="fill" style="width: 45%"></div></div><div class="pct">45%</div></div>
+    <div class="row"><div class="n">14</div><div class="name">Out-of-process iframes</div><div class="track"><div class="fill" style="width: 25%"></div></div><div class="pct">25%</div></div>
+    <div class="row"><div class="n">15</div><div class="name">Media</div><div class="track"><div class="fill" style="width: 20%"></div></div><div class="pct">20%</div></div>
+    <div class="row"><div class="n">16</div><div class="name">Accessibility</div><div class="track"><div class="fill" style="width: 30%"></div></div><div class="pct">30%</div></div>
+    <div class="row"><div class="n">17</div><div class="name">Sandbox hardening</div><div class="track"><div class="fill" style="width: 55%"></div></div><div class="pct">55%</div></div>
+    <div class="row"><div class="n">18</div><div class="name">Chrome</div><div class="track"><div class="fill" style="width: 40%"></div></div><div class="pct">40%</div></div>
+    <div class="row"><div class="n">19</div><div class="name">Privacy</div><div class="track"><div class="fill" style="width: 15%"></div></div><div class="pct">15%</div></div>
+    <div class="row"><div class="n">20</div><div class="name">Release engineering</div><div class="track"><div class="fill" style="width: 15%"></div></div><div class="pct">15%</div></div>
+    <div class="row"><div class="n">21</div><div class="name">MCP</div><div class="track"><div class="fill" style="width: 30%"></div></div><div class="pct">30%</div></div>
+    <div class="row"><div class="n">22</div><div class="name">Extensions</div><div class="track"><div class="fill" style="width: 5%"></div></div><div class="pct">5%</div></div>
+  </section>
+  <nav><a href="about:newtab">New tab</a><a href="about:privacy">Privacy</a></nav>
+</main>
+</body>
+</html>

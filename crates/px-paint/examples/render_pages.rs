@@ -7,7 +7,8 @@
 //! render_pages [--twice] <out_dir> <root> <id>=<source> ...
 //! ```
 //!
-//! `source` is a path relative to `root` (the repository root). For each page it
+//! `source` is a path relative to `root` (the repository root), optionally
+//! suffixed `#dark` to render with `prefers-color-scheme: dark`. For each page it
 //! writes `<out_dir>/<id>.png` and prints one line on stdout:
 //!
 //! ```text
@@ -95,7 +96,7 @@ fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
     out
 }
 
-fn render(root: &Path, path: &Path) -> Result<px_paint::Canvas, String> {
+fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, String> {
     let source = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
     let dom = px_dom::parse(&source);
     if dom.abandoned {
@@ -103,7 +104,12 @@ fn render(root: &Path, path: &Path) -> Result<px_paint::Canvas, String> {
     }
     let quirks = px_css::engine::quirks_mode_of(&dom);
     let arena = dom.arena;
-    let mut engine = px_css::engine::StyleEngine::new(WIDTH as f32, MIN_HEIGHT as f32, quirks);
+    let mut engine = px_css::engine::StyleEngine::new_with_color_scheme(
+        WIDTH as f32,
+        MIN_HEIGHT as f32,
+        quirks,
+        dark,
+    );
     engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
     for css in stylesheets(root, path, &arena) {
         engine.add_author_stylesheet(&css, "https://corpus.invalid/page.css");
@@ -166,8 +172,8 @@ impl GlyphSource for LayoutFonts {
     }
 }
 
-fn png_of(root: &Path, path: &Path) -> Result<(px_paint::Canvas, Vec<u8>), String> {
-    let canvas = catch_unwind(AssertUnwindSafe(|| render(root, path)))
+fn png_of(root: &Path, path: &Path, dark: bool) -> Result<(px_paint::Canvas, Vec<u8>), String> {
+    let canvas = catch_unwind(AssertUnwindSafe(|| render(root, path, dark)))
         .map_err(|_| "panicked".to_string())??;
     let png = canvas.to_png().map_err(|e| format!("png: {e}"))?;
     Ok((canvas, png))
@@ -203,12 +209,17 @@ fn main() {
             eprintln!("bad spec {spec}");
             std::process::exit(2);
         };
+        // A `#dark` suffix renders with prefers-color-scheme: dark.
+        let (source, dark) = match source.strip_suffix("#dark") {
+            Some(s) => (s, true),
+            None => (source, false),
+        };
         let path = root.join(source);
-        match png_of(&root, &path) {
+        match png_of(&root, &path, dark) {
             Err(e) => println!("FAIL {id} {e}"),
             Ok((canvas, png)) => {
                 if twice {
-                    match png_of(&root, &path) {
+                    match png_of(&root, &path, dark) {
                         Ok((_, again)) if again == png => {}
                         _ => {
                             println!("FAIL {id} nondeterministic: second render differs");
