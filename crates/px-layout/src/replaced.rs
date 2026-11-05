@@ -46,6 +46,8 @@ use app_units::Au;
 use px_dom::{Arena, Node, NodeId};
 use style::properties::ComputedValues;
 
+use crate::geom::au;
+
 use crate::fragment::FragmentTree;
 
 const AU_PER_PX: i64 = 60;
@@ -149,7 +151,7 @@ fn dimension(value: &str) -> Option<(i64, bool)> {
 }
 
 fn px_to_au(px: i64) -> Au {
-    Au((px.clamp(0, MAX_PX) * AU_PER_PX) as i32)
+    au((px.clamp(0, MAX_PX) * AU_PER_PX) as i32)
 }
 
 /// The inputs the used-size computation needs from the box walk.
@@ -177,7 +179,7 @@ pub(crate) fn used_size(i: &Inputs<'_>) -> Option<(Au, Au)> {
     let border_box = i.style.clone_box_sizing() == BoxSizing::BorderBox;
     let content = |v: Au, surround: Au| {
         if border_box {
-            Au((v.0 - surround.0).max(0))
+            (v - surround).max(Au(0))
         } else {
             v
         }
@@ -201,25 +203,25 @@ pub(crate) fn used_size(i: &Inputs<'_>) -> Option<(Au, Au)> {
         && let Some((n, pct)) = attr(i.node, "width").and_then(dimension)
     {
         let v = if pct {
-            Au(((i64::from(i.containing.0) * n) / 100_000).clamp(0, i64::from(i32::MAX)) as i32)
+            au(((i64::from(i.containing.0) * n) / 100_000).clamp(0, i64::from(i32::MAX)) as i32)
         } else {
-            Au((n * AU_PER_PX / 1000).clamp(0, MAX_PX * AU_PER_PX) as i32)
+            au((n * AU_PER_PX / 1000).clamp(0, MAX_PX * AU_PER_PX) as i32)
         };
         w = Some(v);
     }
     if h.is_none()
         && let Some((n, false)) = attr(i.node, "height").and_then(dimension)
     {
-        h = Some(Au(
+        h = Some(au(
             (n * AU_PER_PX / 1000).clamp(0, MAX_PX * AU_PER_PX) as i32
         ));
     }
 
     // Following the ratio, rounding to the nearest Au.
     let by_ratio_h =
-        |w: Au| Au(((i64::from(w.0) * ih + iw / 2) / iw).clamp(0, i64::MAX >> 33) as i32);
+        |w: Au| au(((i64::from(w.0) * ih + iw / 2) / iw).clamp(0, i64::MAX >> 33) as i32);
     let by_ratio_w =
-        |h: Au| Au(((i64::from(h.0) * iw + ih / 2) / ih).clamp(0, i64::MAX >> 33) as i32);
+        |h: Au| au(((i64::from(h.0) * iw + ih / 2) / ih).clamp(0, i64::MAX >> 33) as i32);
     let clamp = |v: Au, (min, max): (Au, Option<Au>)| {
         let capped = max.map_or(v, |m| v.min(m));
         capped.max(min)
@@ -246,7 +248,7 @@ pub(crate) fn used_size(i: &Inputs<'_>) -> Option<(Au, Au)> {
             }
         }
     };
-    let cap = Au((MAX_PX * AU_PER_PX) as i32);
+    let cap = au((MAX_PX * AU_PER_PX) as i32);
     Some((wu.min(cap).max(Au(0)), hu.min(cap).max(Au(0))))
 }
 
