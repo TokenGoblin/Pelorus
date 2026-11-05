@@ -4,9 +4,10 @@
   with default features off and `annex-b` on; `Intl`, `Temporal`, WebAssembly and
   SharedArrayBuffer absent in v1; the layered runaway-script limits including the
   10-second abort watchdog; the 100-microsecond jittered timer specification; a
-  rule-selected test262 subset. **Still blank and still the user's:** maintainer
-  count and cargo-vet audit status of the new crates. Nothing in any `Cargo.toml`
-  or `Cargo.lock` had been changed when this was written.
+  rule-selected test262 subset. Maintainer count and cargo-vet status of the new
+  crates were blank at acceptance and are filled in below (2026-11-05, see
+  "Corrections"). Nothing in any `Cargo.toml` or `Cargo.lock` had been changed
+  when this was written.
 - **Date:** 2026-11-04
 - **Phase:** 10
 - **Invariants touched:** 6 (No JIT: upheld). Bears on 1 (no ambient authority),
@@ -67,12 +68,12 @@ Surprising hard dependencies of an interpreter: `serde_json`, `rand` 0.10 (+
 switched off. `serde_json` in the content binary does not conflict with "no
 serde_json in IPC", which is about the wire format.
 
-**Maintainers and audit.** Boa is a community project under the `boa-dev`
-organisation with a roster of active contributors, not one person; I did not
-count maintainers and did not look in the Mozilla or Google `cargo-vet` audit
-sets (no network route to them here). Both must be filled in before acceptance;
-the ADR template asks for them and I will not invent a figure. Expect most of the
-73 to be unaudited, so `cargo vet` exemptions go up by about that many.
+**Maintainers and audit.** Filled in on 2026-11-05 from the committed vet store and
+the crates.io owners endpoint; see "Corrections" for the figures and for what is
+still unknown. Original text, kept: Boa is a community project under the `boa-dev`
+organisation, not one person; at the time of writing nothing had been counted or
+checked. The prediction that most of the 73 would be unaudited was right for the
+seven Boa crates (all seven are exemptions).
 
 **The honest unsafe statement.** The GC is 180 tokens of the +5,143. It is the
 part that matters by kind: `boa_gc` is a tracing collector with `unsafe impl
@@ -300,6 +301,75 @@ WASM in v1" before the compat gate runs; that is why it is deferred, not closed.
 3. §6 says "zero panics"; Boa's 0.22 changelog is still converting panics to
    `EngineError::Panic`. Contained by `panic = "abort"` either way.
 
+## Corrections and fill-ins (2026-11-05, Phase 10 close-out)
+
+Recorded after the code and the tests existed. Nothing above was rewritten;
+where a claim above is wrong, this section says so.
+
+1. **A limit error is NOT catchable by script.** "Resource limits" above (and the
+   research note) say the loop-iteration limit "throws a catchable error" and that
+   `for(;;){ try{ f() }catch(e){} }` escapes it. In Boa 0.22.0 the limit raises
+   `EngineError::RuntimeLimit`, which the VM treats as uncatchable
+   (`JsError::is_catchable`); a `try/catch` around it does not run its `catch`
+   block. Pinned by `script_limits_engine_the_limit_error_is_not_catchable_by_script`
+   and `script_limits_engine_places_the_spec_says_swallow_errors_do_not_swallow_the_limit`.
+   The host does not rely on it: any engine error crossing the native boundary
+   terminates script (`TerminateReason::RuntimeLimit`). What the claim got right
+   is the real hole, which is different: the loop count is per call frame, so a
+   loop of CALLS to looping functions is not bounded by it, and native builtins
+   (regex backtracking, a huge array fill) are not interrupted at all. Only the
+   watchdog ends those shapes.
+2. **Timer properties 4 and 5 conflict; the implementation follows the formula.**
+   Property 4 ("within one quantum, repeated reads are identical") and property 5
+   ("the number of distinct outputs over 10 ms is 100 +/- 1") cannot both hold:
+   if a whole quantum returned one value, consecutive quanta rounding to the same
+   grid point would repeat it and the distinct count would fall to about 75. The
+   code implements the ADR's own formula (`up = hash(seed, q) % Q < frac`): 100
+   +/- 1 distinct values, at most one change inside a quantum, and re-reading one
+   raw instant is always stable. The tests assert that and say why. The wording of
+   property 4 above is therefore superseded; the formula stands. (Still the user's
+   to confirm; `docs/backlog.md` has the entry.)
+3. **Memory bomb, after Phase 17 (ADR 043).** Layer 3 above said a memory bomb is
+   uncontained until Phase 17. On Linux Phase 17 added a 1 GiB `RLIMIT_AS` applied
+   before exec and confirmed from `/proc/<pid>/limits`; it is in force and proven
+   by `sandbox_memory_*` tests. On Windows nothing caps the heap and the Phase 17
+   gate is not met there, so a memory bomb remains uncontained on Windows. The cap
+   is address space, not resident memory (`docs/backlog.md`).
+4. **A timer delay is a WebIDL `long`.** Found by the Phase 10 fixture table: the
+   host clamped `setTimeout(f, 2**31)` to the 32-bit ceiling, but the delay
+   converts with `ToInt32`, so `2**31` and `Infinity` are zero (as in browsers).
+   Fixed in `px-script`; the row `delay_two_to_the_31_wraps_to_zero` pins it.
+5. **Maintainers and audit status of the new crates (the blanks above).**
+   - cargo-vet (`supply-chain/config.toml`, `imports.lock`, read 2026-11-05):
+     the store imports Bytecode Alliance, Embark, Google, ISRG and Mozilla audits.
+     **All seven Boa crates are exemptions** (`safe-to-deploy`, version 0.22.0):
+     nobody whose audits we import has read them, and nobody here has. Of the 132
+     non-first-party crates in `px-script`'s tree, 86 are exemptions (some shared
+     with `stylo`) and 46 have no exemption, which `cargo vet` can satisfy only
+     through an imported audit. That last statement is inferred from the store;
+     `cargo vet` could not be run in the environment that wrote this (not
+     installed), and the newest completed CI run's `supply-chain` jobs failed on
+     the store's formatting (fixed on `main` afterwards, not yet re-run in CI), so
+     "the vet gate passes" is NOT established here.
+   - crates.io owners (API read 2026-11-05) for the 64 crate names this
+     dependency added to `Cargo.lock` (`Cargo.lock` at the commit that added Boa
+     versus the one before it; the ADR text counts 73 name+version pairs). Of the 64:
+     39 list exactly one individual and no team; 21 list a team (alone or beside
+     individuals); 4 list two or three individuals and no team. Seven are owned
+     by the `boa-dev:owners` team (`boa_ast`, `boa_engine`, `boa_gc`,
+     `boa_interner`, `boa_macros`, `boa_parser`, and `ryu-js`); the first six also
+     list `jasonwilliams`. `boa_string`, `small_btree` and `tag_ptr` list
+     `jasonwilliams` alone. **One named individual with publish rights is the
+     common case in the tree** (`memchr`, `time`, `portable-atomic`,
+     `intrusive-collections`, `bytemuck` and others), as it is across the Rust
+     ecosystem; that is a statement about owners, not about active maintainers
+     or reviewers.
+   - **Unknown, and not guessable from here:** how many people are in the
+     `boa-dev:owners` team (the GitHub organisation API is not reachable from the
+     build environment); how many are active; whether any of the 64 crates has
+     been audited by anyone outside the imported sets. "Maintainer count" in the
+     dependency block is therefore an owner listing, not a count of maintainers.
+
 ## What the user must decide
 
 1. **Approve adding `boa_engine =0.22.0`** (+73 crates, baseline 21,675 ->
@@ -326,9 +396,15 @@ WASM in v1" before the compat gate runs; that is why it is deferred, not closed.
   in Rust, with `boa_gc` tracing GC. Interpreter only.
 - **Why not write it:** a conformant ES2025 engine is years of work; Appendix A
   settles reuse.
-- **Maintainer count:** not counted here; to be filled before acceptance.
-- **Audit status:** not checked here (no route to Mozilla/Google audit sets);
-  to be filled.
+- **Maintainer count:** crates.io lists, for `boa_engine` and five of the other Boa
+  crates, one user (`jasonwilliams`) plus the GitHub team `boa-dev:owners`;
+  `boa_string` has the user alone. The team's membership is not readable from here,
+  so the number of people who can publish Boa is UNKNOWN. See "Corrections".
+- **Audit status:** all seven Boa crates (`boa_ast`, `boa_engine`, `boa_gc`,
+  `boa_interner`, `boa_macros`, `boa_parser`, `boa_string`, 0.22.0) are cargo-vet
+  EXEMPTIONS in `supply-chain/config.toml`: trusted, not audited by anyone. None
+  of the five imported audit sets covers them (`imports.lock` has no `boa`
+  entry). See "Corrections".
 - **Unsafe-line count:** Boa's seven crates 604; tree total 8,025; new to the
   baseline 5,143; baseline 21,675 -> 26,818.
 - **Transitive dependencies added:** 73 new crates (66 non-Boa), full list in

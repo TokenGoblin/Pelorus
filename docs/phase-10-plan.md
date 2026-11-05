@@ -158,9 +158,9 @@ Recommended: (a).
 | 2 event loop and queues | **Done.** Bounded queues, microtask budget, terminated state, 21 ordering tests, 13 stress tests |
 | 3 timers and the coarse clock | **Done.** 100 microsecond grid, jittered round-up, broker-seeded, monotonic |
 | 4 resource limits | **Done.** Engine limits, a 10 second watchdog abort, process-boundary tests for each runaway shape |
-| 5 test262 | **Half done.** 10,356 tests vendored (14.9 MB, pinned commit, reproducible); the engine-independent runner and ratchet exist and report `graded 0`; the Boa-bound runner is in progress, so **no pass rate exists yet** |
-| 6 fixture table | Not started |
-| 7 gate report | Not started |
+| 5 test262 | **Done (2026-11-05).** 10,356 tests vendored (14.9 MB, pinned commit); the Boa-bound runner and ratchet exist: 10,077 of 10,233 graded pass (98.48%), 156 expected failures, 123 ungraded. A subset by feature and sampling, not a test262 rate |
+| 6 fixture table | **Done (2026-11-05).** 49 spec-derived rows in-process, 16 also through the content process; one defect found and fixed (`setTimeout` delay is a WebIDL `long`) |
+| 7 gate report | **Done (2026-11-05):** `docs/phase-10-gate-report.md`. Boa speed on CPU-bound scripts is NOT measured |
 
 ### Findings that change the ADR
 
@@ -184,11 +184,12 @@ Recommended: (a).
 
 | Item | State |
 |---|---|
-| test262 threshold | not measurable until the Boa-bound runner lands |
+| test262 threshold | ratchet green (own first measurement as the floor); see the gate report |
 | event ordering | tests pass (loop-level; DOM ordering is Phase 11) |
 | no unbounded queue growth | tests pass |
 | timer resolution asserted | tests pass, with the property conflict above |
 | script only in the sandboxed content process | tested; **not yet under the sandbox profile through the broker** (in progress) |
 
-Phase 10 is **not closed**: the headline gate item (a test262 number) does not exist
-yet.
+Phase 10 is **built, not closed**: see `docs/phase-10-gate-report.md` for what closes it
+(a CI run green on both OSes, then `continue-on-error` removed from the `script` and
+`test262` jobs).
