@@ -5,7 +5,7 @@ use std::time::Duration;
 use px_paint::raster::Canvas;
 use px_ui::chrome::PlatformConfig;
 use px_ui::geom::{Rect, Size};
-use px_ui::input::{Button, CursorShape, Event, KeyEvent, PointerEvent, PointerKind, WindowAction};
+use px_ui::input::{Button, CursorShape, Event, KeyEvent, PointerEvent, PointerKind, WheelEvent, WindowAction};
 use px_ui::platform::{PlatformError, PlatformWindow};
 
 use super::conn::{Conn, RawEvent, Wait};
@@ -13,6 +13,9 @@ use super::discover::Auth;
 use super::keys::{self, KeyMap};
 use super::proto::{self, Reader};
 use crate::{Display, DisplayError, DisplayEvent, WindowOptions};
+
+/// Logical pixels one wheel detent scrolls.
+const WHEEL_NOTCH_PX: i32 = 48;
 
 /// Largest clipboard payload accepted from another client, in bytes. A larger
 /// one (or an INCR transfer) is dropped rather than truncated.
@@ -270,7 +273,17 @@ impl X11Window {
                     1 => Button::Primary,
                     2 => Button::Middle,
                     3 => Button::Secondary,
-                    _ => return Ok(()), // wheel and extra buttons: no chrome event
+                    4 | 5 => {
+                        // Wheel: one press per detent (the release is ignored).
+                        if ev.code == proto::EV_BUTTON_PRESS {
+                            let dy = if e.detail == 4 { -WHEEL_NOTCH_PX } else { WHEEL_NOTCH_PX };
+                            let mut w = WheelEvent::new(i32::from(e.x), i32::from(e.y), 0, dy);
+                            w.mods = keys::modifiers(e.state);
+                            self.out.push_back(DisplayEvent::Ui(Event::Wheel(w)));
+                        }
+                        return Ok(());
+                    }
+                    _ => return Ok(()), // sideways wheel and extra buttons: no event
                 };
                 let kind = if ev.code == proto::EV_BUTTON_PRESS {
                     PointerKind::Down(button)

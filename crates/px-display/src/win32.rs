@@ -33,7 +33,7 @@ use px_ui::chrome::PlatformConfig;
 use px_ui::geom::{Rect, Size};
 use px_ui::input::{
     Button, CursorShape, Event, Key, KeyEvent, Modifiers, PointerEvent, PointerKind, Preedit,
-    WindowAction,
+    WheelEvent, WindowAction,
 };
 use px_ui::platform::{PlatformError, PlatformWindow};
 
@@ -72,9 +72,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
     SetWindowPos, ShowWindow, TranslateMessage, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND,
     WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KILLFOCUS,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS,
-    WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
+    WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::{Display, DisplayError, DisplayEvent, WindowOptions};
@@ -98,6 +98,9 @@ struct State {
     frame_size: Cell<(i32, i32)>,
     high_surrogate: Cell<Option<u16>>,
     tracking_leave: Cell<bool>,
+    /// Last pointer position in logical pixels; the wheel message carries screen
+    /// coordinates, so the chrome is given the pointer's last client position.
+    last_pos: Cell<(i32, i32)>,
     buttons_down: Cell<u32>,
     cursor: Cell<CursorShape>,
     composing: Cell<bool>,
@@ -547,7 +550,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             let mut e = PointerEvent::new(st.scale(lo(lp)), st.scale(hi(lp)), kind);
             e.mods = modifiers();
+            st.last_pos.set((e.pos.x, e.pos.y));
             st.push(DisplayEvent::Ui(Event::Pointer(e)));
+            0
+        }
+        WM_MOUSEWHEEL => {
+            // The high word of `wParam` is the signed delta; 120 per detent,
+            // positive away from the user (scroll up), so negate for the page.
+            let delta = i32::from((wp >> 16) as u16 as i16);
+            let (x, y) = st.last_pos.get();
+            let mut w = WheelEvent::new(x, y, 0, -(delta / 120) * 48);
+            w.mods = modifiers();
+            st.push(DisplayEvent::Ui(Event::Wheel(w)));
             0
         }
         WM_MOUSELEAVE => {
@@ -593,6 +607,7 @@ impl Win32Window {
             frame_size: Cell::new((0, 0)),
             high_surrogate: Cell::new(None),
             tracking_leave: Cell::new(false),
+            last_pos: Cell::new((0, 0)),
             buttons_down: Cell::new(0),
             cursor: Cell::new(CursorShape::Default),
             composing: Cell::new(false),

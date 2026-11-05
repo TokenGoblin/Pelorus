@@ -1,0 +1,19 @@
+<!doctype html>
+<title>Flexbox</title>
+<style>
+body { margin: 0; padding: 24px 32px; }
+h2 { margin: 0 0 12px 0 }
+.row { display: flex; flex-direction: row; margin-bottom: 20px; background: #f1f3f5; padding: 8px }
+.row div { padding: 14px; color: #fff }
+.a { background: #e03131; flex: 1 }
+.b { background: #2f9e44; flex: 2 }
+.c { background: #1971c2; width: 120px }
+.col { display: flex; flex-direction: column; width: 260px; height: 220px; background: #f1f3f5; padding: 8px }
+.col div { margin-bottom: 8px; padding: 10px; color: #fff; background: #7048e8 }
+.col .grow { flex: 1; background: #f08c00 }
+</style>
+<h2>Flex row: 1 : 2 : fixed</h2>
+<div class="row"><div class="a">one</div><div class="b">two, twice as wide</div><div class="c">fixed</div></div>
+<h2>Flex column</h2>
+<div class="col"><div>first</div><div class="grow">grows to fill</div><div>last</div></div>
+<p><a href="about:welcome">Back to the welcome page</a></p>
