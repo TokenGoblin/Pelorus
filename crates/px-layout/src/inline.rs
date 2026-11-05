@@ -162,7 +162,7 @@ pub fn layout_lines(
         }
         for run in prepared.line_runs(&line, extra_space) {
             let record = TextRun::new(
-                style.font,
+                run.font,
                 style.size,
                 run.rtl,
                 context.node,

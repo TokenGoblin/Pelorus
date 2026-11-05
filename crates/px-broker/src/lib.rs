@@ -36,6 +36,7 @@
 //! [`ContentProcess::next_request`].
 
 mod script;
+pub mod system_fonts;
 pub use script::{DeathCause, OPENING_DEADLINE, ScriptOutcome, ScriptSession, fresh_seed};
 
 use std::collections::{HashMap, HashSet, VecDeque};

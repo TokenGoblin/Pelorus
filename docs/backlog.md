@@ -6,6 +6,7 @@ every defect they encounter never close.
 Format: one entry per defect.
 
 ```
+
 ## <short title>
 - **Found in:** phase NN, <crate or file>
 - **Belongs to:** phase NN (or: unassigned)
@@ -1247,6 +1248,7 @@ follows.
   `tests/layout.rs` in px-a11y has the reference adapter and shows the gap. The `hidden`
   attribute, `aria-hidden` and the user-agent never-rendered elements already exclude nodes.
 - **Why deferred:** exposing `display` is a px-css change, outside the accessibility phase's crate.
+
 ## Duplicated inflate and PNG decoder: px-paint and px-image
 
 - **Found in:** phase 15 (px-image, ADR 042)
@@ -1331,6 +1333,36 @@ follows.
   noise run through the content binary. The close-spaced timing rows (a 3 ms timer against a
   5 ms one, the 4 ms nested clamp) run on the manual clock only, so the real-clock path has
   not been shown to honour them under load.
+
+## Phase 9: no CJK face is bundled (needs a user decision)
+
+- **State:** the bundled set is Ahem plus whole Noto Sans, Hebrew, Arabic and Devanagari
+  Regular (`tests/fonts/PROVENANCE`). **No CJK face is bundled**, so the sixth gate script
+  has no baseline. Noto Sans CJK is CFF-based (`OTTO`), which px-text's own reader
+  rejects (`Unsupported`), and a whole face is tens of MB. Subsetting needs a tool that is
+  not installed here, and this session may not install or run third-party code.
+- **Decision needed from the user, one of:**
+  1. Authorize installing `fonttools` in a throwaway virtualenv (outside the repo) to
+     subset a CJK face to the fixtures' glyphs (the subsetter would not be committed;
+     ADR 036 (g) and ADR 032 only need the recipe recorded in `PROVENANCE`). The output
+     is CFF-flavoured unless converted to `glyf`, so also decide whether to add CFF
+     outline support to px-text (the shaper, harfrust/skrifa, already reads CFF; only
+     `glyf.rs` and the rasterizer source do not) or to convert to quadratic `glyf` (a
+     fonttools step, `cu2qu`).
+  2. Write a Rust subsetter and CFF reader in this repo (several hundred lines; keeps
+     the project 100% Rust and removes the external step; the larger option).
+  3. Defer CJK: Phase 9's gate stays at five of six scripts and says so.
+- **Code is CJK-ready:** `FontRegistry::fallback_for` and layout's `split_by_font` take
+  any registered face; appending a CJK face to `BUNDLED_FAMILIES` and `FALLBACK_ORDER`
+  (last, so ids do not move) is the whole change, plus a `text-script-cjk` fixture.
+  `unmapped_characters_have_no_fallback_yet` in `crates/px-text/tests/bundled.rs` pins
+  today's `None` for U+65E5 and must flip then.
+- **System fonts:** symlinks are skipped, never followed, so a font directory made of
+  symlinks (some distributions) finds nothing; resolving a link and checking the target
+  is inside the root needs a `canonicalize` in the broker reader. The scan reads whole
+  files to reach the `name` table, bounded (1 GiB total); a range-reading `DirReader`
+  would make a large CJK-heavy font directory cheaper. The Windows roots are unit-tested
+  with a fake environment only; they have not run on Windows.
 
 ## Unify the two Origin types in px-websec; finish Phase 12 wiring outside the fetch path
 

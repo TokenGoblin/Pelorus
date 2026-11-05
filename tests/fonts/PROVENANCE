@@ -14,5 +14,34 @@ Ahem.ttf
             descent 200, glyf + cmap only. Reproduce by copying fonts/Ahem.ttf from
             that WPT commit and comparing the SHA-256 above.
 
-Noto subsets are not here yet; they come with the subsetter recipe (plan unit 1,
-later commit).
+Noto Sans, whole static Regular faces, NOT subset
+  Source:   https://github.com/notofonts/notofonts.github.io (the Noto project's
+            published build outputs; the per-script repos such as notofonts/hebrew
+            hold only sources, no built TTFs on their default branch).
+  Commit:   a5fca98891563057e7f65c1c4bf3f2a58c7704a4 (default branch, fetched
+            2026-11-05, shallow blob-filtered sparse clone). The files were
+            COPIED; no tool was run on them: they are the upstream bytes.
+  Licence:  SIL Open Font License 1.1, verbatim in OFL-Noto.txt (upstream
+            fonts/LICENSE at that commit). Its copyright line is "Copyright 2022
+            The Noto Project Authors" and names NO Reserved Font Name, so the
+            OFL name restriction does not apply. Each font's own name table
+            carries its copyright (Hebrew: 2024). Used unmodified and bundled,
+            not sold alone (OFL condition 1).
+  Outlines: TrueType (glyf), static (not variable). Non-UI, non-Display faces.
+
+  NotoSans-Regular.ttf            Noto Sans 2.015 (Latin, Greek, Cyrillic)
+    path fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf (unhinted: smaller)
+    431,364 bytes  SHA-256 f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8
+  NotoSansHebrew-Regular.ttf      Noto Sans Hebrew 3.001
+    path fonts/NotoSansHebrew/hinted/ttf/NotoSansHebrew-Regular.ttf
+    26,860 bytes   SHA-256 cdefaf8efd47045f6820928eba84db5bed7557539328952b5f828315485e02ee
+  NotoSansArabic-Regular.ttf      Noto Sans Arabic 2.013
+    path fonts/NotoSansArabic/hinted/ttf/NotoSansArabic-Regular.ttf
+    234,892 bytes  SHA-256 bdff3e5659d67e67def05b33f749683b9376ae819d65d3dd62ac4640b3aaef48
+  NotoSansDevanagari-Regular.ttf  Noto Sans Devanagari 2.007
+    path fonts/NotoSansDevanagari/hinted/ttf/NotoSansDevanagari-Regular.ttf
+    243,520 bytes  SHA-256 4e3c66638958c3e2ab5d37f47a8deb89fffeb7be9985c665a519bbc7ba762313
+  Total of the four 936,636 bytes; with Ahem 958,404 bytes (limit was ~2.5 MB).
+  Reproduce: copy the paths above from that commit and compare the SHA-256.
+
+CJK is not bundled: see docs/phase-09-plan.md STATUS and docs/backlog.md.
