@@ -114,9 +114,15 @@ fn inline_text_before_and_after() {
 #[test]
 fn text_content_is_laid_out_at_its_length() {
     // Ahem: 16px per character.
-    let (_, t) = tree_of(&page("p::before { content: 'abc'; display: inline-block }", "<p>x</p>"));
+    let (_, t) = tree_of(&page(
+        "p::before { content: 'abc'; display: inline-block }",
+        "<p>x</p>",
+    ));
     let wide = rects(&t).iter().any(|r| r.2 == px(48));
-    assert!(wide, "an inline-block ::before of three Ahem characters is 48px wide");
+    assert!(
+        wide,
+        "an inline-block ::before of three Ahem characters is 48px wide"
+    );
 }
 
 #[test]
@@ -187,14 +193,24 @@ fn outside_marker_takes_no_room() {
     let extra: Vec<&Rect> = r_with.iter().filter(|r| !r_without.contains(r)).collect();
     assert_eq!(extra.len(), 1, "exactly the marker box is added: {extra:?}");
     let li_left = r_without.iter().map(|r| r.0).min().unwrap_or(Au(0));
-    let m = extra.first().copied().copied().unwrap_or((Au(0), Au(0), Au(0), Au(0)));
-    assert!(m.0 + m.2 <= li_left.max(Au(0)) + Au(60 * 40), "marker is left of the text");
+    let m = extra
+        .first()
+        .copied()
+        .copied()
+        .unwrap_or((Au(0), Au(0), Au(0), Au(0)));
+    assert!(
+        m.0 + m.2 <= li_left.max(Au(0)) + Au(60 * 40),
+        "marker is left of the text"
+    );
 }
 
 #[test]
 fn inside_marker_pushes_the_text() {
     let (_, outside) = tree_of(&page("", "<ul><li>ab</li></ul>"));
-    let (_, inside) = tree_of(&page("ul { list-style-position: inside }", "<ul><li>ab</li></ul>"));
+    let (_, inside) = tree_of(&page(
+        "ul { list-style-position: inside }",
+        "<ul><li>ab</li></ul>",
+    ));
     let widest = |t: &FragmentTree| rects(t).iter().map(|r| r.2).max().unwrap_or(Au(0));
     // The line holds marker + text, so some fragment is wider than the text.
     assert!(rects(&inside).len() >= rects(&outside).len());
@@ -204,7 +220,10 @@ fn inside_marker_pushes_the_text() {
 #[test]
 fn marker_on_the_first_line_of_a_block_child_adds_no_line() {
     let (_, with) = tree_of(&page("", "<ul><li><p>ab</p></li></ul>"));
-    let (_, without) = tree_of(&page("li { display: block }", "<ul><li><p>ab</p></li></ul>"));
+    let (_, without) = tree_of(&page(
+        "li { display: block }",
+        "<ul><li><p>ab</p></li></ul>",
+    ));
     let h = |t: &FragmentTree| {
         t.in_layout_order()
             .into_iter()
@@ -213,13 +232,20 @@ fn marker_on_the_first_line_of_a_block_child_adds_no_line() {
             .max()
             .unwrap_or(Au(0))
     };
-    assert_eq!(h(&with), h(&without), "the marker must not add a line above the paragraph");
+    assert_eq!(
+        h(&with),
+        h(&without),
+        "the marker must not add a line above the paragraph"
+    );
 }
 
 #[test]
 fn numbered_markers_do_not_move_siblings() {
     let (_, with) = tree_of(&page("", "<ol><li>a</li><li>b</li><li>c</li></ol>"));
-    let (_, without) = tree_of(&page("li { display: block }", "<ol><li>a</li><li>b</li><li>c</li></ol>"));
+    let (_, without) = tree_of(&page(
+        "li { display: block }",
+        "<ol><li>a</li><li>b</li><li>c</li></ol>",
+    ));
     let ys = |t: &FragmentTree| {
         let mut v: Vec<Au> = rects(t).iter().map(|r| r.1).collect();
         v.sort();

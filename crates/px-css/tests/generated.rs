@@ -125,13 +125,31 @@ fn empty_string_still_generates_a_box() {
 
 #[test]
 fn display_none_pseudo_and_display_none_host_generate_nothing() {
-    assert!(generated("<div>x</div>", "div::before { content: 'a'; display: none }").is_empty());
-    assert!(generated("<div>x</div>", "div { display: none } div::before { content: 'a' }").is_empty());
+    assert!(
+        generated(
+            "<div>x</div>",
+            "div::before { content: 'a'; display: none }"
+        )
+        .is_empty()
+    );
+    assert!(
+        generated(
+            "<div>x</div>",
+            "div { display: none } div::before { content: 'a' }"
+        )
+        .is_empty()
+    );
 }
 
 #[test]
 fn replaced_and_void_elements_get_none() {
-    assert!(generated("<p>a<br>b<img></p>", "br::before, img::after, hr::before { content: 'x' }").is_empty());
+    assert!(
+        generated(
+            "<p>a<br>b<img></p>",
+            "br::before, img::after, hr::before { content: 'x' }"
+        )
+        .is_empty()
+    );
 }
 
 #[test]
@@ -235,7 +253,10 @@ fn markers(html: &str, css: &str) -> Vec<String> {
 #[test]
 fn ordered_list_markers() {
     assert_eq!(
-        markers("<ol><li>a</li><li>b</li><li>c</li></ol>", "ol { list-style-type: decimal }"),
+        markers(
+            "<ol><li>a</li><li>b</li><li>c</li></ol>",
+            "ol { list-style-type: decimal }"
+        ),
         vec!["1.", "2.", "3."]
     );
 }
@@ -291,7 +312,10 @@ fn marker_pseudo_content_and_colour() {
             .collect::<Vec<_>>()
     );
     assert!(markers("<ul><li>a</li></ul>", "li::marker { content: none }").is_empty());
-    let (arena, root) = styled("<ul><li>a</li></ul>", "li::marker { color: rgb(255, 0, 0) }");
+    let (arena, root) = styled(
+        "<ul><li>a</li></ul>",
+        "li::marker { color: rgb(255, 0, 0) }",
+    );
     let m = arena
         .descendants(arena.document())
         .find(|id| px_css::generated::is_generated(&arena, *id))
@@ -460,4 +484,3 @@ fn generated_elements_have_computed_style() {
     })
     .unwrap();
 }
-

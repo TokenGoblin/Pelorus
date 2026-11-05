@@ -603,7 +603,11 @@ impl<'a> selectors::Element for StyleElement<'a> {
         let mut child = self.node.first_child();
         while let Some(node) = child {
             if let Some(n) = node.arena().get(node.id()) {
-                if n.element_name().is_some() && !crate::generated::is_generated_name(&n.element_name().map_or("", |q| &q.local)) {
+                if n.element_name().is_some()
+                    && !crate::generated::is_generated_name(
+                        n.element_name().map_or("", |q| &q.local),
+                    )
+                {
                     return false;
                 }
                 if n.text().is_some_and(|t| !t.is_empty()) {

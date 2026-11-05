@@ -1613,12 +1613,36 @@ against a definite parent (root basis = viewport height via `layout_document_in`
 `width: min-content | max-content | fit-content | stretch`, `aspect-ratio` on blocks,
 translate-only `transform`, `z-index` on flex/grid items. Still open:
 
-- **`::before` / `::after` generated content.** Nothing is styled or laid out for a
-  pseudo-element (`px-css` `match_pseudo_element` matches none). The clearfix
-  (`::after { content: ""; display: table; clear: both }`), icon glyphs, quotes and
-  decorative bars all vanish, and a floated column then collapses its container.
-  Highest-yield remaining item for real pages. Needs stylo pseudo cascade in px-css,
-  a box per pseudo in `px-layout` and text content in the run builder.
+- ~~**`::before` / `::after` generated content.**~~ Done (phase6/generated-content).
+  `StyleEngine::style_document(&mut Arena)` replaces `style_root_for` + `resolve`: it
+  resolves style (stylo already cascades the eager pseudos), then materialises
+  `<px-before>`, `<px-after>` and `<px-marker>` elements in the arena with the pseudo's
+  computed style, so layout and paint see ordinary boxes (`crates/px-css/src/generated.rs`).
+  Implemented: `content` strings, `attr()`, `counter()`/`counters()` with
+  `counter-reset`/`counter-increment` scopes, `open-quote`/`close-quote` and `quotes`,
+  `content: ""` boxes with any display/position/float/size/background, list markers
+  (`list-style-type` disc/circle/square drawn as shapes, decimal, decimal-leading-zero,
+  lower/upper-alpha/latin, lower/upper-roman, lower-greek, strings, none; `outside` hangs
+  left of the first line, `inside` is inline), `<ol start reversed>`, `<li value>`, the
+  `type` attribute, default list styles by nesting depth, `li::marker` `content` and
+  `color`. Callers that do not use `style_document` (px-fetch, the px-pages and px-a11y
+  tests) simply see no generated content. Still open:
+  - `counter-set` (gecko-only in stylo's property list), `counter-reset: reversed()`,
+    `content: url()` images (the image work owns that), `alt` text after `/`, and
+    `quotes: auto` is always English curly quotes (no `lang` lookup).
+  - `::marker` styling beyond `content` and `color` (font, size and `::marker` as a box),
+    `list-style-image`, the CJK/Armenian/Georgian/Hebrew counter styles (they fall back to
+    decimal), `symbols()`/`@counter-style`.
+  - `::first-line`, `::first-letter`, `::selection` and `::placeholder` are not generated.
+  - The generated elements are in the arena (`px-` local names) until the next
+    `style_document`; script and a11y consumers that walk the DOM after styling will see
+    them and should skip `px_css::generated::is_generated`.
+  - The vendored WPT corpus has no generated-content, css-pseudo or css-lists directory
+    (the sandbox could not reach GitHub to vendor one), so the instrument is
+    `crates/px-layout/tests/generated.rs` (test/reference pairs, ADR 029's comparison)
+    and the `gen-*` / `site-generated` render fixtures.
+  - A shrink-to-fit inline-block no longer counts its own margin in its width (found by
+    the marker's margin; grid floor 67 to 70).
 - **`position: sticky` and `position: fixed` are positioned once, at scroll 0.** A
   sticky header is laid out like a static box and a fixed bar scrolls with the page.
   Needs scroll-offset-aware paint (the shell clips and offsets the display list).

@@ -241,6 +241,13 @@ fn takes_pseudos(local: &str) -> bool {
     )
 }
 
+/// An element's primary style and its `::before` and `::after` styles.
+type Styles = (
+    Arc<ComputedValues>,
+    Option<Arc<ComputedValues>>,
+    Option<Arc<ComputedValues>>,
+);
+
 enum Visit {
     Enter(NodeId),
     Exit(NodeId),
@@ -278,14 +285,7 @@ impl<'e, 'd> Planner<'e, 'd> {
         self.dom.arena()
     }
 
-    fn styles_of(
-        &self,
-        id: NodeId,
-    ) -> Option<(
-        Arc<ComputedValues>,
-        Option<Arc<ComputedValues>>,
-        Option<Arc<ComputedValues>>,
-    )> {
+    fn styles_of(&self, id: NodeId) -> Option<Styles> {
         use style::selector_parser::PseudoElement as P;
         let element = StyleElement::new(self.dom.node(id)?)?;
         let data = style::dom::TElement::borrow_data(&element)?;
@@ -301,7 +301,12 @@ impl<'e, 'd> Planner<'e, 'd> {
         let mut stack = vec![Visit::Enter(arena.document())];
         // The document node has no style; start from its children.
         stack.clear();
-        for child in arena.child_ids(arena.document()).collect::<Vec<_>>().into_iter().rev() {
+        for child in arena
+            .child_ids(arena.document())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
             stack.push(Visit::Enter(child));
         }
         while let Some(visit) = stack.pop() {
@@ -507,7 +512,10 @@ impl<'e, 'd> Planner<'e, 'd> {
                 .is_some_and(|q| &*q.local == "ol");
         let by = list_item.then_some(if rev_parent { -1 } else { 1 });
         self.style_counters(style, by);
-        if in_list && list_item && let Some(v) = attr_of("value").and_then(|s| s.trim().parse::<i32>().ok()) {
+        if in_list
+            && list_item
+            && let Some(v) = attr_of("value").and_then(|s| s.trim().parse::<i32>().ok())
+        {
             self.set("list-item", v);
         }
     }
@@ -540,7 +548,11 @@ impl<'e, 'd> Planner<'e, 'd> {
         // Counter operations of the pseudo-element apply before its content is
         // read, and in document order with everything else.
         self.style_counters(ps, None);
-        let text = self.content_text(host, host_style, &items.items[..items.alt_start.min(items.items.len())]);
+        let text = self.content_text(
+            host,
+            host_style,
+            &items.items[..items.alt_start.min(items.items.len())],
+        );
         self.plan.push(Gen {
             host,
             kind,
@@ -566,7 +578,9 @@ impl<'e, 'd> Planner<'e, 'd> {
                     let found = self.arena().get(origin).and_then(|n| {
                         n.attrs()?
                             .iter()
-                            .find(|x| *x.name.local == *a.attribute && x.name.ns == html5ever::ns!())
+                            .find(|x| {
+                                *x.name.local == *a.attribute && x.name.ns == html5ever::ns!()
+                            })
                             .map(|x| x.value.to_string())
                     });
                     match found {
@@ -643,7 +657,11 @@ impl<'e, 'd> Planner<'e, 'd> {
         let content = own.as_ref().and_then(|ms| {
             use style::values::generics::counters::GenericContent as C;
             match ms.clone_content() {
-                C::Items(items) => Some(self.content_text(li, style, &items.items[..items.alt_start.min(items.items.len())])),
+                C::Items(items) => Some(self.content_text(
+                    li,
+                    style,
+                    &items.items[..items.alt_start.min(items.items.len())],
+                )),
                 C::None => Some(String::new()),
                 C::Normal => None,
             }
@@ -661,7 +679,8 @@ impl<'e, 'd> Planner<'e, 'd> {
         let (mut css, text) = shape.css_and_text(outside);
         if let Some(ms) = &own {
             let c = ms.get_inherited_text().clone_color().into_srgb_legacy();
-            let ch = |v: f32| (if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) } * 255.0).round() as u8;
+            let ch =
+                |v: f32| (if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) } * 255.0).round() as u8;
             css.push_str(&format!(
                 ";color:rgba({},{},{},{})",
                 ch(c.components.0),
@@ -765,7 +784,10 @@ impl MarkerShape {
     fn css_and_text(&self, outside: bool) -> (String, String) {
         let display = if outside { "inline-block" } else { "inline" };
         match self {
-            Self::Disc => (shape_css("border-radius:50%;background-color:currentcolor"), String::new()),
+            Self::Disc => (
+                shape_css("border-radius:50%;background-color:currentcolor"),
+                String::new(),
+            ),
             Self::Circle => (
                 shape_css("border-radius:50%;border:1px solid currentcolor;box-sizing:border-box"),
                 String::new(),
@@ -774,7 +796,9 @@ impl MarkerShape {
             // Outside, the gap to the item is a margin (a trailing space inside a
             // shrink-to-fit box does not survive); inside it stays text.
             Self::Text(t) if outside => (
-                format!("display:{display};white-space:pre;text-indent:0;text-align:start;margin-right:0.35em"),
+                format!(
+                    "display:{display};white-space:pre;text-indent:0;text-align:start;margin-right:0.35em"
+                ),
                 t.trim_end().to_owned(),
             ),
             Self::Text(t) => (
@@ -794,10 +818,7 @@ fn shape_css(paint: &str) -> String {
 
 /// What `list-style-type` draws for list item number `value`.
 #[must_use]
-pub fn marker_shape(
-    ty: &style::counter_style::CounterStyle,
-    value: i32,
-) -> Option<MarkerShape> {
+pub fn marker_shape(ty: &style::counter_style::CounterStyle, value: i32) -> Option<MarkerShape> {
     use style::counter_style::CounterStyle as C;
     match ty {
         C::None => None,
@@ -807,9 +828,15 @@ pub fn marker_shape(
             "circle" => Some(MarkerShape::Circle),
             "square" => Some(MarkerShape::Square),
             "none" => None,
-            _ => Some(MarkerShape::Text(format!("{}. ", format_counter(ty, value)))),
+            _ => Some(MarkerShape::Text(format!(
+                "{}. ",
+                format_counter(ty, value)
+            ))),
         },
-        C::Symbols { .. } => Some(MarkerShape::Text(format!("{}. ", format_counter(ty, value)))),
+        C::Symbols { .. } => Some(MarkerShape::Text(format!(
+            "{}. ",
+            format_counter(ty, value)
+        ))),
     }
 }
 
@@ -843,8 +870,12 @@ fn format_named(name: &str, value: i32) -> String {
         }
         "lower-roman" => roman(value, false).unwrap_or_else(|| value.to_string()),
         "upper-roman" => roman(value, true).unwrap_or_else(|| value.to_string()),
-        "lower-alpha" | "lower-latin" => alpha(value, &LOWER_LATIN).unwrap_or_else(|| value.to_string()),
-        "upper-alpha" | "upper-latin" => alpha(value, &UPPER_LATIN).unwrap_or_else(|| value.to_string()),
+        "lower-alpha" | "lower-latin" => {
+            alpha(value, &LOWER_LATIN).unwrap_or_else(|| value.to_string())
+        }
+        "upper-alpha" | "upper-latin" => {
+            alpha(value, &UPPER_LATIN).unwrap_or_else(|| value.to_string())
+        }
         "lower-greek" => alpha(value, &LOWER_GREEK).unwrap_or_else(|| value.to_string()),
         _ => value.to_string(),
     }
