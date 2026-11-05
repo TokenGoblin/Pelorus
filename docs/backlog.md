@@ -1478,3 +1478,42 @@ follows.
   `set_shape` seam).
 - **Window shadows** are not drawn on either OS (a compositor may add its own;
   an ARGB shadow margin is a layout change).
+
+## Phase 12 / 18 integration: live web in the shell (px-shell + px-net `browse`)
+
+`px-shell https://...` now loads real pages through `SecureFetcher` (see
+`docs/phase-12-integration.md`, "Live web in the shell"). What the first real
+sites showed, none of it fixed here:
+
+- **Blocking load.** The fetch runs on the UI thread; the window does not repaint
+  or respond until the page and its stylesheets arrive (30 s per request cap).
+  Needs the Phase 19 content/network split, or a worker thread first.
+- **No HTTP/2, no compression.** HTTP/1.1 with no `Accept-Encoding`, no `User-Agent`
+  and no `Accept`: sites that require one of them will refuse or serve a reduced
+  page. Deliberate (invariant 4); revisit with ADR 015.
+- **`@import` in stylesheets, `<base href>`, `<style media>`, `<link media>` other
+  than `print`** are not handled: no `@import` fetch, relative URLs always resolve
+  against the document URL.
+- **Stylesheet MIME sniffing.** A no-cors cross-origin stylesheet is opaque, so its
+  `Content-Type` is not visible; the shell only drops a body that starts with `<`.
+- **Inline `style=""` attributes are not checked against CSP** (`style-src-attr`
+  and `'unsafe-inline'`): only `<style>` elements are. Same for `<meta>` CSP.
+- **COEP** from the navigation response is not carried into stylesheet requests
+  (`DocumentFacts::embedder_policy` vs `FetchContext::embedder_policy` differ in
+  type); CSP and Referrer-Policy are.
+- **Cookies and sessions do not persist** between page loads (jar lives for one
+  load). Correct for "no identifiers", but sites that need a session cookie to
+  redirect correctly across two navigations will loop or fail.
+- **Address bar** shows the whole host emphasised; the registrable-domain split
+  needs the PSL in the UI path. IDN hosts are shown as the parser gives them.
+- **Typed text without a scheme** (`example.com`) is still read as a local path.
+- **Font fallback.** `px_layout::text::set_web_fallback(true)` (the shell turns it
+  on) sends unknown/generic families to Noto Sans; the conformance default (Ahem)
+  is unchanged. There is no serif/monospace face, no system fonts, no web fonts:
+  icon fonts draw as missing-glyph boxes.
+- **`<noscript>`** is parsed as raw text (scripting-enabled parser) and hidden by the
+  shell's UA stylesheet.
+- Engine gaps seen on real pages (images, flex/grid page layout, `<pre>` and
+  `<code>` whitespace, form controls, positioned headers, media queries, `calc`)
+  are listed per site in `docs/brand/ui-live-web-*.png` review notes in the branch
+  report.

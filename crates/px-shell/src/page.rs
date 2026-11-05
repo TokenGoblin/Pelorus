@@ -1,8 +1,10 @@
 //! One page through the engine: parse, style, layout, display list, and a
 //! viewport raster at a scroll offset. Also the link boxes, for hit testing.
 //!
-//! Everything here is in-process (see this crate's CLAUDE.md). Local files only:
-//! a stylesheet `href` with a scheme or a host is skipped, never fetched.
+//! Everything here is in-process (see this crate's CLAUDE.md). Layout never
+//! fetches anything: a local page reads relative stylesheets next to its file (a
+//! scheme, host or `..` is skipped); a web page's stylesheets were fetched by
+//! [`crate::web`] through `px-net` beforehand and arrive in [`Resources`].
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -21,7 +23,7 @@ const AU_PER_PX: i64 = 60;
 /// size so an ordinary page reads as text and not as Ahem squares.
 const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
      nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
-     table, form, fieldset, pre, hr { display: block } \
+     table, form, fieldset, pre, hr, dl, dd, dt { display: block } \
      html { font-family: \"Noto Sans\"; font-size: 16px; line-height: 1.4; color: #1b1b1f } \
      body { margin: 8px } \
      p, blockquote, figure { margin: 1em 0 } \
@@ -29,6 +31,11 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      h2 { margin: 0.83em 0; font-size: 1.5em } \
      h3 { margin: 1em 0; font-size: 1.17em } \
      ul, ol { margin: 1em 0; padding-left: 40px } \
+     h4 { margin: 1.33em 0 } \
+     h5 { margin: 1.67em 0; font-size: 0.83em } \
+     h6 { margin: 2.33em 0; font-size: 0.67em } \
+     pre { margin: 1em 0; white-space: pre } \
+     dl { margin: 1em 0 } dd { margin-left: 40px } \
      a { color: #0b57d0 } \
      head, style, script, noscript, template, title, meta, link { display: none }";
 
