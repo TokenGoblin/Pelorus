@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<title>line-height: zero, number, percentage, normal, mixed sizes, br lines</title>
+<style>
+body { margin: 8px; font: 20px/1 Ahem; color: #222 }
+div { width: 200px; margin: 0 0 8px 0; background: #dde; float: left; margin-right: 8px }
+span { background: #fc8 }
+.zero { line-height: 0; height: 24px; background: #cec }
+.num { line-height: 1.5 }
+.pct { line-height: 150% }
+.norm { line-height: normal }
+.big { font-size: 30px }
+.px { line-height: 40px }
+</style>
+<div class="zero">ab cd ef</div>
+<div class="num">one <span class="big">two</span> three four</div>
+<div class="pct">one <span class="big">two</span> three four</div>
+<div class="norm">one <span class="big">two</span> three</div>
+<div class="px">one <span style="line-height: 10px">two</span> x</div>
+<div>a<br><br>b<br></div>

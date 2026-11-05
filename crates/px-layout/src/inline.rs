@@ -59,14 +59,18 @@
 //!
 //! # What is not done
 //!
-//! No `vertical-align` but `baseline`; `text-decoration`, `letter-spacing`,
-//! `word-spacing` and `text-transform` are not applied; `unicode-bidi` embeds and
-//! overrides on spans are not (the paragraph direction is the block's); a span's
-//! own `white-space` is used to collapse its text but the breaking options are the
-//! block's; a percentage margin, border or padding on an inline box resolves
-//! against zero; a float's band is queried with the block's strut height, not the
-//! line's final one; a mixed-direction line gives a box one fragment spanning the
-//! extent of its content rather than one per visual piece.
+//! `text-decoration-style`, `-thickness` and `text-underline-offset` (every line is
+//! solid, a sixteenth of the font size thick); `text-indent: hanging | each-line`
+//! and its share of intrinsic widths; `text-transform: full-width | full-size-kana`;
+//! `unicode-bidi` embeds and overrides on spans (the paragraph direction is the
+//! block's); a span's own `white-space` collapses its text but the breaking options
+//! are the block's; a percentage margin, border or padding on an inline box
+//! resolves against zero; a float's band is queried with the block's strut height,
+//! not the line's final one; a mixed-direction line gives a box one fragment
+//! spanning the extent of its content rather than one per visual piece; an atomic
+//! inline inside a `vertical-align: top | bottom` subtree is aligned to the
+//! baseline of its parent, not placed with the subtree; the subtree root of a box
+//! reopened after a block interrupts it keeps its old subtree index.
 
 use app_units::Au;
 use px_dom::{Arena, NodeId};

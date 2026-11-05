@@ -1167,6 +1167,20 @@ follows.
 
 ## Inline layout: what is left after inline elements got boxes; `hyphens` is not a property
 
+- **Update 2 (Phase 9, `phase9/inline-gaps`):** closed: `text-decoration` (`underline`,
+  `overline`, `line-through`; propagated from in-flow block ancestors and inline boxes,
+  not into atomics, floats or abspos; painted in `text-decoration-color`; **solid only**,
+  `-style`, `-thickness` and `text-underline-offset` are not read), `letter-spacing`,
+  `word-spacing`, `text-transform` (`uppercase`, `lowercase`, `capitalize`; `full-width` and
+  `full-size-kana` are not), `text-indent` (length or percentage, first line; `hanging` and
+  `each-line` not read, and it does not widen intrinsic sizes), exact `text-align: justify`
+  (slack spread in whole app units), `vertical-align: middle | text-top | text-bottom` for
+  inline boxes and atomics, `top | bottom` for text boxes (whole subtree against the finished
+  line), an atomic inside a raised span carries the raise. `white-space` pre, nowrap,
+  pre-wrap, pre-line and tabs were already right and are now pinned by tests. **Still open
+  from the list below:** a span's own `white-space` for *breaking*; `unicode-bidi` embeds on
+  spans; the float band height; the items about abspos static position, relative text, flex
+  baselines and inline-block shrink-to-fit.
 - **Update (Phase 9, `phase9/inline-elements`):** the flattening below is gone. A run keeps
   its inline elements (`crate::inline`): each element's text is shaped with its own font and
   size and painted in its own `color`/`visibility`, line boxes follow CSS 2.1 10.8.1 (strut,

@@ -369,6 +369,61 @@ fn layout_inline_gaps_a_top_aligned_text_box_taller_than_the_line_extends_it() {
 }
 
 #[test]
+fn layout_inline_gaps_line_height_zero_makes_zero_height_lines_that_still_hold_text() {
+    // Half-leading goes negative: 10px content in a 0px line, 5 off each side. The
+    // baseline is 8 - 5 = 3 below the line's top and the lines do not advance.
+    let l = lay("<div style='width: 10px; line-height: 0'>a b</div>", "");
+    assert_eq!(l.line_rects(), vec![(0, 0, 10, 0), (0, 0, 10, 0)]);
+    assert_eq!(l.tree.text_runs(l.lines()[0])[0].baseline, px(3));
+}
+
+#[test]
+fn layout_inline_gaps_consecutive_br_make_empty_lines_of_strut_height() {
+    // "a", an empty line, "b": three lines of 10 each.
+    let l = lay("<div>a<br><br>b</div>", "");
+    let r = l.line_rects();
+    assert_eq!(r.iter().map(|x| x.3).collect::<Vec<_>>(), vec![10, 10, 10]);
+    assert_eq!(r.iter().map(|x| x.1).collect::<Vec<_>>(), vec![0, 10, 20]);
+}
+
+#[test]
+fn layout_inline_gaps_a_trailing_br_does_not_add_a_line() {
+    let l = lay("<div>a<br></div>", "");
+    assert_eq!(l.line_rects().len(), 1);
+}
+
+#[test]
+fn layout_inline_gaps_line_height_percentage_and_em_resolve_against_the_elements_own_font() {
+    // 150% of 10px is 15 on the div; the span's 20px font inherits the computed
+    // length (15px), not a ratio.
+    let l = lay(
+        "<div style='line-height: 150%'>a<span style='font-size: 20px'>b</span></div>",
+        "",
+    );
+    // Span: content 20 in 15px (leading -5): above 16 - 2.5 = 13.5, below
+    // 4 - 2.5 = 1.5. The strut: above 8 + 2.5 = 10.5, below 2 + 2.5 = 4.5. The line
+    // takes the highest top (13.5) and the lowest bottom (4.5): 18.
+    assert_eq!(l.line_rects()[0].3, 18);
+    let n = lay(
+        "<div style='line-height: 1.5'>a<span style='font-size: 20px'>b</span></div>",
+        "",
+    );
+    // A bare number is inherited as a number: the span is 30px. Its above is
+    // 16 + 5 = 21, below 4 + 5 = 9: 30.
+    assert_eq!(n.line_rects()[0].3, 30);
+}
+
+#[test]
+fn layout_inline_gaps_line_height_normal_uses_the_font_and_ignores_the_blocks_number() {
+    // Ahem has no line gap, so `normal` is ascent + descent = 10 at 10px, 20 at 20px.
+    let l = lay(
+        "<div style='line-height: normal'>a<span style='font-size: 20px'>b</span></div>",
+        "",
+    );
+    assert_eq!(l.line_rects()[0].3, 20);
+}
+
+#[test]
 fn layout_inline_gaps_a_top_aligned_subtree_is_as_tall_as_all_of_it() {
     // The aligned subtree is the outer span with the 30px child inside (24 above,
     // 6 below the shared baseline): 30 tall, so the line is 30, as it would be
