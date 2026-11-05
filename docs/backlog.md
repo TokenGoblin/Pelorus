@@ -1224,7 +1224,7 @@ follows.
   SIGABRT with its address space never past the cap, and the broker, a broker-held frame
   and a second content process are untouched. **What is contained:** a content process
   cannot map more than 1 GiB on Linux. **What is not:**
-  - **Windows: written, never run (ADR 044).** The job's `JOB_OBJECT_LIMIT_PROCESS_MEMORY`
+  - **Windows: written, never run (ADR 048).** The job's `JOB_OBJECT_LIMIT_PROCESS_MEMORY`
     commit cap, kill-on-close, one-process limit and UI restrictions are applied before the
     process exists and read back by the parent; `memory_limit()` is `Some` only after that.
     It cross-compiles and has Windows tests, but has not been executed, and the runaway-tab
@@ -1328,7 +1328,7 @@ follows.
     aborts itself and cannot be denied by number. The user-namespace rung (separate PID
     namespace) would close it and is not applied. The suite prints `KNOWN GAP` there.
 - **Not done:**
-  - **Windows.** Creation-time profile written, unrun (ADR 044: job limits, low integrity,
+  - **Windows.** Creation-time profile written, unrun (ADR 048: job limits, low integrity,
     mitigation policies; no AppContainer, so file reads and network are NOT blocked). There is
     no stage two and no escape suite on Windows; the
     Phase 17 gate ("fails every attempt on both OSes") is NOT met. `enter_content_profile`

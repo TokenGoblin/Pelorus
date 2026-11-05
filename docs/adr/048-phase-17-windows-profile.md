@@ -1,4 +1,4 @@
-# 044 — Phase 17 (Windows): job limits, low integrity, mitigation policies
+# 048 — Phase 17 (Windows): job limits, low integrity, mitigation policies
 
 - **Status:** proposed (written and cross-compiled on Linux, **never run on
   Windows**; CI on Windows is the first execution. The user should confirm

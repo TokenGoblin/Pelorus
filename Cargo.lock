@@ -1420,6 +1420,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "px-display"
+version = "0.0.0"
+dependencies = [
+ "px-brand",
+ "px-paint",
+ "px-text",
+ "px-ui",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "px-dom"
 version = "0.0.0"
 dependencies = [

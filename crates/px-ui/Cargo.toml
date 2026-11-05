@@ -6,8 +6,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Workspace crates only; no third-party crate (and no windowing crate: ADR 044 is
-# undecided, see `platform`). px-paint is the display list and the software
+# Workspace crates only; no third-party crate (and no windowing crate: the window layer is
+# px-display, ADR 044). px-paint is the display list and the software
 # rasterizer the chrome is drawn with; px-layout supplies its `Au` unit; px-brand
 # the palette and every user-visible string.
 px-brand = { path = "../px-brand", version = "0.0.0" }

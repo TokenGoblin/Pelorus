@@ -1,6 +1,6 @@
 # Phase 17, Windows: what is verified and what is not
 
-ADR 044 describes the profile. It was written on Linux. What was and was not
+ADR 048 describes the profile. It was written on Linux. What was and was not
 checked:
 
 ## Checked (Linux container)
@@ -53,7 +53,7 @@ certainly be one of them.
 
 ## Not built
 
-- AppContainer / restricted SIDs (file read, network), decision 1 in ADR 044.
+- AppContainer / restricted SIDs (file read, network), decision 1 in ADR 048.
 - Windows stage two (`enter_content_profile` still refuses) and the Windows
   escape suite (`sandbox_escape_*`, probe bodies) and runaway-tab test
   (`sandbox_memory_*`): Linux-only today.

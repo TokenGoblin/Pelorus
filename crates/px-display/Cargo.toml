@@ -1,0 +1,47 @@
+[package]
+name = "px-display"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The window layer (ADR 044, accepted 2026-11-05). No third-party crate on
+# Linux; on Windows `windows-sys`, which `px-sandbox` already locks. Only the
+# browser binary links this crate: no content, GPU or network process does.
+[dependencies]
+px-ui = { path = "../px-ui", version = "0.0.0" }
+px-paint = { path = "../px-paint", version = "0.0.0" }
+# The demo's font stack and window title only (feature `demo`); workspace
+# paths, not new crates.
+px-text = { path = "../px-text", version = "0.0.0", optional = true }
+px-brand = { path = "../px-brand", version = "0.0.0", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Additive on px-sandbox's list. The unsafe-audit gate counts every feature of
+# windows-sys whichever are on, so this moves no baseline.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+# Builds `px-chrome-demo`, which opens a window showing the px-ui chrome.
+demo = ["dep:px-text", "dep:px-brand"]
+
+[[bin]]
+name = "px-chrome-demo"
+path = "src/bin/px-chrome-demo/main.rs"
+required-features = ["demo"]
+
+# The X11 reply decoder reads bytes written by the server and by other
+# applications (ADR 044, Consequences); it is held to the panic lints of the
+# other decoders of hostile input.
+[lints]
+workspace = true

@@ -65,10 +65,10 @@ pub enum Rung {
     RestrictedToken,
     /// Windows: the object that makes killing a process tree possible. At
     /// Phase 17 it also carries the memory cap, kill-on-close, an active-process
-    /// limit of one and the UI restrictions (ADR 044).
+    /// limit of one and the UI restrictions (ADR 048).
     JobObject,
     /// Windows: the token's integrity level is Low, so writes to anything not
-    /// labelled low are refused whatever the DACL says (Phase 17, ADR 044). In
+    /// labelled low are refused whatever the DACL says (Phase 17, ADR 048). In
     /// the Windows [`FLOOR`]; reported in [`SandboxedChild::applied`] only after
     /// the parent read the level back from the child's own token.
     LowIntegrity,
@@ -80,7 +80,7 @@ pub enum Rung {
     /// [`SandboxedChild::applied`] only once the kernel has confirmed it.
     /// Windows: the job object's per-process commit limit
     /// (`JOB_OBJECT_LIMIT_PROCESS_MEMORY`), read back from the job. That is
-    /// committed memory, not address space (ADR 044).
+    /// committed memory, not address space (ADR 048).
     MemoryCap,
 }
 

@@ -1,7 +1,7 @@
 //! What the platform tells the chrome, and what the chrome asks for back.
 //!
 //! Everything here is plain data. The chrome never calls the platform; it returns
-//! [`Effect`]s and the platform layer (ADR 044, undecided) carries them out. That
+//! [`Effect`]s and the platform layer (ADR 044, `px-display`) carries them out. That
 //! is the whole seam: events in, effects out, a `Canvas` for the window to show.
 
 use crate::geom::{Point, Rect, Size};

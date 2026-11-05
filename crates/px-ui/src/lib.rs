@@ -6,7 +6,7 @@
 //! logical pixels, and a painter that turns the lot into a `px-paint` display
 //! list for the deterministic software rasterizer. Nothing here opens a window,
 //! reads a clock, touches the filesystem or the network, or uses `unsafe`: the
-//! platform (ADR 044, still proposed) feeds [`input::Event`]s in, carries
+//! platform (ADR 044, implemented by `px-display`) feeds [`input::Event`]s in, carries
 //! [`input::Effect`]s out, and shows the `Canvas`. [`platform`] is that seam.
 //!
 //! Invariants from this crate's CLAUDE.md that the code enforces: strings come

@@ -4,7 +4,7 @@ Full specification: docs/build-spec.md. Read §9 for the current phase at the
 start of a phase. Do not load the whole spec every session.
 
 ## Hard rules
-- Every crate begins with `#![forbid(unsafe_code)]`. Two crates are excepted,
+- Every crate begins with `#![forbid(unsafe_code)]`. Three crates are excepted,
   with different rules — read the difference, it is the point:
   - `px-sandbox` (ADR 008): `#![deny(unsafe_op_in_unsafe_fn)]`, a `// SAFETY:`
     comment on every unsafe block, reviewed against the OS documentation.
@@ -16,6 +16,12 @@ start of a phase. Do not load the whole spec every session.
     both halves. This is narrower than an exemption; do not read it as one, and
     do not quote it as precedent for anything broader than a trait signature we
     do not control.
+  - `px-display` (ADR 044, accepted by the user 2026-11-05): the window layer.
+    Same rule as `px-sandbox`: `#![deny(unsafe_op_in_unsafe_fn)]`, a
+    `// SAFETY:` comment on every unsafe block, reviewed against the Win32
+    documentation. The X11 half is safe Rust and every unsafe block is in the
+    `cfg(windows)` half. Only the browser binary may depend on it: no content,
+    GPU or network process links a window layer (`cargo tree -p px-content`).
 - **The project is 100% Rust** (ADR 032, user directive). All first-party
   source, build logic, tests, CI gate logic and dev tooling are Rust: no new
   `.sh`, `.py`, `.ps1`, `.js` or similar. Gates live in `crates/px-xtask`
