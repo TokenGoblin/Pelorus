@@ -16,8 +16,8 @@
 //!
 //! # What is not here
 //!
-//! Scripts, images, fonts, frames and forms are not fetched (the engine cannot
-//! use them), so the embedder never asks for them. HTTP/2 is not implemented
+//! Scripts, fonts, frames and forms are not fetched (the engine cannot use
+//! them), so the embedder never asks for them. Images are: [`Loader::image`]. HTTP/2 is not implemented
 //! (ADR 015). The loader is synchronous and in-process; the content/network
 //! process split is Phase 19.
 
@@ -36,6 +36,43 @@ const HSTS_TEXT: &str = include_str!("../../../data/hsts_preload.txt");
 
 /// The largest stylesheet the loader hands back.
 pub const MAX_STYLESHEET_BYTES: usize = 2 << 20;
+
+/// The largest image body the loader hands back (compressed bytes; the decoder
+/// has its own pixel and memory caps).
+pub const MAX_IMAGE_BYTES: usize = 8 << 20;
+
+/// What kind of picture a body is, by its first bytes (never by its name or by
+/// the server's say-so alone).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageKind {
+    Png,
+    Gif,
+    Jpeg,
+    Bmp,
+    Ico,
+    Webp,
+}
+
+/// Sniff an image signature. `None` for anything else, SVG and HTML included:
+/// an unknown body is refused, not guessed at.
+#[must_use]
+pub fn sniff_image(body: &[u8]) -> Option<ImageKind> {
+    if body.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some(ImageKind::Png)
+    } else if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
+        Some(ImageKind::Gif)
+    } else if body.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(ImageKind::Jpeg)
+    } else if body.starts_with(b"BM") {
+        Some(ImageKind::Bmp)
+    } else if body.starts_with(&[0, 0, 1, 0]) {
+        Some(ImageKind::Ico)
+    } else if body.starts_with(b"RIFF") && body.get(8..12) == Some(b"WEBP".as_slice()) {
+        Some(ImageKind::Webp)
+    } else {
+        None
+    }
+}
 
 /// The lists a load needs, parsed once.
 pub struct WebSession {
@@ -113,6 +150,17 @@ pub struct Document {
     /// `Content-Type` header value, if any.
     pub content_type: Option<String>,
     /// The response body, undecoded.
+    pub body: Vec<u8>,
+}
+
+/// An image body that passed the loader's checks.
+#[derive(Debug)]
+pub struct FetchedImage {
+    /// The URL after redirects.
+    pub url: String,
+    /// What its first bytes say it is.
+    pub kind: ImageKind,
+    /// The undecoded bytes, at most [`MAX_IMAGE_BYTES`].
     pub body: Vec<u8>,
 }
 
@@ -248,6 +296,70 @@ impl Loader<'_> {
             return Err(LoadError::NoResponse);
         }
         Ok(body.to_vec())
+    }
+
+    /// Fetch an image for the current document (`<img>`, `<source>`,
+    /// `background-image`). `src` is resolved against the document's URL and the
+    /// request is a [`Destination::Image`] one, so it runs the same secure path
+    /// as every other subresource: the partitioned client state, HSTS, the
+    /// document's CSP (`img-src`), mixed-content blocking (an `http:` image on
+    /// an `https:` page is upgraded or refused by the fetcher), the document's
+    /// referrer policy, and the redirect rules.
+    ///
+    /// A body is returned only when it is plausibly a picture: a 2xx response,
+    /// at most [`MAX_IMAGE_BYTES`], a `Content-Type` that is absent,
+    /// `image/*` or `application/octet-stream`, and bytes that start with a
+    /// signature [`sniff_image`] knows. Anything else (HTML, JSON, SVG, an
+    /// unknown signature) is refused with [`LoadError::NoResponse`], whatever
+    /// the server called it.
+    pub fn image(&mut self, src: &str) -> Result<FetchedImage, LoadError> {
+        let doc = self.document.as_ref().ok_or(LoadError::BadAddress)?;
+        let target = resolve(&doc.url, src).ok_or(LoadError::BadAddress)?;
+        let mut ctx = FetchContext::top_level_document(&doc.url, Destination::Image)
+            .ok_or(LoadError::BadAddress)?;
+        if let Some(f) = &doc.facts {
+            ctx.csp = f.csp.clone();
+            ctx.document_referrer_policy = f.referrer_policy;
+        }
+        let mut out = self.fetcher.fetch(&ctx, &target);
+        let Some(resp) = out.response.take() else {
+            return Err(failure(out));
+        };
+        if !(200..300).contains(&resp.status) {
+            return Err(LoadError::NoResponse);
+        }
+        let content_type = resp
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("content-type"))
+            .and_then(|h| String::from_utf8(h.value.clone()).ok());
+        if let Some(ct) = content_type.as_deref() {
+            let essence = ct
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            let ok = essence.is_empty()
+                || essence.starts_with("image/")
+                || essence == "application/octet-stream";
+            // SVG is a document, not a bitmap this loader hands to a decoder.
+            if !ok || essence == "image/svg+xml" {
+                return Err(LoadError::NoResponse);
+            }
+        }
+        let body = resp.embedder_body();
+        if body.len() > MAX_IMAGE_BYTES {
+            return Err(LoadError::NoResponse);
+        }
+        let Some(kind) = sniff_image(body) else {
+            return Err(LoadError::NoResponse);
+        };
+        Ok(FetchedImage {
+            url: resp.url.serialize(true),
+            kind,
+            body: body.to_vec(),
+        })
     }
 }
 
