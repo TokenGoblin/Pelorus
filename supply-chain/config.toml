@@ -23,10 +23,6 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 version = "0.6.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.allocator-api2]]
-version = "0.2.21"
-criteria = "safe-to-deploy"
-
 [[exemptions.arrayvec]]
 version = "0.7.8"
 criteria = "safe-to-deploy"
@@ -41,15 +37,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.autocfg]]
 version = "1.5.1"
-criteria = "safe-to-deploy"
-
-# ADR 036 (Phase 9, shaping). The Fontations crates and bytemuck have Google and
-# Mozilla audits at older versions (see the ADR's audit table); the deltas, and
-# harfrust (no imported audit), are exempted here until audited. Written without
-# running cargo-vet, which is not installed in the authoring container: CI's
-# `cargo vet` is the check, and `cargo vet prune` removes any that are redundant.
-[[exemptions.bytemuck]]
-version = "1.25.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.boa_ast]]
@@ -80,12 +67,12 @@ criteria = "safe-to-deploy"
 version = "0.22.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.bytemuck_derive]]
-version = "1.12.1"
+[[exemptions.bytemuck]]
+version = "1.25.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.chacha20]]
-version = "0.10.2"
+[[exemptions.bytemuck_derive]]
+version = "1.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.concurrent-queue]]
@@ -94,10 +81,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cow-utils]]
 version = "0.1.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.cpufeatures]]
-version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-deque]]
@@ -110,10 +93,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-utils]]
 version = "0.8.23"
-criteria = "safe-to-deploy"
-
-[[exemptions.cssparser-macros]]
-version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
@@ -192,10 +171,6 @@ criteria = "safe-to-deploy"
 version = "0.5.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.foldhash]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.font-types]]
 version = "0.12.7"
 criteria = "safe-to-deploy"
@@ -204,20 +179,12 @@ criteria = "safe-to-deploy"
 version = "7.7.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.futures-core]]
-version = "0.3.34"
-criteria = "safe-to-deploy"
-
 [[exemptions.futures-io]]
 version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-lite]]
 version = "2.6.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.getrandom]]
-version = "0.4.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.harfrust]]
@@ -292,10 +259,6 @@ criteria = "safe-to-deploy"
 version = "0.10.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.itertools]]
-version = "0.15.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.itoa]]
 version = "1.0.18"
 criteria = "safe-to-deploy"
@@ -356,31 +319,11 @@ criteria = "safe-to-deploy"
 version = "0.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.parking]]
-version = "2.2.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.pastey]]
-version = "0.2.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.phf]]
-version = "0.14.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.phf_generator]]
-version = "0.14.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.phf_macros]]
 version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.phf_macros]]
-version = "0.14.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.phf_shared]]
 version = "0.14.0"
 criteria = "safe-to-deploy"
 
@@ -414,14 +357,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.r-efi]]
 version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand]]
-version = "0.10.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
-version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rayon]]
@@ -543,10 +478,6 @@ criteria = "safe-to-deploy"
 version = "0.1.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.tap]]
-version = "1.0.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.thin-vec]]
 version = "0.2.19"
 criteria = "safe-to-deploy"
@@ -591,23 +522,8 @@ criteria = "safe-to-deploy"
 version = "3.1.0"
 criteria = "safe-to-deploy"
 
-# ADR 036 (UAX #9). Audited by Mozilla, Google and Bytecode Alliance per the
-# ADR's research; exempted until `cargo vet` (not installed here) confirms the
-# imported set covers 0.3.18.
-[[exemptions.unicode-bidi]]
-version = "0.3.18"
-criteria = "safe-to-deploy"
-
 [[exemptions.url]]
 version = "2.5.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.utf16_iter]]
-version = "1.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.utf_types]]
-version = "1.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.walkdir]]
@@ -620,10 +536,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.winnow]]
 version = "1.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.write16]]
-version = "1.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.writeable]]
