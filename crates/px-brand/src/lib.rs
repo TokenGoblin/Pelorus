@@ -16,6 +16,7 @@
 //! `px-update`, and `cargo xtask structure` asserts they have not migrated here.
 
 pub mod palette;
+pub mod ui;
 
 /// The product name as shown to a user.
 ///

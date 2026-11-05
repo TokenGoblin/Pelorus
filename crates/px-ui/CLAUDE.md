@@ -1,6 +1,10 @@
 # px-ui
 
-Browser chrome: winit and wgpu, thin hand-rolled widgets. Implemented in phase 18.
+Browser chrome: thin hand-rolled widgets. Implemented in phase 18. The window
+and input stack is ADR 044 (proposed); the windowing-independent core (state
+machines, layout, painter, `platform::PlatformWindow` seam) is here and depends
+on no window crate. Render baselines: `tests/baselines/`, re-bless with
+`PX_UI_BLESS=1 cargo test -p px-ui --test baselines` and review the PNGs.
 
 Full specification: `docs/build-spec.md`. Root working agreement:
 `/CLAUDE.md` — it applies here too; this file only adds what is local.

@@ -1524,6 +1524,12 @@ dependencies = [
 [[package]]
 name = "px-ui"
 version = "0.0.0"
+dependencies = [
+ "px-brand",
+ "px-layout",
+ "px-paint",
+ "px-text",
+]
 
 [[package]]
 name = "px-update"
