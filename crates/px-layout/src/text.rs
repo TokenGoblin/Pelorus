@@ -235,6 +235,47 @@ pub struct Deco {
     pub over: Option<NodeId>,
     /// `line-through`.
     pub through: Option<NodeId>,
+    /// Whether the text is aligned to the line box's edge rather than a baseline
+    /// (`vertical-align: top | bottom` on it or an ancestor).
+    pub pin: Pin,
+}
+
+/// `vertical-align: top | bottom` on an inline box: the box and everything inside
+/// it is one aligned subtree, placed against the line box once the line's height
+/// is known. The number is the index of the subtree's root box in the run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pin {
+    /// Aligned on the baseline.
+    #[default]
+    None,
+    /// The subtree's top is the line's top.
+    Top(usize),
+    /// The subtree's bottom is the line's bottom.
+    Bottom(usize),
+}
+
+impl Pin {
+    /// The subtree this belongs to, if pinned.
+    #[must_use]
+    pub fn id(self) -> Option<usize> {
+        match self {
+            Pin::None => None,
+            Pin::Top(i) | Pin::Bottom(i) => Some(i),
+        }
+    }
+
+    /// How far a pinned box's baseline is raised, given the subtree's extent
+    /// above and below the root's baseline and the line's own (`line_above` is the
+    /// baseline's distance from the top, `line_below` from the bottom). Zero when
+    /// not pinned.
+    #[must_use]
+    pub fn raise(self, extent: (Au, Au), line_above: Au, line_below: Au) -> Au {
+        match self {
+            Pin::None => Au(0),
+            Pin::Top(_) => line_above - extent.0,
+            Pin::Bottom(_) => extent.1 - line_below,
+        }
+    }
 }
 
 impl Deco {
@@ -255,6 +296,7 @@ impl Deco {
             under: pick(L::UNDERLINE, self.under),
             over: pick(L::OVERLINE, self.over),
             through: pick(L::LINE_THROUGH, self.through),
+            pin: self.pin,
         }
     }
 }
@@ -324,6 +366,30 @@ impl TextStyle {
             LineHeight::Length(length) => Au::from(length.0),
         };
         out
+    }
+
+    /// The x-height at this size: the top of the face's `x`, or half an em when
+    /// it has none. `vertical-align: middle` uses it.
+    #[must_use]
+    pub fn x_height(&self) -> Au {
+        let Some(font) = fonts().registry.get(self.font) else {
+            return self.size / 2;
+        };
+        let top = font
+            .glyph_index('x')
+            .and_then(|g| font.outline(g).ok())
+            .and_then(|o| o.bounds())
+            .map(|(_, _, _, y1)| y1)
+            .filter(|y| *y > 0)
+            .and_then(|y| i16::try_from(y).ok());
+        match top {
+            Some(units) => au(font_units_to_au(
+                i32::from(units),
+                font.units_per_em(),
+                self.size.0,
+            )),
+            None => self.size / 2,
+        }
     }
 
     /// The font's vertical metrics at this size.

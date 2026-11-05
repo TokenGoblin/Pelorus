@@ -128,6 +128,11 @@ pub(crate) struct AtomicSpec {
     pub node: NodeId,
     /// Where its `U+FFFC` is.
     pub offset: usize,
+    /// The text style of the element it is inside: `vertical-align: middle`,
+    /// `text-top` and `text-bottom` are measured against it.
+    pub parent: TextStyle,
+    /// How far that element's baseline is raised above the line's.
+    pub parent_raise: Au,
 }
 
 /// A run of inline content: the text and the structure it came from.
@@ -301,7 +306,12 @@ impl InlineRunData {
     ) {
         let offset = self.text.len();
         self.push_char(OBJECT, style, range_node, raise, deco);
-        self.atomics.push(AtomicSpec { node, offset });
+        self.atomics.push(AtomicSpec {
+            node,
+            offset,
+            parent: style,
+            parent_raise: raise,
+        });
     }
 
     /// Whether the run has nothing to lay out: no object, and no text but
@@ -360,6 +370,12 @@ pub(crate) enum VAlign {
     Top,
     /// Margin-box bottom at the line's bottom.
     Bottom,
+    /// Vertical midpoint at the parent's baseline plus half its x-height.
+    Middle,
+    /// Top at the top of the parent's content area.
+    TextTop,
+    /// Bottom at the bottom of the parent's content area.
+    TextBottom,
 }
 
 /// The `vertical-align` of an element, as far as this engine honours it.
@@ -369,8 +385,14 @@ pub(crate) enum VAlign {
 /// `baseline-shift` longhand. A percentage is of the element's own `line-height`;
 /// `sub` lowers by a fifth and `super` raises by a third of the font size.
 pub(crate) fn vertical_align_of(style: &ComputedValues, text: TextStyle) -> VAlign {
-    use style::values::computed::BaselineShift;
+    use style::values::computed::{AlignmentBaseline as A, BaselineShift};
     use style::values::generics::box_::BaselineShiftKeyword as K;
+    match style.clone_alignment_baseline() {
+        A::Middle => return VAlign::Middle,
+        A::TextTop => return VAlign::TextTop,
+        A::TextBottom => return VAlign::TextBottom,
+        _ => {}
+    }
     match style.clone_baseline_shift() {
         BaselineShift::Keyword(K::Top) => VAlign::Top,
         BaselineShift::Keyword(K::Bottom) => VAlign::Bottom,
@@ -554,6 +576,27 @@ pub(crate) fn layout_lines(
         .collect();
     let prepared = Prepared::paragraph(context.text, style, &ranges, &edge_list, &atomic_list);
 
+    // `vertical-align: middle | text-top | text-bottom` and the shifts, all as a
+    // raise from the line's baseline (the parent's own raise included); `top` and
+    // `bottom` stay as they are.
+    let effective: Vec<VAlign> = infos
+        .iter()
+        .zip(specs)
+        .map(|(i, sp)| match i.align {
+            VAlign::Raise(r) => VAlign::Raise(sp.parent_raise + r),
+            VAlign::Middle => VAlign::Raise(
+                sp.parent_raise + sp.parent.x_height() / 2 - (i.above() - i.below()) / 2,
+            ),
+            VAlign::TextTop => {
+                VAlign::Raise(sp.parent_raise + sp.parent.metrics().ascent - i.above())
+            }
+            VAlign::TextBottom => {
+                VAlign::Raise(sp.parent_raise - sp.parent.metrics().descent + i.below())
+            }
+            other => other,
+        })
+        .collect();
+
     let strut = style.metrics();
     let strut_above = strut.baseline_in(style.line_height);
     let strut_below = style.line_height - strut_above;
@@ -670,27 +713,50 @@ pub(crate) fn layout_lines(
         // highest top and the lowest bottom.
         let mut above = strut_above;
         let mut below = strut_below;
+        // Boxes of a `top` or `bottom` subtree are placed against the finished line;
+        // only the subtree's own extent (about its root's baseline) can make the
+        // line taller.
+        let mut tallest_aligned = Au(0);
+        let mut pins: Vec<(usize, Au, Au)> = Vec::new();
         for &i in &active {
             let Some(b) = boxes.get(i) else { continue };
             let a = b.text.metrics().baseline_in(b.text.line_height);
+            if let Some(id) = b.deco.pin.id() {
+                let (pa, pb) = (a + b.raise, b.text.line_height - a - b.raise);
+                match pins.iter_mut().find(|p| p.0 == id) {
+                    Some(p) => {
+                        p.1 = p.1.max(pa);
+                        p.2 = p.2.max(pb);
+                    }
+                    None => pins.push((id, pa, pb)),
+                }
+                continue;
+            }
             above = above.max(a + b.raise);
             below = below.max(b.text.line_height - a - b.raise);
         }
+        for p in &pins {
+            tallest_aligned = tallest_aligned.max(p.1 + p.2);
+        }
+        let extent_of = |pin: text::Pin| {
+            pin.id()
+                .and_then(|id| pins.iter().find(|p| p.0 == id))
+                .map_or((Au(0), Au(0)), |p| (p.1, p.2))
+        };
         // Atomic inlines that `vertical-align: top | bottom` take out of the
         // baseline alignment: they only make the line taller if they must.
-        let mut tallest_aligned = Au(0);
         for slot in content.slots.iter().filter(|s| s.atomic) {
-            if let Some(info) = specs
+            if let Some((info, align)) = specs
                 .binary_search_by_key(&slot.cluster, |s| s.offset)
                 .ok()
-                .and_then(|k| infos.get(k))
+                .and_then(|k| infos.get(k).zip(effective.get(k)))
             {
-                match info.align {
+                match *align {
                     VAlign::Raise(r) => {
                         above = above.max(info.above() + r);
                         below = below.max(info.below() - r);
                     }
-                    VAlign::Top | VAlign::Bottom => {
+                    _ => {
                         tallest_aligned = tallest_aligned.max(info.margin_box_block());
                     }
                 }
@@ -725,7 +791,13 @@ pub(crate) fn layout_lines(
                 r.rtl,
                 range.node,
                 r.inline_offset,
-                baseline - range.raise,
+                baseline
+                    - range.raise
+                    - range.deco.pin.raise(
+                        extent_of(range.deco.pin),
+                        baseline,
+                        line_height - baseline,
+                    ),
                 r.width,
             )
             .with_deco(run_deco(&range.style, range.deco));
@@ -773,6 +845,9 @@ pub(crate) fn layout_lines(
             let m = b.text.metrics();
             let top = baseline
                 - b.raise
+                - b.deco
+                    .pin
+                    .raise(extent_of(b.deco.pin), baseline, line_height - baseline)
                 - m.ascent
                 - b.edges.padding.block_start
                 - b.edges.border.block_start;
@@ -788,19 +863,17 @@ pub(crate) fn layout_lines(
             kids.push(tree.push(f));
         }
         for slot in content.slots.iter().filter(|s| s.atomic) {
-            if let Some(info) = specs
+            if let Some((info, align)) = specs
                 .binary_search_by_key(&slot.cluster, |s| s.offset)
                 .ok()
-                .and_then(|k| infos.get(k))
+                .and_then(|k| infos.get(k).zip(effective.get(k)))
                 && let Some(f) = tree.get_mut(info.fragment)
             {
                 f.inline_offset = shift + slot.x0 + info.margin.inline_start;
-                f.block_offset = match info.align {
+                f.block_offset = match *align {
                     VAlign::Raise(r) => baseline - info.above() - r + info.margin.block_start,
                     VAlign::Top => info.margin.block_start,
-                    VAlign::Bottom => {
-                        line_height - info.margin_box_block() + info.margin.block_start
-                    }
+                    _ => line_height - info.margin_box_block() + info.margin.block_start,
                 };
                 kids.push(info.fragment);
             }

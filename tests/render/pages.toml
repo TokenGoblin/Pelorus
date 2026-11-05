@@ -161,3 +161,7 @@ source = "tests/render/pages/inline-spacing-transform.html"
 [[page]]
 id = "inline-white-space-justify"
 source = "tests/render/pages/inline-white-space-justify.html"
+
+[[page]]
+id = "inline-vertical-align"
+source = "tests/render/pages/inline-vertical-align.html"

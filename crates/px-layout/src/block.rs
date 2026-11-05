@@ -2211,6 +2211,7 @@ fn propagated_decoration(
             under: found.under.or(outer.under),
             over: found.over.or(outer.over),
             through: found.through.or(outer.through),
+            pin: crate::text::Pin::None,
         };
         if is_absolutely_positioned(&style)
             || float_side(&style).is_some()
@@ -2283,12 +2284,33 @@ impl RunBuilder {
         // `top` and `bottom` align a whole subtree to the line box, which is not
         // done for text: those, and `middle`, are `baseline` here. The shifts
         // (`sub`, `super`, lengths) add up down the tree.
-        let own = match crate::inline::vertical_align_of(style, text) {
-            crate::inline::VAlign::Raise(r) => r,
-            crate::inline::VAlign::Top | crate::inline::VAlign::Bottom => Au(0),
+        let (parent_text, _, parent_raise, parent_deco) = self.current();
+        let above = text.metrics().baseline_in(text.line_height);
+        let below = text.line_height - above;
+        let parent = parent_text.metrics();
+        // `own` shifts this box's baseline against its parent's (CSS 2.1 10.8.1). The
+        // box is the inline box, `line-height` tall.
+        let mut deco = parent_deco.with(style, element);
+        let (own, base) = match crate::inline::vertical_align_of(style, text) {
+            crate::inline::VAlign::Raise(r) => (r, parent_raise),
+            crate::inline::VAlign::Middle => (
+                parent_text.x_height() / 2 - (above - below) / 2,
+                parent_raise,
+            ),
+            crate::inline::VAlign::TextTop => (parent.ascent - above, parent_raise),
+            crate::inline::VAlign::TextBottom => (below - parent.descent, parent_raise),
+            // The subtree is placed against the line box once its height is known:
+            // its raise is kept relative to this box's own baseline.
+            crate::inline::VAlign::Top => {
+                deco.pin = crate::text::Pin::Top(self.run.boxes.len());
+                (Au(0), Au(0))
+            }
+            crate::inline::VAlign::Bottom => {
+                deco.pin = crate::text::Pin::Bottom(self.run.boxes.len());
+                (Au(0), Au(0))
+            }
         };
-        let raise = self.current().2 + own;
-        let deco = self.current().3.with(style, element);
+        let raise = base + own;
         let index = self.run.open(crate::inline::InlineBox {
             node: element,
             text,
