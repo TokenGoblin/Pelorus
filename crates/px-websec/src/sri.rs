@@ -5,10 +5,13 @@
 //! digest function.
 //!
 //! # Deviations / decisions
-//! - An `integrity` value with no *recognised* hash (empty, or only unknown
-//!   algorithms such as `md5-...`) means "no integrity metadata" and the load
-//!   proceeds, exactly as the spec says. [`Metadata::is_enforced`] exposes the
-//!   difference so the caller can warn.
+//! - An empty `integrity` value is "no metadata" and the load proceeds. A
+//!   value with only unknown algorithms (`md5-...`) is an empty *set*: it
+//!   proceeds for an eligible response but is refused for an opaque one
+//!   (SRI orders the eligibility test first). A recognised algorithm with an
+//!   undecodable or wrong-length digest is kept and can never match, so the
+//!   load fails instead of silently skipping the check. Callers must consult
+//!   [`Metadata::needs_check`], not `is_enforced`.
 //! - Input is bounded ([`MAX_INTEGRITY_BYTES`], [`MAX_TOKENS`]); beyond that
 //!   parsing *fails* (the load is denied) rather than ignoring the excess,
 //!   because an attacker-padded value must not turn enforcement off.
@@ -295,10 +298,7 @@ mod tests {
 
     #[test]
     fn parse_accepts_and_ignores() {
-        let m = parse(&format!(
-            "sha256-{S256} sha384-{S384}?opt=1 md5-AAAA bogus"
-        ))
-        .unwrap();
+        let m = parse(&format!("sha256-{S256} sha384-{S384}?opt=1 md5-AAAA bogus")).unwrap();
         assert_eq!(m.hashes.len(), 2);
         assert_eq!(m.strongest(), Some(Algorithm::Sha384));
         assert!(parse("").unwrap().hashes.is_empty());

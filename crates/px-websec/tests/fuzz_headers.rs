@@ -26,15 +26,57 @@ impl Rng {
         x.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
     fn below(&mut self, n: usize) -> usize {
-        if n == 0 { 0 } else { (self.next() % n as u64) as usize }
+        if n == 0 {
+            0
+        } else {
+            (self.next() % n as u64) as usize
+        }
     }
 }
 
 const INTERESTING: &[&[u8]] = &[
-    b";", b",", b" ", b"\t", b"\r\n", b"\x0b", b"\x0c", b"\0", b"\xff", b"\xc3\xa9", b"'", b"\"",
-    b"*", b"*.", b":", b"://", b"/", b"\\", b"%2e", b"%", b"%zz", b"?", b"#", b"@", b"[", b"]",
-    b"=", b"==", b"-", b"_", b"'none'", b"'self'", b"'nonce-", b"'sha256-", b"https:", b"0",
-    b"99999", b"deny", b"same-origin", b"require-corp", b"bytes=0-", b"report-to=\"x\"",
+    b";",
+    b",",
+    b" ",
+    b"\t",
+    b"\r\n",
+    b"\x0b",
+    b"\x0c",
+    b"\0",
+    b"\xff",
+    b"\xc3\xa9",
+    b"'",
+    b"\"",
+    b"*",
+    b"*.",
+    b":",
+    b"://",
+    b"/",
+    b"\\",
+    b"%2e",
+    b"%",
+    b"%zz",
+    b"?",
+    b"#",
+    b"@",
+    b"[",
+    b"]",
+    b"=",
+    b"==",
+    b"-",
+    b"_",
+    b"'none'",
+    b"'self'",
+    b"'nonce-",
+    b"'sha256-",
+    b"https:",
+    b"0",
+    b"99999",
+    b"deny",
+    b"same-origin",
+    b"require-corp",
+    b"bytes=0-",
+    b"report-to=\"x\"",
 ];
 
 const SEEDS: &[&str] = &[
@@ -66,7 +108,10 @@ fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
                 v.insert(i, b);
             }
             2 => {
-                let tok = INTERESTING[rng.below(INTERESTING.len())];
+                let tok = INTERESTING
+                    .get(rng.below(INTERESTING.len()))
+                    .copied()
+                    .unwrap_or(b"");
                 let i = rng.below(v.len() + 1);
                 for (k, b) in tok.iter().enumerate() {
                     v.insert(i + k, *b);
@@ -74,7 +119,10 @@ fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
             }
             3 if !v.is_empty() => {
                 let i = rng.below(v.len());
-                v[i] ^= 1 << rng.below(8);
+                let bit = 1u8 << rng.below(8);
+                if let Some(b) = v.get_mut(i) {
+                    *b ^= bit;
+                }
             }
             4 if v.len() > 1 => {
                 let a = rng.below(v.len());
@@ -104,14 +152,14 @@ fn fuzz_csp(input: &[u8], urls: &[CspUrl]) {
         };
         // serialisation never panics; a re-parse of a serialised list is
         // stable (idempotent) when serialisation is possible.
-        if let Some(s) = serialize_policy_list(&list) {
-            if let Ok(again) = parse_policy_list(s.as_bytes(), disp) {
-                assert_eq!(
-                    serialize_policy_list(&again).as_deref(),
-                    Some(s.as_str()),
-                    "serialisation not a fixed point for {input:?}"
-                );
-            }
+        if let Some(s) = serialize_policy_list(&list)
+            && let Ok(again) = parse_policy_list(s.as_bytes(), disp)
+        {
+            assert_eq!(
+                serialize_policy_list(&again).as_deref(),
+                Some(s.as_str()),
+                "serialisation not a fixed point for {input:?}"
+            );
         }
     }
     let Ok(p) = Policy::parse(input, Disposition::Enforce, PolicySource::Header) else {
@@ -145,7 +193,10 @@ fn fuzz_csp(input: &[u8], urls: &[CspUrl]) {
     }
     let _ = check_eval(&p, EvalKind::Eval);
     let _ = check_eval(&p, EvalKind::Wasm);
-    let tokens: Vec<String> = lossy(input).split_ascii_whitespace().map(str::to_string).collect();
+    let tokens: Vec<String> = lossy(input)
+        .split_ascii_whitespace()
+        .map(str::to_string)
+        .collect();
     let _ = SourceList::parse(&tokens);
     let _ = SandboxFlags::from_tokens(&tokens);
     let _ = PolicySet::from_headers_fail_closed(&[input], &[input]);
@@ -182,16 +233,40 @@ fn fuzz_misc(input: &[u8], req: &CorsRequest) {
     let _ = cors::is_safelisted_request_header("accept", input);
     let _ = cors::is_forbidden_request_header("x-http-method-override", input);
     let hdrs = vec![
-        Header { name: "Access-Control-Allow-Origin".into(), value: input.to_vec() },
-        Header { name: "Access-Control-Allow-Credentials".into(), value: input.to_vec() },
-        Header { name: "Access-Control-Allow-Methods".into(), value: input.to_vec() },
-        Header { name: "Access-Control-Allow-Headers".into(), value: input.to_vec() },
-        Header { name: "Access-Control-Max-Age".into(), value: input.to_vec() },
-        Header { name: "Access-Control-Expose-Headers".into(), value: input.to_vec() },
+        Header {
+            name: "Access-Control-Allow-Origin".into(),
+            value: input.to_vec(),
+        },
+        Header {
+            name: "Access-Control-Allow-Credentials".into(),
+            value: input.to_vec(),
+        },
+        Header {
+            name: "Access-Control-Allow-Methods".into(),
+            value: input.to_vec(),
+        },
+        Header {
+            name: "Access-Control-Allow-Headers".into(),
+            value: input.to_vec(),
+        },
+        Header {
+            name: "Access-Control-Max-Age".into(),
+            value: input.to_vec(),
+        },
+        Header {
+            name: "Access-Control-Expose-Headers".into(),
+            value: input.to_vec(),
+        },
     ];
-    let resp = CorsResponse { status: 204, headers: hdrs };
+    let resp = CorsResponse {
+        status: 204,
+        headers: hdrs,
+    };
     let mut r = req.clone();
-    r.headers = vec![Header { name: lossy(input), value: input.to_vec() }];
+    r.headers = vec![Header {
+        name: lossy(input),
+        value: input.to_vec(),
+    }];
     for c in [CredentialsMode::Omit, CredentialsMode::Include] {
         r.credentials = c;
         let _ = cors::cors_check(&r, &resp.headers);
@@ -274,7 +349,11 @@ fn pure_noise_and_extremes_never_panic() {
         fuzz_misc(&extreme, &req);
     }
     // referrer policy values round-trip regardless of case
-    for p in ["NO-REFERRER", "Strict-Origin-When-Cross-Origin", "unsafe-URL"] {
+    for p in [
+        "NO-REFERRER",
+        "Strict-Origin-When-Cross-Origin",
+        "unsafe-URL",
+    ] {
         assert!(ReferrerPolicy::from_token(p).is_some());
     }
 }

@@ -481,9 +481,7 @@ pub fn origin_header_value(
             P::NoReferrerWhenDowngrade | P::StrictOrigin | P::StrictOriginWhenCrossOrigin => {
                 request.origin.scheme() == Some("https") && request.url.scheme() != "https"
             }
-            P::SameOrigin => !request
-                .origin
-                .same_origin(&Origin::from_url(&request.url)),
+            P::SameOrigin => !request.origin.same_origin(&Origin::from_url(&request.url)),
             P::Origin | P::OriginWhenCrossOrigin | P::UnsafeUrl => false,
         };
         if hide {

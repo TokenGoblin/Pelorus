@@ -29,10 +29,26 @@ fn blocked(policy: &str, kind: RequestKind, url: &str) -> bool {
 
 #[test]
 fn directive_names_and_keywords_case_insensitive() {
-    assert!(blocked("IMG-SRC 'NONE'", RequestKind::Image, "https://a.test/x.png"));
-    assert!(!blocked("img-src HTTPS://A.TEST", RequestKind::Image, "https://a.test/x.png"));
-    assert!(!blocked("img-src 'SELF'", RequestKind::Image, "https://page.test/x.png"));
-    assert!(!blocked("img-src HTTPS:", RequestKind::Image, "https://a.test/x.png"));
+    assert!(blocked(
+        "IMG-SRC 'NONE'",
+        RequestKind::Image,
+        "https://a.test/x.png"
+    ));
+    assert!(!blocked(
+        "img-src HTTPS://A.TEST",
+        RequestKind::Image,
+        "https://a.test/x.png"
+    ));
+    assert!(!blocked(
+        "img-src 'SELF'",
+        RequestKind::Image,
+        "https://page.test/x.png"
+    ));
+    assert!(!blocked(
+        "img-src HTTPS:",
+        RequestKind::Image,
+        "https://a.test/x.png"
+    ));
 }
 
 #[test]
@@ -59,13 +75,29 @@ fn control_characters_are_not_separators() {
     // VT, NUL, DEL, NBSP inside a token do not split it.
     let p = pol!("img-src a.test\x0bb.test");
     assert_eq!(p.directive("img-src").unwrap().values, ["a.test\x0bb.test"]);
-    assert!(blocked("img-src a.test\x0bb.test", RequestKind::Image, "https://a.test/"));
-    assert!(blocked("img-src 'none'\0 *", RequestKind::Image, "https://x.test/") == false);
+    assert!(blocked(
+        "img-src a.test\x0bb.test",
+        RequestKind::Image,
+        "https://a.test/"
+    ));
+    assert!(!blocked(
+        "img-src 'none'\0 *",
+        RequestKind::Image,
+        "https://x.test/"
+    ));
     // a NUL in the *name* makes it an unknown (skipped) directive, so the
     // real one after it still works.
-    assert!(blocked("img\0-src *; img-src 'none'", RequestKind::Image, "https://x.test/"));
+    assert!(blocked(
+        "img\0-src *; img-src 'none'",
+        RequestKind::Image,
+        "https://x.test/"
+    ));
     // CR/LF/TAB/FF are whitespace.
-    assert!(blocked("img-src\r\n\t\x0c'none'", RequestKind::Image, "https://x.test/"));
+    assert!(blocked(
+        "img-src\r\n\t\x0c'none'",
+        RequestKind::Image,
+        "https://x.test/"
+    ));
 }
 
 #[test]
@@ -77,36 +109,132 @@ fn comma_in_header_splits_policies_each_enforced() {
 #[test]
 fn wildcard_port_scheme_rules() {
     // bare * does not match data:/blob:/javascript:
-    assert!(blocked("img-src *", RequestKind::Image, "data:image/png;base64,AA"));
-    assert!(blocked("img-src *", RequestKind::Image, "blob:https://page.test/u"));
-    assert!(!blocked("img-src *", RequestKind::Image, "https://x.test:8443/a"));
+    assert!(blocked(
+        "img-src *",
+        RequestKind::Image,
+        "data:image/png;base64,AA"
+    ));
+    assert!(blocked(
+        "img-src *",
+        RequestKind::Image,
+        "blob:https://page.test/u"
+    ));
+    assert!(!blocked(
+        "img-src *",
+        RequestKind::Image,
+        "https://x.test:8443/a"
+    ));
     // *.example.com excludes the apex and IP literals, and requires a dot
-    assert!(blocked("img-src *.example.com", RequestKind::Image, "https://example.com/"));
-    assert!(blocked("img-src *.example.com", RequestKind::Image, "https://evilexample.com/"));
-    assert!(blocked("img-src *.example.com", RequestKind::Image, "https://example.com.evil.test/"));
-    assert!(!blocked("img-src *.example.com", RequestKind::Image, "https://a.b.example.com/"));
+    assert!(blocked(
+        "img-src *.example.com",
+        RequestKind::Image,
+        "https://example.com/"
+    ));
+    assert!(blocked(
+        "img-src *.example.com",
+        RequestKind::Image,
+        "https://evilexample.com/"
+    ));
+    assert!(blocked(
+        "img-src *.example.com",
+        RequestKind::Image,
+        "https://example.com.evil.test/"
+    ));
+    assert!(!blocked(
+        "img-src *.example.com",
+        RequestKind::Image,
+        "https://a.b.example.com/"
+    ));
     // port rules
-    assert!(blocked("img-src example.com", RequestKind::Image, "https://example.com:8443/"));
-    assert!(!blocked("img-src example.com:*", RequestKind::Image, "https://example.com:8443/"));
-    assert!(!blocked("img-src example.com:8443", RequestKind::Image, "https://example.com:8443/"));
-    assert!(blocked("img-src example.com:8443", RequestKind::Image, "https://example.com/"));
-    assert!(!blocked("img-src example.com:443", RequestKind::Image, "https://example.com/"));
+    assert!(blocked(
+        "img-src example.com",
+        RequestKind::Image,
+        "https://example.com:8443/"
+    ));
+    assert!(!blocked(
+        "img-src example.com:*",
+        RequestKind::Image,
+        "https://example.com:8443/"
+    ));
+    assert!(!blocked(
+        "img-src example.com:8443",
+        RequestKind::Image,
+        "https://example.com:8443/"
+    ));
+    assert!(blocked(
+        "img-src example.com:8443",
+        RequestKind::Image,
+        "https://example.com/"
+    ));
+    assert!(!blocked(
+        "img-src example.com:443",
+        RequestKind::Image,
+        "https://example.com/"
+    ));
     // scheme-less host from an https page does not match http
-    assert!(blocked("img-src example.com", RequestKind::Image, "http://example.com/"));
+    assert!(blocked(
+        "img-src example.com",
+        RequestKind::Image,
+        "http://example.com/"
+    ));
     // http: source upgrades to https, https: source does not match http
-    assert!(!blocked("img-src http://example.com", RequestKind::Image, "https://example.com/"));
-    assert!(blocked("img-src https://example.com", RequestKind::Image, "http://example.com/"));
-    assert!(blocked("img-src https:", RequestKind::Image, "http://example.com/"));
+    assert!(!blocked(
+        "img-src http://example.com",
+        RequestKind::Image,
+        "https://example.com/"
+    ));
+    assert!(blocked(
+        "img-src https://example.com",
+        RequestKind::Image,
+        "http://example.com/"
+    ));
+    assert!(blocked(
+        "img-src https:",
+        RequestKind::Image,
+        "http://example.com/"
+    ));
     // path-part: exact vs prefix, case-sensitive, percent-decoded
-    assert!(!blocked("img-src example.com/a/", RequestKind::Image, "https://example.com/a/b"));
-    assert!(blocked("img-src example.com/a/", RequestKind::Image, "https://example.com/A/b"));
-    assert!(blocked("img-src example.com/a", RequestKind::Image, "https://example.com/a/b"));
-    assert!(blocked("img-src example.com/a/", RequestKind::Image, "https://example.com/a/../b"));
-    assert!(!blocked("img-src example.com/a%2Fb", RequestKind::Image, "https://example.com/a%2fb"));
-    assert!(blocked("img-src example.com/a/b", RequestKind::Image, "https://example.com/a%2fb"));
+    assert!(!blocked(
+        "img-src example.com/a/",
+        RequestKind::Image,
+        "https://example.com/a/b"
+    ));
+    assert!(blocked(
+        "img-src example.com/a/",
+        RequestKind::Image,
+        "https://example.com/A/b"
+    ));
+    assert!(blocked(
+        "img-src example.com/a",
+        RequestKind::Image,
+        "https://example.com/a/b"
+    ));
+    assert!(blocked(
+        "img-src example.com/a/",
+        RequestKind::Image,
+        "https://example.com/a/../b"
+    ));
+    assert!(!blocked(
+        "img-src example.com/a%2Fb",
+        RequestKind::Image,
+        "https://example.com/a%2fb"
+    ));
+    assert!(blocked(
+        "img-src example.com/a/b",
+        RequestKind::Image,
+        "https://example.com/a%2fb"
+    ));
     // userinfo / backslash tricks in the URL do not change the host
-    assert!(blocked("img-src good.test", RequestKind::Image, "https://good.test@evil.test/"));
-    assert!(blocked("img-src good.test", RequestKind::Image, "https://evil.test\\@good.test/"));
+    assert!(blocked(
+        "img-src good.test",
+        RequestKind::Image,
+        "https://good.test@evil.test/"
+    ));
+    assert!(blocked(
+        "img-src good.test",
+        RequestKind::Image,
+        "https://evil.test\\@good.test/"
+    ));
 }
 
 #[test]
@@ -114,8 +242,14 @@ fn self_semantics() {
     let o = Origin::from_url_str("http://page.test/");
     let p = pol!("img-src 'self'");
     let chk = |u: &str| {
-        check_request(&p, RequestKind::Image, &cu!(u), &o, &RequestOptions::default())
-            .is_blocked()
+        check_request(
+            &p,
+            RequestKind::Image,
+            &cu!(u),
+            &o,
+            &RequestOptions::default(),
+        )
+        .is_blocked()
     };
     assert!(!chk("http://page.test/x"));
     assert!(!chk("https://page.test/x"));
@@ -154,7 +288,7 @@ fn self_semantics() {
 #[test]
 fn nonce_hash_rules() {
     let p = pol!("script-src 'nonce-AbC' 'unsafe-inline'");
-    assert!(check_inline(&p, InlineType::Script, Some("AbC"), "x").is_blocked() == false);
+    assert!(!check_inline(&p, InlineType::Script, Some("AbC"), "x").is_blocked());
     assert!(check_inline(&p, InlineType::Script, Some("abc"), "x").is_blocked());
     assert!(check_inline(&p, InlineType::Script, Some(""), "x").is_blocked());
     // nonce does not apply to attributes
@@ -173,7 +307,11 @@ fn nonce_hash_rules() {
 
 #[test]
 fn default_src_fallback_and_missing_directives() {
-    assert!(blocked("default-src 'none'", RequestKind::Worker, "https://page.test/w.js"));
+    assert!(blocked(
+        "default-src 'none'",
+        RequestKind::Worker,
+        "https://page.test/w.js"
+    ));
     assert!(!blocked(
         "default-src 'none'; worker-src 'self'",
         RequestKind::Worker,
@@ -197,23 +335,33 @@ fn default_src_fallback_and_missing_directives() {
         "https://page.test/w.js"
     ));
     // empty directive value == 'none'
-    assert!(blocked("img-src", RequestKind::Image, "https://page.test/a"));
+    assert!(blocked(
+        "img-src",
+        RequestKind::Image,
+        "https://page.test/a"
+    ));
     // frame-src does not fall back to script-src
-    assert!(!blocked("script-src 'none'", RequestKind::Iframe, "https://a.test/"));
+    assert!(!blocked(
+        "script-src 'none'",
+        RequestKind::Iframe,
+        "https://a.test/"
+    ));
 }
 
-fn node(s: &str) -> ContextNode {
-    let url = WUrl::parse(s).unwrap();
-    ContextNode {
-        origin: WOrigin::from_url(&url),
-        url,
-    }
+macro_rules! node {
+    ($s:expr) => {{
+        let url = WUrl::parse($s).unwrap();
+        ContextNode {
+            origin: WOrigin::from_url(&url),
+            url,
+        }
+    }};
 }
 
 #[test]
 fn mixed_content_edge_urls() {
     let ctx = Context {
-        document: node("https://a.test/"),
+        document: node!("https://a.test/"),
         ancestors: vec![],
     };
     let chk = |k, u: &str| mixed::check_request(&ctx, k, &WUrl::parse(u).unwrap());
@@ -221,28 +369,41 @@ fn mixed_content_edge_urls() {
     assert_eq!(chk(K::Script, "http://b.test/x.js"), Verdict::Block);
     assert_eq!(chk(K::Script, "https://b.test/x.js"), Verdict::Allow);
     assert_eq!(chk(K::Script, "http://localhost/x.js"), Verdict::Allow);
-    assert_eq!(chk(K::Script, "http://localhost.evil.test/x.js"), Verdict::Block);
+    assert_eq!(
+        chk(K::Script, "http://localhost.evil.test/x.js"),
+        Verdict::Block
+    );
     assert_eq!(chk(K::WebSocket, "ws://b.test/"), Verdict::Block);
     assert_eq!(chk(K::Fetch, "http://127.0.0.1.evil.test/"), Verdict::Block);
     // blob: of an insecure origin must not be trusted
     assert_eq!(chk(K::Script, "blob:http://evil.test/uuid"), Verdict::Block);
     assert_eq!(chk(K::Script, "blob:https://b.test/uuid"), Verdict::Allow);
-    assert_eq!(chk(K::Script, "filesystem:http://evil.test/temporary/x"), Verdict::Block);
-    assert!(matches!(chk(K::Image, "http://b.test/i.png"), Verdict::Upgrade(_)));
+    assert_eq!(
+        chk(K::Script, "filesystem:http://evil.test/temporary/x"),
+        Verdict::Block
+    );
+    assert!(matches!(
+        chk(K::Image, "http://b.test/i.png"),
+        Verdict::Upgrade(_)
+    ));
     assert_eq!(chk(K::ImageSet, "http://b.test/i.png"), Verdict::Block);
     // http document, no ancestors secure: nothing to prohibit
     let insecure = Context {
-        document: node("http://a.test/"),
+        document: node!("http://a.test/"),
         ancestors: vec![],
     };
     assert_eq!(
-        mixed::check_request(&insecure, K::Script, &WUrl::parse("http://b.test/").unwrap()),
+        mixed::check_request(
+            &insecure,
+            K::Script,
+            &WUrl::parse("http://b.test/").unwrap()
+        ),
         Verdict::Allow
     );
     // insecure frame under a secure parent is still prohibited
     let nested = Context {
-        document: node("http://a.test/"),
-        ancestors: vec![node("https://top.test/")],
+        document: node!("http://a.test/"),
+        ancestors: vec![node!("https://top.test/")],
     };
     assert_eq!(
         mixed::check_request(&nested, K::Script, &WUrl::parse("http://b.test/").unwrap()),
@@ -259,7 +420,10 @@ fn xfo_edge_cases() {
     assert_eq!(x(&["DENY"]), XfoVerdict::Blocked);
     assert_eq!(x(&["deny, deny"]), XfoVerdict::Blocked);
     assert_eq!(x(&["sameorigin", "deny"]), XfoVerdict::Blocked);
-    assert_eq!(x(&["deny", "allow-from https://evil.test"]), XfoVerdict::Blocked);
+    assert_eq!(
+        x(&["deny", "allow-from https://evil.test"]),
+        XfoVerdict::Blocked
+    );
     assert_eq!(x(&["DENY,"]), XfoVerdict::Blocked);
     assert_eq!(x(&["\tDENY \r\n"]), XfoVerdict::Blocked);
     assert_eq!(x(&["allow-from https://evil.test"]), XfoVerdict::Allowed);
@@ -296,8 +460,14 @@ fn sandbox_attribute_edge_cases() {
 #[test]
 fn referrer_header_edge_cases() {
     use ReferrerPolicy as P;
-    assert_eq!(referrer::parse_header("no-referrer,unsafe-url"), Some(P::UnsafeUrl));
-    assert_eq!(referrer::parse_header("unsafe-url,bogus"), Some(P::UnsafeUrl));
+    assert_eq!(
+        referrer::parse_header("no-referrer,unsafe-url"),
+        Some(P::UnsafeUrl)
+    );
+    assert_eq!(
+        referrer::parse_header("unsafe-url,bogus"),
+        Some(P::UnsafeUrl)
+    );
     assert_eq!(referrer::parse_header("unsafe-url\x0b"), None);
     assert_eq!(referrer::parse_header("no-referrer\0"), None);
     let u = |s: &str| WUrl::parse(s).unwrap();
@@ -313,11 +483,20 @@ fn referrer_header_edge_cases() {
     );
     // downgrade
     assert_eq!(
-        referrer::compute(Some(&u("https://a.test/p")), P::StrictOriginWhenCrossOrigin, &u("http://b.test/")),
+        referrer::compute(
+            Some(&u("https://a.test/p")),
+            P::StrictOriginWhenCrossOrigin,
+            &u("http://b.test/")
+        ),
         None
     );
     assert_eq!(
-        referrer::compute(Some(&u("https://a.test/p")), P::NoReferrerWhenDowngrade, &u("http://localhost/")).as_deref(),
+        referrer::compute(
+            Some(&u("https://a.test/p")),
+            P::NoReferrerWhenDowngrade,
+            &u("http://localhost/")
+        )
+        .as_deref(),
         Some("https://a.test/p")
     );
     // oversize falls back to origin
@@ -328,7 +507,11 @@ fn referrer_header_edge_cases() {
     );
     // data:/about: sources never leak
     assert_eq!(
-        referrer::compute(Some(&u("data:text/html,x")), P::UnsafeUrl, &u("https://b.test/")),
+        referrer::compute(
+            Some(&u("data:text/html,x")),
+            P::UnsafeUrl,
+            &u("https://b.test/")
+        ),
         None
     );
 }

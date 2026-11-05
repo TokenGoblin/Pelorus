@@ -133,7 +133,12 @@ fn range_safelist_is_strict() {
 #[test]
 fn origin_header_value_follows_referrer_policy() {
     use ReferrerPolicy as P;
-    let r = creq!("POST", "https://a.test/", "http://b.test/", RequestMode::NoCors);
+    let r = creq!(
+        "POST",
+        "https://a.test/",
+        "http://b.test/",
+        RequestMode::NoCors
+    );
     let v = |p| cors::origin_header_value(&r, Tainting::Opaque, p);
     assert_eq!(v(P::NoReferrer).as_deref(), Some("null"));
     assert_eq!(v(P::StrictOrigin).as_deref(), Some("null"));
@@ -143,16 +148,34 @@ fn origin_header_value_follows_referrer_policy() {
     assert_eq!(v(P::UnsafeUrl).as_deref(), Some("https://a.test"));
     assert_eq!(v(P::Origin).as_deref(), Some("https://a.test"));
     // CORS-mode requests always carry the real origin.
-    let c = creq!("POST", "https://a.test/", "http://b.test/", RequestMode::Cors);
+    let c = creq!(
+        "POST",
+        "https://a.test/",
+        "http://b.test/",
+        RequestMode::Cors
+    );
     assert_eq!(
         cors::origin_header_value(&c, Tainting::Cors, P::NoReferrer).as_deref(),
         Some("https://a.test")
     );
     // GET same-origin: no header.
-    let g = creq!("GET", "https://a.test/", "https://a.test/x", RequestMode::Cors);
-    assert_eq!(cors::origin_header_value(&g, Tainting::Basic, P::UnsafeUrl), None);
+    let g = creq!(
+        "GET",
+        "https://a.test/",
+        "https://a.test/x",
+        RequestMode::Cors
+    );
+    assert_eq!(
+        cors::origin_header_value(&g, Tainting::Basic, P::UnsafeUrl),
+        None
+    );
     // https -> https same-site no-cors POST under strict-origin keeps origin.
-    let s = creq!("POST", "https://a.test/", "https://b.test/", RequestMode::NoCors);
+    let s = creq!(
+        "POST",
+        "https://a.test/",
+        "https://b.test/",
+        RequestMode::NoCors
+    );
     assert_eq!(
         cors::origin_header_value(&s, Tainting::Opaque, P::StrictOrigin).as_deref(),
         Some("https://a.test")
@@ -168,7 +191,11 @@ fn meta_referrer_legacy_keywords() {
     assert_eq!(m("NEVER"), Some(P::NoReferrer));
     assert_eq!(m("always"), Some(P::UnsafeUrl));
     assert_eq!(m("origin-when-crossorigin"), Some(P::OriginWhenCrossOrigin));
-    assert_eq!(m("default"), None, "mapping of legacy `default` not guessed");
+    assert_eq!(
+        m("default"),
+        None,
+        "mapping of legacy `default` not guessed"
+    );
     assert_eq!(m("no-referrer"), Some(P::NoReferrer));
     assert_eq!(m("bogus"), None);
     // The attribute form does not accept legacy keywords.

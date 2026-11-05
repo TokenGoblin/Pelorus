@@ -267,12 +267,10 @@ pub fn parse_source(token: &str) -> SourceExpr {
         let (Some(alg), true) = (HashAlg::parse(alg), is_base64_value(value)) else {
             return SourceExpr::Unrecognized;
         };
-        return SourceExpr::Hash(
-            HashValue::parse(inner).unwrap_or(HashValue {
-                alg,
-                digest: Vec::new(),
-            }),
-        );
+        return SourceExpr::Hash(HashValue::parse(inner).unwrap_or(HashValue {
+            alg,
+            digest: Vec::new(),
+        }));
     }
     if let Some(s) = token.strip_suffix(':') {
         return if is_scheme(s) {
