@@ -9,6 +9,7 @@
 
 pub mod decode;
 pub mod fonts;
+pub mod images;
 pub mod nav;
 pub mod page;
 pub mod shell;

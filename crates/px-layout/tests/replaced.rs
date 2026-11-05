@@ -79,7 +79,11 @@ impl Laid {
             .in_layout_order()
             .into_iter()
             .map(|(_, i)| i)
-            .filter(|i| self.tree.get(*i).is_some_and(|f| f.kind == FragmentKind::Line))
+            .filter(|i| {
+                self.tree
+                    .get(*i)
+                    .is_some_and(|f| f.kind == FragmentKind::Line)
+            })
             .collect()
     }
 }

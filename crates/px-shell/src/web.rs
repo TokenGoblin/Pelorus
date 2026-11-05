@@ -4,8 +4,9 @@
 //! navigation and then for each stylesheet the page links, and every one of
 //! those requests passes the checks wired into `px-net`'s secure fetch
 //! (partitioned state, HSTS, CSP, mixed content, CORS, referrer policy,
-//! redirect rules). What the engine cannot use yet (scripts, images, fonts,
-//! frames, forms) is never requested and never run. A failure of any kind
+//! redirect rules). Pictures are fetched too (see [`crate::images`]). What the
+//! engine cannot use yet (scripts, fonts, frames, forms) is never requested and
+//! never run. A failure of any kind
 //! becomes the built-in error page, in calm words.
 //!
 //! This runs on the UI thread and blocks while it waits; the content/network
@@ -16,8 +17,9 @@ use std::collections::{HashMap, HashSet};
 use px_net::browse::{LoadError, WebSession};
 
 use crate::decode::decode_html;
+use crate::images;
 use crate::nav::Loaded;
-use crate::page::{Resources, subresource_plan};
+use crate::page::{Resources, image_plan, subresource_plan};
 
 /// The most stylesheets fetched for one page.
 const MAX_SHEETS: usize = 12;
@@ -26,6 +28,11 @@ const MAX_SHEETS: usize = 12;
 #[derive(Default)]
 pub struct Net {
     session: Option<Result<WebSession, ()>>,
+    /// Test-only: send every connection to this address (a local server) while
+    /// the URLs keep their site names. Behind the `testing` feature, which no
+    /// shipping build enables.
+    #[cfg(feature = "testing")]
+    pub connect_to: Option<std::net::SocketAddr>,
 }
 
 fn failed(url: &str, reason: &str) -> Loaded {
@@ -53,6 +60,10 @@ impl Net {
             return failed(url, &LoadError::Setup.reason());
         };
         let mut loader = session.loader();
+        #[cfg(feature = "testing")]
+        if let Some(addr) = self.connect_to {
+            loader.connect_to(addr);
+        }
         let doc = match loader.navigate(url) {
             Ok(d) => d,
             Err(e) => return failed(url, &e.reason()),
@@ -95,6 +106,7 @@ impl Net {
             fetched: HashMap::new(),
             blocked_inline: HashSet::new(),
             file: None,
+            images: HashMap::new(),
         };
         for text in styles {
             if !loader.allows_inline_style(&text) {
@@ -117,6 +129,24 @@ impl Net {
                 if !css.trim_start().starts_with('<') {
                     res.fetched.insert(abs, css);
                 }
+            }
+        }
+        // Pictures: each is a `Destination::Image` fetch through the same secure
+        // path as the stylesheets (CSP `img-src`, mixed content, referrer
+        // policy). One that is refused, fails, is not a decodable picture or
+        // would push the page past its decoded-bytes budget is skipped, and
+        // layout shows the `alt` text.
+        let mut total = 0usize;
+        for key in image_plan(&source, &res) {
+            let Ok(fetched) = loader.image(&key) else {
+                continue;
+            };
+            if let Some(img) = images::decode(&fetched.body) {
+                total += img.rgba.len();
+                if total > images::MAX_TOTAL_BYTES {
+                    break;
+                }
+                res.images.insert(key, img);
             }
         }
         Loaded {

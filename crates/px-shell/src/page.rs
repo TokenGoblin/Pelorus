@@ -6,11 +6,11 @@
 //! scheme, host or `..` is skipped); a web page's stylesheets were fetched by
 //! [`crate::web`] through `px-net` beforehand and arrive in [`Resources`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use px_layout::block::layout_document;
 use px_layout::geom::{Au, px};
 use px_paint::raster::Canvas;
 use px_paint::{DisplayList, Item};
@@ -37,7 +37,7 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      pre { margin: 1em 0; white-space: pre } \
      dl { margin: 1em 0 } dd { margin-left: 40px } \
      a { color: #0b57d0 } \
-     head, style, script, noscript, template, title, meta, link { display: none }";
+     head, style, script, noscript, template, title, meta, link, source, track { display: none }";
 
 /// A clickable region of the document, in CSS pixels from its top-left.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,6 +95,82 @@ pub struct Resources {
     pub base: Option<String>,
     pub fetched: HashMap<String, String>,
     pub blocked_inline: HashSet<String>,
+    /// Decoded pictures by key (see [`Resources::key`]): what the image loader
+    /// fetched and `px-image` decoded. A picture that failed is simply absent.
+    pub images: HashMap<String, Arc<px_paint::ImageData>>,
+}
+
+/// Percent-decode `s` (bytes that are not valid UTF-8 after decoding make it
+/// `None`).
+fn percent_decode(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b.get(i) == Some(&b'%')
+            && let Some(h) = s.get(i + 1..i + 3)
+            && let Ok(v) = u8::from_str_radix(h, 16)
+        {
+            out.push(v);
+            i += 3;
+        } else {
+            out.push(*b.get(i)?);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+impl Resources {
+    /// The key a reference to an image goes by: the absolute URL (fragment
+    /// dropped) for a web page; for a local page the path of a file at or below
+    /// the page's directory, as a string. `None` for anything else: a local page
+    /// cannot reach the web, a web page cannot reach `file:`, `data:` and the
+    /// like are not fetched, and `..` does not leave the directory.
+    #[must_use]
+    pub fn key(&self, raw: &str) -> Option<String> {
+        if let Some(base) = &self.base {
+            let abs = px_net::browse::resolve(base, raw)?;
+            return Some(abs.split('#').next().unwrap_or("").to_string());
+        }
+        let page = self.file.as_deref()?;
+        let dir = std::path::absolute(page).ok()?.parent()?.to_path_buf();
+        let raw = raw.trim();
+        let path = if let Some(rest) = raw.strip_prefix("file://") {
+            PathBuf::from(percent_decode(rest.split(['#', '?']).next()?)?)
+        } else {
+            let r = raw.split(['#', '?']).next()?;
+            if r.is_empty() || r.contains(':') || r.starts_with('/') || r.contains("..") {
+                return None;
+            }
+            dir.join(percent_decode(r)?)
+        };
+        let abs = std::path::absolute(&path).ok()?;
+        if abs
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+            || !abs.starts_with(&dir)
+        {
+            return None;
+        }
+        Some(abs.to_string_lossy().into_owned())
+    }
+
+    /// The URL relative references in an inline `<style>` resolve against: the
+    /// document's URL on the web, `file://` + the page's path for a local page.
+    fn sheet_base(&self, _own: Option<&str>) -> String {
+        if let Some(b) = &self.base {
+            return b.clone();
+        }
+        match self
+            .file
+            .as_deref()
+            .and_then(|p| std::path::absolute(p).ok())
+        {
+            Some(p) => format!("file://{}", p.display()),
+            None => "about:page".to_string(),
+        }
+    }
 }
 
 /// A `<link rel=stylesheet>` the engine should apply: not `alternate`, not
@@ -136,7 +212,7 @@ pub fn subresource_plan(source: &str) -> (Vec<String>, Vec<String>) {
     (links, styles)
 }
 
-fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<String> {
+fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for id in arena.descendants(arena.document()) {
         let Some(node) = arena.get(id) else { continue };
@@ -147,7 +223,7 @@ fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<String> {
             "style" => {
                 let text = px_layout::inline::collect_text(arena, id);
                 if !res.blocked_inline.contains(&text) {
-                    out.push(text);
+                    out.push((text, res.sheet_base(None)));
                 }
             }
             "link" => {
@@ -155,12 +231,19 @@ fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<String> {
                     continue;
                 };
                 let css = if let Some(base) = &res.base {
-                    px_net::browse::resolve(base, href).and_then(|u| res.fetched.get(&u).cloned())
+                    px_net::browse::resolve(base, href)
+                        .and_then(|u| res.fetched.get(&u).cloned().map(|c| (c, u)))
                 } else {
                     res.file
                         .as_deref()
                         .and_then(|p| resolve_css(p, href))
-                        .and_then(|p| std::fs::read_to_string(p).ok())
+                        .and_then(|p| {
+                            let base = std::path::absolute(&p).map_or_else(
+                                |_| res.sheet_base(None),
+                                |a| format!("file://{}", a.display()),
+                            );
+                            std::fs::read_to_string(&p).ok().map(|c| (c, base))
+                        })
                 };
                 out.extend(css);
             }
@@ -226,14 +309,21 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
     let arena = dom.arena;
     let mut engine = px_css::engine::StyleEngine::new(width as f32, height as f32, quirks);
     engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
-    for css in stylesheets(page, &arena) {
-        engine.add_author_stylesheet(&css, "about:page");
+    for (css, base) in stylesheets(page, &arena) {
+        engine.add_author_stylesheet(&css, &base);
     }
     let style_root = engine.style_root_for(&arena);
     engine
         .resolve(&arena, &style_root)
         .ok_or("style resolve failed")?;
-    let tree = layout_document(&arena, &style_root, px(width as i32)).ok_or("layout failed")?;
+    let (images, sizes) = image_tables(&arena, &style_root, page, width);
+    let tree = px_layout::replaced::layout_document_with_images(
+        &arena,
+        &style_root,
+        px(width as i32),
+        &sizes,
+    )
+    .ok_or("layout failed")?;
 
     let mut bottom: i64 = 0;
     let mut links = Vec::new();
@@ -272,12 +362,13 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
     }
     let doc_px = ((bottom + AU_PER_PX - 1) / AU_PER_PX).clamp(0, i64::from(i32::MAX)) as i32;
 
-    let list = px_paint::build_with_viewport(
+    let list = px_paint::build_with_images(
         &arena,
         &style_root,
         &tree,
         px(width as i32),
         px(doc_px.max(height as i32)),
+        &images,
     );
     Ok(Laid {
         width,
@@ -286,6 +377,106 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
         links,
         list,
     })
+}
+
+/// The distinct `background-image` URLs the styled document uses, in document
+/// order, as the style engine resolved them.
+fn background_urls(arena: &px_dom::Arena, root: &px_css::view::StyleRoot) -> Vec<String> {
+    px_css::view::with_dom(arena, root, |dom| {
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for id in arena.descendants(arena.document()) {
+            for layer in px_css::image_style::background_layers(dom, id) {
+                if seen.insert(layer.url.clone()) {
+                    out.push(layer.url);
+                }
+            }
+        }
+        out
+    })
+    .unwrap_or_default()
+}
+
+/// What paint and layout get to know about the page's pictures: each `<img>`
+/// that has one (the first of its candidates, in preference order, that was
+/// fetched and decoded) and each background URL that has one.
+fn image_tables(
+    arena: &px_dom::Arena,
+    root: &px_css::view::StyleRoot,
+    res: &Resources,
+    width: u32,
+) -> (px_paint::ImageSet, BTreeMap<px_dom::NodeId, (u32, u32)>) {
+    let mut set = px_paint::ImageSet::default();
+    let mut sizes = BTreeMap::new();
+    if res.images.is_empty() {
+        return (set, sizes);
+    }
+    for id in arena.descendants(arena.document()) {
+        if arena
+            .get(id)
+            .and_then(|n| n.element_name())
+            .is_none_or(|q| &*q.local != "img")
+        {
+            continue;
+        }
+        let found = crate::images::candidates(arena, id, width)
+            .into_iter()
+            .find_map(|raw| res.key(&raw).and_then(|k| res.images.get(&k)));
+        if let Some(img) = found {
+            sizes.insert(id, (img.width, img.height));
+            set.elements.insert(id, img.clone());
+        }
+    }
+    for url in background_urls(arena, root) {
+        if let Some(img) = res.key(&url).and_then(|k| res.images.get(&k)) {
+            set.urls.insert(url, img.clone());
+        }
+    }
+    (set, sizes)
+}
+
+/// The images a page asks for, as keys (see [`Resources::key`]) in request
+/// order: each `<img>`'s preferred candidate, then each `background-image`
+/// URL, de-duplicated and capped at [`crate::images::MAX_IMAGES`]. Needs the
+/// stylesheets in `res` already, because backgrounds come from computed style.
+#[must_use]
+pub fn image_plan(source: &str, res: &Resources) -> Vec<String> {
+    let dom = px_dom::parse(source);
+    if dom.abandoned {
+        return Vec::new();
+    }
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let arena = dom.arena;
+    let mut engine =
+        px_css::engine::StyleEngine::new(crate::images::PLAN_WIDTH as f32, 768.0, quirks);
+    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
+    for (css, base) in stylesheets(res, &arena) {
+        engine.add_author_stylesheet(&css, &base);
+    }
+    let style_root = engine.style_root_for(&arena);
+    if engine.resolve(&arena, &style_root).is_none() {
+        return Vec::new();
+    }
+    let mut wanted = crate::images::Wanted::default();
+    for id in arena.descendants(arena.document()) {
+        let is_img = arena
+            .get(id)
+            .and_then(|n| n.element_name())
+            .is_some_and(|q| &*q.local == "img");
+        if is_img
+            && let Some(key) = crate::images::candidates(&arena, id, crate::images::PLAN_WIDTH)
+                .into_iter()
+                .find_map(|raw| res.key(&raw))
+        {
+            wanted.add(key);
+        }
+    }
+    for url in background_urls(&arena, &style_root) {
+        if let Some(key) = res.key(&url) {
+            wanted.add(key);
+        }
+    }
+    wanted.keys
 }
 
 impl Laid {

@@ -29,10 +29,7 @@ pub struct LenPct {
 }
 
 impl LenPct {
-    pub const ZERO: LenPct = LenPct {
-        abs: Au(0),
-        pct: 0,
-    };
+    pub const ZERO: LenPct = LenPct { abs: Au(0), pct: 0 };
 
     /// Resolve against `basis`, rounding half up.
     #[must_use]
@@ -171,8 +168,7 @@ pub fn background_layers_of(style: &ComputedValues) -> Vec<BgLayer> {
             Some(BackgroundSize::Cover) => BgSize::Cover,
             Some(BackgroundSize::Contain) => BgSize::Contain,
             Some(BackgroundSize::ExplicitSize { width, height }) => {
-                let comp = |c: &Lpa<style::values::computed::NonNegativeLengthPercentage>| match c
-                {
+                let comp = |c: &Lpa<style::values::computed::NonNegativeLengthPercentage>| match c {
                     Lpa::Auto => SizeComp::Auto,
                     Lpa::LengthPercentage(lp) => SizeComp::Len(len_pct(&lp.0)),
                 };

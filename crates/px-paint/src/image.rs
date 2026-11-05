@@ -263,14 +263,22 @@ mod tests {
 
     #[test]
     fn transparent_pixels_carry_no_colour_into_a_blend() {
-        let i = img(2, 1, |x, _| if x == 0 { [255, 0, 0, 0] } else { [0, 0, 255, 255] });
+        let i = img(2, 1, |x, _| {
+            if x == 0 {
+                [255, 0, 0, 0]
+            } else {
+                [0, 0, 255, 255]
+            }
+        });
         let out = scale(&i, 1, 1, (0, 1), (0, 1), ImageFilter::Smooth);
         assert_eq!(out, vec![c([0, 0, 255, 128])]);
     }
 
     #[test]
     fn a_window_of_the_destination_equals_the_same_pixels_of_the_whole() {
-        let i = img(5, 7, |x, y| [(x * 40) as u8, (y * 30) as u8, (x * y) as u8, 255]);
+        let i = img(5, 7, |x, y| {
+            [(x * 40) as u8, (y * 30) as u8, (x * y) as u8, 255]
+        });
         for filter in [ImageFilter::Nearest, ImageFilter::Smooth] {
             let whole = scale(&i, 13, 4, (0, 13), (0, 4), filter);
             let part = scale(&i, 13, 4, (3, 9), (1, 3), filter);

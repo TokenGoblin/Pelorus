@@ -537,9 +537,7 @@ pub fn layout_document(
                         })
                     });
                     let content_inline = match side {
-                        _ if replaced_size.is_some() => {
-                            replaced_size.map_or(Au(0), |(w, _)| w)
-                        }
+                        _ if replaced_size.is_some() => replaced_size.map_or(Au(0), |(w, _)| w),
                         // §10.3.7. An absolutely positioned box is solved rather
                         // than filled: its width comes from the equation relating
                         // `left`, `width` and `right` to the containing block,
