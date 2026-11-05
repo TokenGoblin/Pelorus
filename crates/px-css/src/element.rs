@@ -341,20 +341,25 @@ impl<'a> style::dom::TElement for StyleElement<'a> {
             .is_some_and(|p| p.qual_name().local == html5ever::local_name!("html"))
     }
 
-    /// Presentational attributes such as `width="100"` and `bgcolor`.
-    ///
-    /// **Not synthesised in Phase 5.** These are the legacy HTML attributes that
-    /// map to CSS declarations at the user-agent origin. Each is a small mapping
-    /// and there are dozens; they matter mostly for old markup. Concretely:
-    /// `<table border="1">` gets no border, while the same table styled with CSS
-    /// does. In the backlog and in the phase report.
+    /// Presentational hints: the table elements' default `display` and the legacy
+    /// table attributes (`border`, `cellspacing`, `cellpadding`, `width`, `align`,
+    /// ...). See [`crate::hints`]. Other legacy attributes are still not mapped.
     fn synthesize_presentational_hints_for_legacy_attributes<V>(
         &self,
         _: selectors::context::VisitedHandlingMode,
-        _: &mut V,
+        hints: &mut V,
     ) where
         V: selectors::sink::Push<style::applicable_declarations::ApplicableDeclarationBlock>,
     {
+        if let Some(block) = self.data().presentational_hint_of(self.node().id()) {
+            hints.push(
+                style::applicable_declarations::ApplicableDeclarationBlock::from_declarations(
+                    block.clone(),
+                    style::rule_tree::CascadeLevel::new(style::rule_tree::CascadeOrigin::PresHints),
+                    style::stylesheets::layer_rule::LayerOrder::root(),
+                ),
+            );
+        }
     }
 
     fn local_name(&self) -> &web_atoms::LocalName {

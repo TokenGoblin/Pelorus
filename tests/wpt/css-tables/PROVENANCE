@@ -1,0 +1,40 @@
+WPT css-tables reftest subset (ADR 031), vendored by `cargo xtask vendor-wpt --module css-tables`.
+
+repository  https://github.com/web-platform-tests/wpt
+commit      ad1fa4318725f506b80ba1ec3b18cbec638d675e  (css/css-tables, master at vendoring time)
+paths       preserved relative to css/css-tables/
+
+counts
+  candidates (files with a <link rel=match|mismatch>; crashtests excluded)  173
+  kept as test+reference pairs                                       72
+  distinct reference files among them (shared ones vendored once)    65
+  support files (stylesheets, images) a kept file needs              2
+  files vendored (tests + references + support, excluding this file) 139
+
+  dropped-scripted (<script> or an on* attribute in the test)        29
+  dropped-other                                                      72
+      reference is .xht                                                    38
+      reference outside this module                                        30
+      rel=mismatch                                                          4
+
+Selection rule (executable: crates/px-xtask/src/gates/vendor_wpt.rs, select_module)
+  1. Walk css/css-tables/ excluding directories named crashtests.
+  2. A file is a candidate if it has a <link> whose rel contains "match" or
+     "mismatch".
+  3. Drop the candidate if it is not .html/.htm, if it has rel=mismatch, or if
+     it contains a <script> element or any attribute whose name starts with
+     "on", checked in that order.
+  4. Resolve the single rel=match href against the test's own directory
+     (absolute /css/css-tables/... hrefs resolve inside the module).
+  5. Drop the pair if the reference is not .html/.htm, is outside css/css-tables/,
+     is missing, or itself contains script or on* attributes.
+  6. Vendor the test, its reference (once if shared), and any file named by
+     <link rel=stylesheet href>, <img src>, <source|video|audio|iframe|embed
+     src> or <object data> in either, if that file exists inside css/css-tables/.
+
+Known gaps that remain in the denominator (nothing was removed to hide them):
+files a vendored test or reference names that are not in the module, so are NOT
+vendored. The harness reports these as "support file not vendored".
+  fonts/ahem.css  (10 files)
+
+Refresh by re-running the tool against a new commit; the diff is the record.

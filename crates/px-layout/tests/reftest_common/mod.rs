@@ -273,7 +273,7 @@ fn needs_script(arena: &px_dom::Arena) -> bool {
 /// `display: flex` and `grid` are deliberately not here; the documents ask for them.
 const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
      nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
-     table, form, fieldset, pre, hr { display: block } \
+     form, fieldset, pre, hr { display: block } \
      body { margin: 8px } \
      p, blockquote, figure { margin: 1em 0 } \
      h1 { margin: 0.67em 0; font-size: 2em } \

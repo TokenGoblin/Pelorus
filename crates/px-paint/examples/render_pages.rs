@@ -43,7 +43,7 @@ const AU_PER_PX: i32 = 60;
 /// without which nothing lays out, and the default margins.
 const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
      nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
-     table, form, fieldset, pre, hr { display: block } \
+     form, fieldset, pre, hr { display: block } \
      body { margin: 8px } \
      p, blockquote, figure { margin: 1em 0 } \
      h1 { margin: 0.67em 0; font-size: 2em } \

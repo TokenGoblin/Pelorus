@@ -197,6 +197,80 @@ fn border(
     }
 }
 
+/// Whether this box's own `border-*` properties are not painted by the box itself.
+///
+/// CSS 2.1 section 17.6: borders do not apply to rows, row groups, columns and
+/// column groups in the separated model, and in the collapsing model they apply to
+/// nothing but are resolved per grid edge by table layout, which emits one filled
+/// rectangle per resolved segment. Painting the computed borders as well would
+/// draw every edge twice, once wrongly.
+fn table_borders_not_drawn_by_box(style: &ComputedValues) -> bool {
+    use style::values::specified::box_::DisplayInside as I;
+    let inside = style.clone_display().inside();
+    let collapsed = style.get_inherited_table().clone_border_collapse()
+        == style::computed_values::border_collapse::T::Collapse;
+    match inside {
+        I::TableRow | I::TableRowGroup | I::TableHeaderGroup | I::TableFooterGroup => true,
+        I::TableColumn | I::TableColumnGroup => true,
+        I::Table | I::TableCell => collapsed,
+        _ => false,
+    }
+}
+
+/// One border side as the collapsing border model's conflict resolution sees it
+/// (CSS 2.1 section 17.6.2.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollapsedSide {
+    /// Used width: zero when the style is `none` or `hidden`.
+    pub width: Au,
+    /// Style rank: 0 for `none`, then inset, groove, outset, ridge, dotted,
+    /// dashed, solid, double in ascending precedence.
+    pub style: u8,
+    /// `border-style: hidden`, which suppresses every other border on the edge.
+    pub hidden: bool,
+    pub color: Rgba,
+}
+
+/// The four borders of `style` for the collapsing model, in order top, right,
+/// bottom, left. Unlike [`paint_style_of`] this is not zeroed for table boxes.
+#[must_use]
+pub fn collapsed_sides(style: &ComputedValues) -> [CollapsedSide; 4] {
+    let b = style.get_border();
+    let side = |w: Au, s: BorderStyle, c: &style::values::computed::Color| {
+        let rank = match s {
+            BorderStyle::None | BorderStyle::Hidden => 0,
+            BorderStyle::Inset => 1,
+            BorderStyle::Groove => 2,
+            BorderStyle::Outset => 3,
+            BorderStyle::Ridge => 4,
+            BorderStyle::Dotted => 5,
+            BorderStyle::Dashed => 6,
+            BorderStyle::Solid => 7,
+            BorderStyle::Double => 8,
+        };
+        CollapsedSide {
+            width: if rank == 0 { Au(0) } else { w },
+            style: rank,
+            hidden: matches!(s, BorderStyle::Hidden),
+            color: rgba(style.resolve_color(c)),
+        }
+    };
+    [
+        side(b.border_top_width.0, b.border_top_style, &b.border_top_color),
+        side(
+            b.border_right_width.0,
+            b.border_right_style,
+            &b.border_right_color,
+        ),
+        side(
+            b.border_bottom_width.0,
+            b.border_bottom_style,
+            &b.border_bottom_color,
+        ),
+        side(b.border_left_width.0, b.border_left_style, &b.border_left_color),
+    ]
+}
+
 /// Read the paint-relevant parts of `style`.
 #[must_use]
 pub fn paint_style_of(style: &ComputedValues) -> PaintStyle {
@@ -217,6 +291,38 @@ pub fn paint_style_of(style: &ComputedValues) -> PaintStyle {
             kind: corner_kind(shape),
         }
     };
+    let mut borders = [
+        border(
+            style,
+            b.border_top_width.0,
+            b.border_top_style,
+            &b.border_top_color,
+        ),
+        border(
+            style,
+            b.border_right_width.0,
+            b.border_right_style,
+            &b.border_right_color,
+        ),
+        border(
+            style,
+            b.border_bottom_width.0,
+            b.border_bottom_style,
+            &b.border_bottom_color,
+        ),
+        border(
+            style,
+            b.border_left_width.0,
+            b.border_left_style,
+            &b.border_left_color,
+        ),
+    ];
+    if table_borders_not_drawn_by_box(style) {
+        for side in &mut borders {
+            side.width = Au(0);
+            side.drawn = false;
+        }
+    }
     PaintStyle {
         corners: [
             corner(&b.border_top_left_radius, b.clone_corner_top_left_shape()),
@@ -237,32 +343,7 @@ pub fn paint_style_of(style: &ComputedValues) -> PaintStyle {
         ),
         background: rgba(style.resolve_color(&style.get_background().clone_background_color())),
         background_clip: clip,
-        borders: [
-            border(
-                style,
-                b.border_top_width.0,
-                b.border_top_style,
-                &b.border_top_color,
-            ),
-            border(
-                style,
-                b.border_right_width.0,
-                b.border_right_style,
-                &b.border_right_color,
-            ),
-            border(
-                style,
-                b.border_bottom_width.0,
-                b.border_bottom_style,
-                &b.border_bottom_color,
-            ),
-            border(
-                style,
-                b.border_left_width.0,
-                b.border_left_style,
-                &b.border_left_color,
-            ),
-        ],
+        borders,
         clips_overflow: style.clone_overflow_x() != Overflow::Visible
             || style.clone_overflow_y() != Overflow::Visible,
         positioned: !matches!(style.clone_position(), Position::Static),

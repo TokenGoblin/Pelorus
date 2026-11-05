@@ -23,7 +23,7 @@ const AU_PER_PX: i64 = 60;
 /// size so an ordinary page reads as text and not as Ahem squares.
 const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
      nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
-     table, form, fieldset, pre, hr, dl, dd, dt { display: block } \
+     form, fieldset, pre, hr, dl, dd, dt { display: block } \
      html { font-family: \"Noto Sans\"; font-size: 16px; line-height: 1.4; color: #1b1b1f } \
      body { margin: 8px } \
      p, blockquote, figure { margin: 1em 0 } \

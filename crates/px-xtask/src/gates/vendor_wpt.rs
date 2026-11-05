@@ -86,7 +86,7 @@ pub fn parse_args(args: &[String]) -> Result<Opts, String> {
                 if flag == "--module" {
                     if module_spec(&v).is_none() {
                         return Err(format!(
-                            "unknown module `{v}` (expected css-flexbox or css-grid)"
+                            "unknown module `{v}` (expected css-flexbox, css-grid or css-tables)"
                         ));
                     }
                     module = Some(v);
@@ -531,6 +531,10 @@ pub fn module_spec(name: &str) -> Option<ModuleSpec> {
         "css-grid" => Some(ModuleSpec {
             name: "css-grid",
             excluded: &["crashtests", "grid-lanes"],
+        }),
+        "css-tables" => Some(ModuleSpec {
+            name: "css-tables",
+            excluded: &["crashtests"],
         }),
         _ => None,
     }

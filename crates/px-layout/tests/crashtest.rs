@@ -79,7 +79,7 @@ const CRASHTEST_FLOOR: usize = 20;
 /// because a crashtest run is not supposed to fail when the reftest sheet changes.
 const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, footer, \
      nav, aside, main, figure, blockquote, h1, h2, h3, h4, h5, h6, ul, ol, li, \
-     table, form, fieldset, pre, hr, span, a, b, i, em, strong { display: block } \
+     form, fieldset, pre, hr, span, a, b, i, em, strong { display: block } \
      body { margin: 8px } \
      p, blockquote, figure { margin: 1em 0 } \
      head, style, script, title, meta, link { display: none }";

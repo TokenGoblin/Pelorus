@@ -122,6 +122,8 @@ struct Names {
     /// cascade, which also means a malformed attribute is reported once instead
     /// of re-parsed per pass.
     style_attribute: Option<style::servo_arc::Arc<Locked<PropertyDeclarationBlock>>>,
+    /// The presentational-hint declarations (`crate::hints`), parsed the same way.
+    pres_hint: Option<style::servo_arc::Arc<Locked<PropertyDeclarationBlock>>>,
 }
 
 /// The traversal bits stylo keeps per element.
@@ -238,6 +240,15 @@ impl StyleData {
             .map(style::servo_arc::Arc::borrow_arc)
     }
 
+    /// The presentational-hint block of an element, if it has one.
+    #[must_use]
+    pub fn presentational_hint_of(
+        &self,
+        id: NodeId,
+    ) -> Option<&style::servo_arc::Arc<Locked<PropertyDeclarationBlock>>> {
+        self.slot(id)?.names.pres_hint.as_ref()
+    }
+
     /// Intern every element's `id` and `class` once, before the pass.
     ///
     /// Walks the arena from the document rather than scanning slots, so a retired
@@ -253,9 +264,13 @@ impl StyleData {
                 continue;
             }
             let Some(attrs) = node.attrs() else { continue };
+            let hint = style_attrs.and_then(|parser| {
+                crate::hints::css_for(arena, id).map(|css| parser.parse(&css))
+            });
             let Some(slot) = self.slots.get_mut(id.index() as usize) else {
                 continue;
             };
+            slot.names.pres_hint = hint;
             for attr in attrs {
                 if attr.name.ns != html5ever::ns!() {
                     continue;

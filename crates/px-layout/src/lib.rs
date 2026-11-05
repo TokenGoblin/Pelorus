@@ -12,4 +12,5 @@ pub mod fragment;
 pub mod geom;
 pub mod grid;
 pub mod inline;
+pub mod table;
 pub mod text;

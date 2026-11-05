@@ -1,0 +1,13 @@
+WPT css-tables crashtests, vendored by `cargo xtask vendor-wpt --module css-tables`.
+
+repository  https://github.com/web-platform-tests/wpt
+commit      b875b21fd9e6b688e37c10d1b6366cab7418f91e
+directory   css/css-tables (-> tests/wpt/css-tables-crashtests)
+selection   every .html under that directory whose file name contains "crash",
+            at any depth, with the relative path preserved
+files       33
+
+A crashtest has no reference and no assertions: it passes if layout does not
+panic, overflow the stack or fail to terminate. Some carry a <script>, which
+cannot run until Phase 10; they are still laid out as written, as the CSS2
+crashtests are.

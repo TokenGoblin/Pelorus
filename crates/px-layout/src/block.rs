@@ -309,20 +309,20 @@ struct PendingRun {
 /// whose `min-width` exceeds its `max-width` gets the **minimum**. Clamping in the
 /// other order silently gives the maximum and looks identical everywhere else.
 #[derive(Clone, Copy, Debug)]
-struct Bounds {
-    min: Au,
-    max: Option<Au>,
+pub(crate) struct Bounds {
+    pub(crate) min: Au,
+    pub(crate) max: Option<Au>,
 }
 
 impl Bounds {
     /// No bounds at all: `min-*: 0` and `max-*: none`, the initial values.
-    const NONE: Self = Self {
+    pub(crate) const NONE: Self = Self {
         min: Au(0),
         max: None,
     };
 
     /// Apply the bounds to a tentative used size, §10.4's order.
-    fn clamp(self, size: Au) -> Au {
+    pub(crate) fn clamp(self, size: Au) -> Au {
         let capped = match self.max {
             Some(max) if size > max => max,
             _ => size,
@@ -435,6 +435,13 @@ pub fn layout_document(
     // fragment index. A `BTreeMap`, so nothing here depends on hash order.
     let mut grids: std::collections::BTreeMap<usize, grid::Container> =
         std::collections::BTreeMap::new();
+    // Tables between their `Children` and `Exit` visits, and the sizes their
+    // cells are forced to (CSS 2.1 chapter 17; see `crate::table`).
+    let mut tstate = crate::table::State::new();
+    // Content of anonymous table cells, by fragment index: it is not any one
+    // element's children, so `Children` takes it from here.
+    let mut anon_items: std::collections::BTreeMap<usize, Vec<Content>> =
+        std::collections::BTreeMap::new();
 
     // The ICB is entered as a block container whose content is the document's.
     // Starting from the document node rather than from the root element is what
@@ -474,11 +481,18 @@ pub fn layout_document(
                     // confidently wrong geometry rather than none. Its slot stays
                     // empty and `Exit` drops it.
                     let inline_block = is_inline_block(&style);
-                    if !is_block_level(&style) && !inline_block {
+                    // A cell or caption is entered by its table with a size the
+                    // table has already decided; a table-internal box met outside
+                    // a table starts an anonymous one (§17.2.1).
+                    let forced = tstate.forced(parent, slot);
+                    let anon_table = forced.is_none() && crate::table::is_internal(&style);
+                    if forced.is_none() && !anon_table && !is_block_level(&style) && !inline_block {
                         continue;
                     }
+                    let table_part = forced.is_some() || anon_table;
 
-                    let absolute = is_absolutely_positioned(&style);
+                    let absolute =
+                        forced.is_none() && !anon_table && is_absolutely_positioned(&style);
                     // §10.1: an absolutely positioned box resolves against its
                     // containing block's *padding* box; everything else resolves
                     // against its parent's content box. The two are the same
@@ -503,8 +517,14 @@ pub fn layout_document(
                     let grid_item = grids.get(&parent.index()).and_then(|g| g.item_inline(slot));
                     let containing = grid_item.map_or(containing, |g| g.containing);
                     let mut resolved = resolve_edges(&style, containing);
+                    if anon_table {
+                        resolved = Edges::ZERO;
+                    }
+                    if let Some(f) = &forced {
+                        resolved = f.edges;
+                    }
                     // `float` does not apply to a grid item (section 6).
-                    let side = if grid_item.is_some() {
+                    let side = if grid_item.is_some() || table_part {
                         None
                     } else {
                         float_side(&style)
@@ -516,7 +536,29 @@ pub fn layout_document(
                     // fills, and getting these the wrong way round makes every
                     // float the full width of the page — indistinguishable from
                     // "floats are not implemented" in a rendering.
-                    let content_inline = match side {
+                    let table_plan = (forced.is_none()
+                        && (anon_table || crate::table::is_table(&style)))
+                    .then(|| {
+                        crate::table::plan(
+                            dom,
+                            arena,
+                            node,
+                            &style,
+                            containing,
+                            resolved.margin,
+                            side.is_none() && !absolute,
+                        )
+                    });
+                    let content_inline = if let Some(f) = &forced {
+                        f.content_inline
+                    } else if let Some(p) = &table_plan {
+                        resolved = p.edges;
+                        (p.wrapper_inline
+                            - resolved.border.inline_sum()
+                            - resolved.padding.inline_sum())
+                        .max(Au(0))
+                    } else {
+                    match side {
                         // §10.3.7. An absolutely positioned box is solved rather
                         // than filled: its width comes from the equation relating
                         // `left`, `width` and `right` to the containing block,
@@ -544,6 +586,7 @@ pub fn layout_document(
                             )
                         }
                         _ => resolve_inline_size(&style, containing, &resolved),
+                    }
                     };
                     // §10.4. Applied to the *used* width rather than by recomputing
                     // §10.3 with the bound as the computed width, which is how the
@@ -551,23 +594,25 @@ pub fn layout_document(
                     // resolves, because the only part of §10.3 that would run again
                     // is the auto-margin centring below, and that reads the width
                     // it is given.
-                    let content_inline = inline_bounds(&style, containing).clamp(content_inline);
-                    let content_inline = flex.inline_size(
-                        dom,
-                        arena,
-                        node,
-                        &style,
-                        containing,
-                        &resolved,
-                        content_inline,
-                    );
+                    let sized_elsewhere = forced.is_some() || table_plan.is_some();
+                    let content_inline = if sized_elsewhere {
+                        content_inline
+                    } else {
+                        let c = inline_bounds(&style, containing).clamp(content_inline);
+                        flex.inline_size(dom, arena, node, &style, containing, &resolved, c)
+                    };
 
                     // §9.5.1 rule 9: `auto` margins on a float are zero, not
                     // centring. A float is shifted to an edge; there is nothing
                     // for the leftover space to be shared between. An absolutely
                     // positioned box's auto margins are resolved by §10.3.7's own
                     // equation, which `absolute_inline_size` has already done.
-                    if side.is_none() && !absolute && !inline_block && !flex.is_item(node) {
+                    if side.is_none()
+                        && !absolute
+                        && !inline_block
+                        && !flex.is_item(node)
+                        && !sized_elsewhere
+                    {
                         centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
                     }
                     let content_inline = match grid_item {
@@ -589,7 +634,13 @@ pub fn layout_document(
                         ),
                     ));
                     if let Some(f) = tree.get_mut(fragment) {
-                        f.node = Some(node);
+                        f.node = match &table_plan {
+                            Some(p) => p.node,
+                            None => Some(node),
+                        };
+                    }
+                    if forced.is_some() {
+                        tstate.entered(parent, slot, fragment);
                     }
 
                     tables.grow_to(fragment.index());
@@ -641,14 +692,18 @@ pub fn layout_document(
                         content_inline + resolved.padding.inline_sum();
 
                     tables.edges[fragment.index()] = resolved;
-                    tables.clear_sides[fragment.index()] = clear_side(&style);
-                    tables.formatting_context_roots[fragment.index()] =
-                        establishes_formatting_context(&style)
+                    tables.clear_sides[fragment.index()] =
+                        clear_side(&style).filter(|_| !table_part);
+                    tables.formatting_context_roots[fragment.index()] = table_part
+                        || table_plan.is_some()
+                        || establishes_formatting_context(&style)
                             || inline_block
                             || flex.is_item(node)
                             || grid_item.is_some();
                     // A flex item's block size is the flex algorithm's to decide.
-                    if !flex.is_item(node) {
+                    if !flex.is_item(node)
+                        && (!sized_elsewhere || forced.is_some_and(|f| f.honour_height))
+                    {
                         tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
                         tables.block_bounds[fragment.index()] = block_bounds(&style);
                     }
@@ -660,6 +715,9 @@ pub fn layout_document(
                         *reserved = Some(fragment);
                     }
 
+                    if let Some(p) = table_plan {
+                        tstate.register(fragment, p.table);
+                    }
                     // Popped in the reverse order: `Children` schedules the
                     // subtree, and `Exit` runs once all of it has.
                     stack.push(Step::Exit { fragment });
@@ -683,21 +741,75 @@ pub fn layout_document(
                     node,
                     containing_block,
                 } => {
+                    if tstate.is_table(fragment) {
+                        for job in tstate.schedule(&mut tree, fragment) {
+                            match job {
+                                crate::table::Sched::Real {
+                                    node: child,
+                                    parent,
+                                    slot,
+                                } => {
+                                    tables.grow_to(parent.index());
+                                    if let Some(kids) = tables.pending.get_mut(parent.index())
+                                        && kids.len() <= slot
+                                    {
+                                        kids.resize(slot + 1, None);
+                                    }
+                                    stack.push(Step::Enter {
+                                        node: child,
+                                        parent,
+                                        slot,
+                                        containing_block,
+                                    });
+                                }
+                                crate::table::Sched::Anon {
+                                    fragment: cell,
+                                    container,
+                                    nodes,
+                                    width,
+                                } => {
+                                    tables.grow_to(cell.index());
+                                    tables.inline_sizes[cell.index()] = width;
+                                    tables.padding_box_inline[cell.index()] = width;
+                                    tables.formatting_context_roots[cell.index()] = true;
+                                    anon_items.insert(
+                                        cell.index(),
+                                        partition_nodes(dom, arena, container, nodes),
+                                    );
+                                    stack.push(Step::Exit { fragment: cell });
+                                    stack.push(Step::Children {
+                                        fragment: cell,
+                                        node: container,
+                                        containing_block,
+                                    });
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    let anon_content = anon_items.remove(&fragment.index());
                     let style = computed_style(dom, node);
-                    let is_grid = style.as_ref().is_some_and(|s| grid::is_grid_container(s));
-                    let flex_items = flex.begin(
-                        dom,
-                        arena,
-                        fragment,
-                        node,
-                        tables
-                            .inline_sizes
-                            .get(fragment.index())
-                            .copied()
-                            .unwrap_or(Au(0)),
-                    );
+                    let is_grid = anon_content.is_none()
+                        && style.as_ref().is_some_and(|s| grid::is_grid_container(s));
+                    let flex_items = if anon_content.is_some() {
+                        None
+                    } else {
+                        flex.begin(
+                            dom,
+                            arena,
+                            fragment,
+                            node,
+                            tables
+                                .inline_sizes
+                                .get(fragment.index())
+                                .copied()
+                                .unwrap_or(Au(0)),
+                        )
+                    };
                     let is_flex = flex_items.is_some();
-                    let items = flex_items.unwrap_or_else(|| partition_content(dom, arena, node));
+                    let items = flex_items.unwrap_or_else(|| {
+                        anon_content.unwrap_or_else(|| partition_content(dom, arena, node))
+                    });
                     // Only *in-flow* block-level content forces anonymous boxes
                     // (§9.2.1.1); a float is block-level and does not. Text in a
                     // flex or grid container is always wrapped: it is an anonymous
@@ -852,6 +964,16 @@ pub fn layout_document(
                 }
 
                 Step::Exit { fragment } => {
+                    if tstate.finish(&mut tree, fragment) {
+                        if let Some(slot) = tables.collapsed_margins.get_mut(fragment.index()) {
+                            let m = tables
+                                .edges
+                                .get(fragment.index())
+                                .map_or(LogicalEdges::ZERO, |e| e.margin);
+                            *slot = (m.block_start, m.block_end);
+                        }
+                        continue;
+                    }
                     if flex.is_container(fragment) {
                         let slots = tables
                             .pending
@@ -2061,6 +2183,18 @@ fn float_side(style: &ComputedValues) -> Option<crate::float::FloatSide> {
 ///
 /// Iterative, and a pre-order walk so the items come out in document order.
 fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> Vec<Content> {
+    partition_nodes(dom, arena, node, children_in_order(arena, node))
+}
+
+/// [`partition_content`] over an explicit list of sibling nodes, which belong to
+/// `node`'s box for the purposes of style and white-space (an anonymous table
+/// cell's content is a run of its table's children).
+pub(crate) fn partition_nodes(
+    dom: px_css::view::Dom<'_>,
+    arena: &Arena,
+    node: NodeId,
+    nodes: Vec<NodeId>,
+) -> Vec<Content> {
     enum Visit {
         Node(NodeId),
         /// The end of the element whose box was opened last.
@@ -2081,11 +2215,7 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
         container: node,
         white_space,
     };
-    let mut stack: Vec<Visit> = children_in_order(arena, node)
-        .into_iter()
-        .rev()
-        .map(Visit::Node)
-        .collect();
+    let mut stack: Vec<Visit> = nodes.into_iter().rev().map(Visit::Node).collect();
 
     while let Some(visit) = stack.pop() {
         let id = match visit {
@@ -2132,6 +2262,17 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
                 out.push(Content::Block(id));
                 continue;
             }
+            // A table-internal box outside a table (§17.2.1): it and the siblings
+            // that belong with it become one anonymous table, entered at its first
+            // box. The rest of the run is consumed here.
+            if style.as_ref().is_some_and(|s| crate::table::is_internal(s)) {
+                builder.flush(&mut out, drop_blank);
+                for _ in 1..crate::table::internal_run(dom, arena, id).len() {
+                    stack.pop();
+                }
+                out.push(Content::Block(id));
+                continue;
+            }
             // `<br>`: a forced line break (§9.4.2), whatever its `display`.
             if current
                 .element_name()
@@ -2171,7 +2312,10 @@ pub(crate) fn is_inline_block(style: &ComputedValues) -> bool {
     matches!(display.outside(), DisplayOutside::Inline)
         && matches!(
             display.inside(),
-            DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid
+            DisplayInside::FlowRoot
+                | DisplayInside::Flex
+                | DisplayInside::Grid
+                | DisplayInside::Table
         )
 }
 
@@ -2426,7 +2570,7 @@ pub(crate) struct Intrinsic {
 }
 
 impl Intrinsic {
-    const ZERO: Self = Self {
+    pub(crate) const ZERO: Self = Self {
         min: Au(0),
         max: Au(0),
     };
@@ -2525,6 +2669,23 @@ fn intrinsic_inline_size(dom: px_css::view::Dom<'_>, arena: &Arena, root: NodeId
     intrinsic_inline_size_with(dom, arena, root, false)
 }
 
+/// The intrinsic sizes of `nodes` as the content of an anonymous box inside
+/// `container` (an anonymous table cell): content only, no surround.
+pub(crate) fn intrinsic_of_nodes(
+    dom: px_css::view::Dom<'_>,
+    arena: &Arena,
+    container: NodeId,
+    nodes: &[NodeId],
+) -> Intrinsic {
+    intrinsic_walk(
+        dom,
+        arena,
+        container,
+        false,
+        Some(partition_nodes(dom, arena, container, nodes.to_vec())),
+    )
+}
+
 /// As [`intrinsic_inline_size`], optionally ignoring `root`'s own `width`.
 ///
 /// A flex item's content-based minimum (css-flexbox-1 section 4.5) is its
@@ -2535,6 +2696,16 @@ pub(crate) fn intrinsic_inline_size_with(
     arena: &Arena,
     root: NodeId,
     ignore_root_width: bool,
+) -> Intrinsic {
+    intrinsic_walk(dom, arena, root, ignore_root_width, None)
+}
+
+fn intrinsic_walk(
+    dom: px_css::view::Dom<'_>,
+    arena: &Arena,
+    root: NodeId,
+    ignore_root_width: bool,
+    mut root_contents: Option<Vec<Content>>,
 ) -> Intrinsic {
     let mut frames: Vec<IntrinsicFrame> = Vec::new();
     let mut stack = vec![IntrinsicStep::Descend(root)];
@@ -2568,13 +2739,26 @@ pub(crate) fn intrinsic_inline_size_with(
                     continue;
                 }
 
+                // A table (or the start of an anonymous one) measures itself.
+                if crate::table::is_table(&style)
+                    || (node != root && crate::table::is_internal(&style))
+                {
+                    let value = crate::table::intrinsic(dom, arena, node, &style);
+                    contribute(&mut frames, &mut result, value);
+                    continue;
+                }
+                let own_contents = if node == root { root_contents.take() } else { None };
                 let edges = resolve_edges(&style, Au(0));
-                let surround = edges.inline_surround();
+                let surround = if own_contents.is_some() {
+                    Au(0)
+                } else {
+                    edges.inline_surround()
+                };
 
                 // A definite width makes both figures the same and stops the
                 // walk: nothing inside can widen a box whose width is stated.
-                if let Some(width) =
-                    definite_inline_size(&style).filter(|_| !(ignore_root_width && node == root))
+                if let Some(width) = definite_inline_size(&style)
+                    .filter(|_| !(ignore_root_width && node == root) && own_contents.is_none())
                 {
                     let total = width + surround;
                     contribute(
@@ -2634,7 +2818,8 @@ pub(crate) fn intrinsic_inline_size_with(
                     grid: None,
                 };
                 let mut blocks = Vec::new();
-                for item in partition_content(dom, arena, node) {
+                let items = own_contents.unwrap_or_else(|| partition_content(dom, arena, node));
+                for item in items {
                     match item {
                         // A float contributes to its container's preferred
                         // *minimum* width -- content cannot be narrower than a
@@ -2709,7 +2894,7 @@ pub(crate) fn intrinsic_inline_size_with(
 ///
 /// Percentages resolve against the containing block's inline size, like every
 /// other percentage on this axis.
-fn inline_bounds(style: &ComputedValues, containing: Au) -> Bounds {
+pub(crate) fn inline_bounds(style: &ComputedValues, containing: Au) -> Bounds {
     use style::values::computed::{MaxSize, Size};
 
     let min = match style.clone_min_width() {
@@ -2732,7 +2917,7 @@ fn inline_bounds(style: &ComputedValues, containing: Au) -> Bounds {
 /// `None` and §10.7 says to treat the declaration as if it were not there. That is
 /// exactly what `Bounds::NONE`'s two halves mean, which is why this reads as
 /// falling through rather than as a special case.
-fn block_bounds(style: &ComputedValues) -> Bounds {
+pub(crate) fn block_bounds(style: &ComputedValues) -> Bounds {
     use style::values::computed::{MaxSize, Size};
 
     let min = match style.clone_min_height() {
@@ -2753,7 +2938,7 @@ fn block_bounds(style: &ComputedValues) -> Bounds {
 ///
 /// `auto` and percentages both return `None`, which the intrinsic walk reads as
 /// "look inside". They mean different things in general and the same thing here.
-fn definite_inline_size(style: &ComputedValues) -> Option<Au> {
+pub(crate) fn definite_inline_size(style: &ComputedValues) -> Option<Au> {
     use style::values::computed::Size;
     match style.clone_width() {
         Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
@@ -2823,6 +3008,7 @@ pub(crate) fn is_block_level(style: &ComputedValues) -> bool {
                 | DisplayInside::FlowRoot
                 | DisplayInside::Flex
                 | DisplayInside::Grid
+                | DisplayInside::Table
         ))
 }
 
@@ -2943,7 +3129,7 @@ fn used_border(
 /// case and wrong when an ancestor has a definite height. Named rather than
 /// silently approximated; it wants the containing block's resolved height threaded
 /// down, which is a change to the Enter pass rather than a patch here.
-fn resolve_block_size(style: &ComputedValues) -> Option<Au> {
+pub(crate) fn resolve_block_size(style: &ComputedValues) -> Option<Au> {
     use style::values::computed::Size;
     match style.clone_height() {
         // `maybe_to_used_value(None)` is exactly this function's semantics: a

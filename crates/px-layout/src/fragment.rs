@@ -106,6 +106,9 @@ pub struct Fragment {
     /// For a line fragment: the baseline, from its block start edge. Zero for
     /// every other kind. An inline-block's own baseline is found from this.
     pub baseline: Au,
+    /// A solid colour this fragment paints over its whole border box, for boxes
+    /// that have no element to take a background from (collapsed table borders).
+    pub fill: Option<[u8; 4]>,
     /// This fragment's children, as a range into the tree's flat storage.
     first_child: u32,
     child_count: u32,
@@ -126,6 +129,7 @@ impl Fragment {
             size,
             node: None,
             baseline: Au(0),
+            fill: None,
             first_child: 0,
             child_count: 0,
             first_text_run: 0,
