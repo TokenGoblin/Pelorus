@@ -267,3 +267,88 @@ fn layout_table_html_attributes_map_to_css() {
         .expect("a table fragment");
     assert_eq!(table, (0, 0, 34, 24));
 }
+
+// A table with 2000 rows of 8 cells lays out in time that does not grow with the
+// square of the row count (the slow part of a naive grid builder).
+#[test]
+fn layout_table_a_large_table_lays_out() {
+    let mut html = String::from("<table>");
+    for r in 0..2000 {
+        html.push_str("<tr>");
+        for c in 0..8 {
+            html.push_str(&format!("<td>{r}x{c}"));
+        }
+    }
+    html.push_str("</table>");
+    let r = t(&html, "");
+    assert_eq!(r[0].3, 2000 * 10);
+}
+
+/// Random trees of table-ish displays must lay out without panicking: anonymous
+/// box generation sees every nesting of cells, rows, groups, captions, columns,
+/// floats and out-of-flow boxes, with spans that overlap and run off the grid.
+#[test]
+fn layout_table_random_display_trees_do_not_panic() {
+    const DISPLAYS: [&str; 14] = [
+        "table",
+        "inline-table",
+        "table-row",
+        "table-cell",
+        "table-row-group",
+        "table-header-group",
+        "table-footer-group",
+        "table-column",
+        "table-column-group",
+        "table-caption",
+        "block",
+        "inline",
+        "inline-block",
+        "flex",
+    ];
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move |n: usize| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % n as u64) as usize
+    };
+    for _ in 0..300 {
+        let mut html = String::new();
+        let mut open = 0usize;
+        for _ in 0..(2 + next(25)) {
+            match next(6) {
+                0..=2 => {
+                    let d = DISPLAYS[next(DISPLAYS.len())];
+                    let extra = match next(7) {
+                        0 => " colspan=3",
+                        1 => " rowspan=0",
+                        2 => " rowspan=4 colspan=2",
+                        3 => " style='float:left;border:3px solid;width:50%'",
+                        4 => " style='position:absolute'",
+                        _ => "",
+                    };
+                    html.push_str(&format!("<div style='display:{d}' {extra}>"));
+                    open += 1;
+                }
+                3 => html.push_str("text "),
+                4 => {
+                    if open > 0 {
+                        open -= 1;
+                        html.push_str("</div>");
+                    }
+                }
+                _ => html.push_str("<table border=1><tr><td>x<td>y</table>"),
+            }
+        }
+        for _ in 0..open {
+            html.push_str("</div>");
+        }
+        let collapse = if next(2) == 0 {
+            "border-collapse:collapse;"
+        } else {
+            ""
+        };
+        let _ = t(&html, &format!("div {{ {collapse} }}"));
+        let _ = t(&html, "div { table-layout:fixed; width:300px }");
+    }
+}

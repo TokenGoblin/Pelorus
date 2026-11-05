@@ -1079,6 +1079,23 @@ follows.
 
 ## Table layout is in no phase at all, found in Phase 6
 
+- **Status (branch `phase6/tables`): built.** `crates/px-layout/src/table.rs`
+  implements CSS 2.1 §17 (anonymous boxes, auto and fixed layout, spans, spacing,
+  both border models, captions, vertical-align, empty-cells), and px-css maps the
+  HTML table attributes (`border`, `cellspacing`, `cellpadding`, `width`,
+  `height`, `align`, `valign`, `bgcolor`, `nowrap`) and the table elements'
+  `display` at the presentational-hint level (`crates/px-css/src/hints.rs`).
+  Still open, found while building it: percentage `height` on tables and cells
+  (needs the containing block's height threaded through `Enter`);
+  `visibility: collapse` on rows and columns; `th`'s `-internal-center`
+  `text-align` (a `th` inside a table with an explicit `text-align` should follow
+  it); the `rules` and `frame` attributes; `display: contents` inside tables;
+  tables as flex or grid items take their own width, not the one the flex or grid
+  algorithm computes; table fragmentation (print, multicol); quirks-mode table
+  rules. The css-tables corpus pairs that still fail mostly compare a table to a
+  non-table reference, which the geometry comparison cannot equate.
+- Original entry, kept for the record:
+
 - **What:** `docs/build-spec.md` §9 has Phase 6 as "block and inline layout" and
   Phase 7 as "flex and grid". **Table formatting — CSS 2.1 §17 — is not named in
   any phase.** It is not deferred, disallowed or listed in §13's open decisions; it

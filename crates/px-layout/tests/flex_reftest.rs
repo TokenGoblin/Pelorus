@@ -91,7 +91,10 @@ const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 ///   rectangles differ by that. Browsers draw the same picture (the extra is
 ///   empty space under the box), which a rectangle comparison cannot see: the
 ///   oracle's blind spot, not a flex defect.
-const MATCH_FLOOR: usize = 156;
+///
+/// 157 once tables lay out (`phase6/tables`): a flex test whose items are
+/// `display: table` elements stopped being laid out as plain blocks.
+const MATCH_FLOOR: usize = 157;
 
 /// The corpus size this suite is pinned at (kept pairs in PROVENANCE: 543).
 const MIN_PAIRS: usize = 540;
