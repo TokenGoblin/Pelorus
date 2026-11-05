@@ -473,7 +473,8 @@ pub fn layout_document(
                     // fragment, because laying it out as a block would be
                     // confidently wrong geometry rather than none. Its slot stays
                     // empty and `Exit` drops it.
-                    let inline_block = is_inline_block(&style);
+                    let inline_block =
+                        is_inline_block(&style) || crate::replaced::is_atomic_inline(node, &style);
                     if !is_block_level(&style) && !inline_block {
                         continue;
                     }
@@ -516,7 +517,29 @@ pub fn layout_document(
                     // fills, and getting these the wrong way round makes every
                     // float the full width of the page — indistinguishable from
                     // "floats are not implemented" in a rendering.
+                    // A replaced element with a picture (an `<img>`): its size
+                    // comes from the picture and its attributes, not from the
+                    // containing block (§10.3.2, §10.6.2; crate::replaced).
+                    let replaced_size = arena.get(node).and_then(|n| {
+                        let wb = inline_bounds(&style, containing);
+                        let hb = block_bounds(&style);
+                        crate::replaced::used_size(&crate::replaced::Inputs {
+                            node_id: node,
+                            node: n,
+                            style: &style,
+                            containing,
+                            surround: (
+                                resolved.border.inline_sum() + resolved.padding.inline_sum(),
+                                resolved.border.block_sum() + resolved.padding.block_sum(),
+                            ),
+                            width_bounds: (wb.min, wb.max),
+                            height_bounds: (hb.min, hb.max),
+                        })
+                    });
                     let content_inline = match side {
+                        _ if replaced_size.is_some() => {
+                            replaced_size.map_or(Au(0), |(w, _)| w)
+                        }
                         // §10.3.7. An absolutely positioned box is solved rather
                         // than filled: its width comes from the equation relating
                         // `left`, `width` and `right` to the containing block,
@@ -568,7 +591,13 @@ pub fn layout_document(
                     // positioned box's auto margins are resolved by §10.3.7's own
                     // equation, which `absolute_inline_size` has already done.
                     if side.is_none() && !absolute && !inline_block && !flex.is_item(node) {
-                        centre_if_auto_margins(&style, containing, content_inline, &mut resolved);
+                        centre_if_auto_margins(
+                            &style,
+                            containing,
+                            content_inline,
+                            &mut resolved,
+                            replaced_size.is_some(),
+                        );
                     }
                     let content_inline = match grid_item {
                         Some(g) => {
@@ -651,6 +680,11 @@ pub fn layout_document(
                     if !flex.is_item(node) {
                         tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
                         tables.block_bounds[fragment.index()] = block_bounds(&style);
+                    }
+                    if let Some((_, h)) = replaced_size {
+                        // Already within min/max-height.
+                        tables.specified_block_sizes[fragment.index()] = Some(h);
+                        tables.block_bounds[fragment.index()] = Bounds::NONE;
                     }
                     if let Some(reserved) = tables
                         .pending
@@ -2140,7 +2174,10 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
                 builder.line_break();
                 continue;
             }
-            if style.as_ref().is_some_and(|s| is_inline_block(s)) {
+            if style
+                .as_ref()
+                .is_some_and(|s| is_inline_block(s) || crate::replaced::is_atomic_inline(id, s))
+            {
                 builder.atomic(id);
                 out.push(Content::InlineBlock(id));
                 continue;
@@ -2148,6 +2185,10 @@ fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) ->
             let opened = builder.open_element(id, style.as_deref());
             if opened {
                 stack.push(Visit::Close);
+            }
+            // An `<img>` whose picture is not available shows its `alt` text.
+            if let Some(alt) = crate::replaced::alt_text(id, current) {
+                builder.text(&alt);
             }
             for kid in children_in_order(arena, id).into_iter().rev() {
                 stack.push(Visit::Node(kid));
@@ -2571,6 +2612,40 @@ pub(crate) fn intrinsic_inline_size_with(
                 let edges = resolve_edges(&style, Au(0));
                 let surround = edges.inline_surround();
 
+                // A replaced element is as wide as its picture says, whatever
+                // is (not) inside it.
+                if let Some(arena_node) = arena.get(node)
+                    && let Some((w, _)) = crate::replaced::used_size(&crate::replaced::Inputs {
+                        node_id: node,
+                        node: arena_node,
+                        style: &style,
+                        containing: Au(0),
+                        surround: (
+                            edges.border.inline_sum() + edges.padding.inline_sum(),
+                            edges.border.block_sum() + edges.padding.block_sum(),
+                        ),
+                        width_bounds: {
+                            let b = inline_bounds(&style, Au(0));
+                            (b.min, b.max)
+                        },
+                        height_bounds: {
+                            let b = block_bounds(&style);
+                            (b.min, b.max)
+                        },
+                    })
+                {
+                    let total = w + surround;
+                    contribute(
+                        &mut frames,
+                        &mut result,
+                        Intrinsic {
+                            min: total,
+                            max: total,
+                        },
+                    );
+                    continue;
+                }
+
                 // A definite width makes both figures the same and stops the
                 // walk: nothing inside can widen a box whose width is stated.
                 if let Some(width) =
@@ -2986,11 +3061,13 @@ fn centre_if_auto_margins(
     containing: Au,
     content_inline: Au,
     edges: &mut Edges,
+    replaced: bool,
 ) {
     use style::values::computed::Size;
     use style::values::generics::length::GenericMargin;
 
-    if matches!(style.clone_width(), Size::Auto) {
+    // A replaced element's `auto` width is its picture's, not the fill (§10.3.4).
+    if !replaced && matches!(style.clone_width(), Size::Auto) {
         return;
     }
 
