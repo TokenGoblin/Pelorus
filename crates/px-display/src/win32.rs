@@ -37,10 +37,11 @@ use px_ui::input::{
 };
 use px_ui::platform::{PlatformError, PlatformWindow};
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, DIB_RGB_COLORS, EndPaint, GetDC, HALFTONE,
-    PAINTSTRUCT, ReleaseDC, SRCCOPY, SetStretchBltMode, StretchDIBits,
+    AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint,
+    CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, EndPaint, GetDC,
+    HALFTONE, PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetStretchBltMode, StretchDIBits,
 };
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
@@ -66,18 +67,22 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-    DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HTCLIENT,
-    IDC_ARROW, IDC_HAND, IDC_IBEAM, IsZoomed, LoadCursorW, MSG, MsgWaitForMultipleObjects,
-    PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassExW, SIZE_MINIMIZED, SW_MAXIMIZE,
-    SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, TranslateMessage, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KILLFOCUS,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
-    WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW,
+    GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT, HTLEFT, HTRIGHT, HTTOP,
+    HTTOPLEFT, HTTOPRIGHT, HTTRANSPARENT, IDC_ARROW, IDC_HAND, IDC_IBEAM, IsZoomed, LoadCursorW,
+    MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassExW,
+    SIZE_MINIMIZED, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
+    SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    TranslateMessage, ULW_ALPHA, UpdateLayeredWindow, WM_CHAR, WM_CLOSE, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+    WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_NCCALCSIZE, WM_NCCREATE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_QUIT,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME,
 };
 
-use crate::{Display, DisplayError, DisplayEvent, WindowOptions};
+use crate::{Display, DisplayError, DisplayEvent, Mask, WindowKind, WindowOptions, WindowShape};
 
 const CF_UNICODETEXT: u32 = 13;
 const MAX_CLIPBOARD_UNITS: usize = 1 << 20;
@@ -105,9 +110,39 @@ struct State {
     cursor: Cell<CursorShape>,
     composing: Cell<bool>,
     ime_area: Cell<Rect>,
+    kind: WindowKind,
+    shape: Option<WindowShape>,
+    /// Squircle outline at the current physical client size and DPI; full when
+    /// there is no shape.
+    mask: RefCell<Mask>,
+    /// The press that started a pointer sequence landed inside the outline.
+    pointer_inside: Cell<bool>,
+    mask_key: Cell<(u32, u32, u32)>,
 }
 
 impl State {
+    /// Rebuild the outline mask when the physical size or DPI changed.
+    fn refresh_mask(&self) {
+        let (w, h) = self.client.get();
+        let (w, h) = (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0));
+        let key = (w, h, self.dpi.get());
+        if self.mask_key.get() == key {
+            return;
+        }
+        let Ok(mut m) = self.mask.try_borrow_mut() else {
+            return;
+        };
+        *m = match self.shape {
+            Some(s) => s.scaled(key.2).mask(w, h),
+            None => Mask::full(w, h),
+        };
+        self.mask_key.set(key);
+    }
+
+    fn hit(&self, x: i32, y: i32) -> bool {
+        self.mask.try_borrow().map(|m| m.hit(x, y)).unwrap_or(true)
+    }
+
     fn push(&self, e: DisplayEvent) {
         if let Ok(mut q) = self.queue.try_borrow_mut() {
             q.push_back(e);
@@ -278,7 +313,101 @@ fn place_ime(hwnd: HWND, area: Rect, dpi: u32) {
     }
 }
 
+/// Push the last frame to a layered (squircle) window: the frame is stretched to
+/// the physical size, premultiplied under the outline mask, copied to a 32-bit
+/// DIB section and handed to `UpdateLayeredWindow` with `AC_SRC_ALPHA`, so the
+/// edge is anti-aliased and fully transparent pixels let clicks through.
+fn update_layered(st: &State) {
+    st.refresh_mask();
+    let (cw, ch) = st.client.get();
+    let (fw, fh) = st.frame_size.get();
+    if cw <= 0 || ch <= 0 || fw <= 0 || fh <= 0 {
+        return;
+    }
+    let pixels = {
+        let (Ok(bits), Ok(mask)) = (st.bgra.try_borrow(), st.mask.try_borrow()) else {
+            return;
+        };
+        mask.compose_bgra(&bits, fw as u32, fh as u32)
+    };
+    if pixels.len() != cw as usize * ch as usize * 4 {
+        return;
+    }
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: cw,
+            biHeight: -ch, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            biSizeImage: 0,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [windows_sys::Win32::Graphics::Gdi::RGBQUAD {
+            rgbBlue: 0,
+            rgbGreen: 0,
+            rgbRed: 0,
+            rgbReserved: 0,
+        }],
+    };
+    // SAFETY: GetDC(null) is the screen DC, released below. CreateDIBSection
+    // gets a valid BITMAPINFO (32 bpp top-down, cw x ch) and an out-pointer;
+    // on success `bits` addresses cw*ch*4 writable bytes owned by the section,
+    // and `pixels` was checked above to be exactly that long, so the copy stays
+    // inside both. The section is selected into a memory DC for the duration of
+    // UpdateLayeredWindow, then the old object is restored and the section, the
+    // DC and the screen DC are released, so nothing leaks or dangles.
+    unsafe {
+        let screen = GetDC(null_mut());
+        if screen.is_null() {
+            return;
+        }
+        let mut bits: *mut core::ffi::c_void = null_mut();
+        let dib = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+        let mem = CreateCompatibleDC(screen);
+        if !dib.is_null() && !bits.is_null() && !mem.is_null() {
+            std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits.cast::<u8>(), pixels.len());
+            let old = SelectObject(mem, dib);
+            let size = SIZE { cx: cw, cy: ch };
+            let src = POINT { x: 0, y: 0 };
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+            UpdateLayeredWindow(
+                st.hwnd.get(),
+                screen,
+                null(),
+                &size,
+                mem,
+                &src,
+                0,
+                &blend,
+                ULW_ALPHA,
+            );
+            SelectObject(mem, old);
+        }
+        if !mem.is_null() {
+            DeleteDC(mem);
+        }
+        if !dib.is_null() {
+            DeleteObject(dib);
+        }
+        ReleaseDC(null_mut(), screen);
+    }
+}
+
 fn blit(st: &State, hdc: windows_sys::Win32::Graphics::Gdi::HDC) {
+    if st.shape.is_some() {
+        update_layered(st);
+        return;
+    }
     let Ok(bits) = st.bgra.try_borrow() else {
         return;
     };
@@ -384,6 +513,49 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
         }
         WM_ERASEBKGND => 1,
+        // A squircle window has no non-client area: the client is the window
+        // (WS_THICKFRAME is kept only so the system offers edge resizing).
+        WM_NCCALCSIZE if st.shape.is_some() && wp != 0 => 0,
+        WM_NCHITTEST if st.shape.is_some() => {
+            let mut r = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            // SAFETY: `r` is a valid RECT; `hwnd` is our window.
+            if unsafe { GetWindowRect(hwnd, &mut r) } == 0 {
+                // SAFETY: forwarding the system's own arguments.
+                return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+            }
+            let (x, y) = (lo(lp) - r.left, hi(lp) - r.top);
+            // A tooltip never takes the pointer. Transparent corners belong to
+            // whatever is below (same-thread windows honour this; for other
+            // processes the layered window's alpha-0 pixels already pass through).
+            if st.kind == WindowKind::Tooltip || !st.hit(x, y) {
+                return HTTRANSPARENT as LRESULT;
+            }
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            if matches!(st.kind, WindowKind::Main | WindowKind::Dialog) {
+                // Edge and corner grips for resizing, 6 logical px wide. They
+                // are invisible: no hard-edged resize affordance is drawn.
+                let g = (6 * i64::from(st.dpi.get()) / 96) as i32;
+                let (l, rt, t, b) = (x < g, x >= w - g, y < g, y >= h - g);
+                let code = match (l, rt, t, b) {
+                    (true, _, true, _) => HTTOPLEFT,
+                    (_, true, true, _) => HTTOPRIGHT,
+                    (true, _, _, true) => HTBOTTOMLEFT,
+                    (_, true, _, true) => HTBOTTOMRIGHT,
+                    (true, ..) => HTLEFT,
+                    (_, true, ..) => HTRIGHT,
+                    (_, _, true, _) => HTTOP,
+                    (_, _, _, true) => HTBOTTOM,
+                    _ => HTCLIENT,
+                };
+                return code as LRESULT;
+            }
+            HTCLIENT as LRESULT
+        }
         WM_PAINT => {
             let mut ps = PAINTSTRUCT {
                 hdc: null_mut(),
@@ -415,6 +587,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_SIZE => {
             if wp as u32 != SIZE_MINIMIZED {
                 st.client.set((lo(lp).max(0), hi(lp).max(0)));
+                st.refresh_mask();
                 let s = st.logical_size();
                 st.push(DisplayEvent::Ui(Event::Resize(s)));
                 st.push(DisplayEvent::Redraw(Rect::new(0, 0, s.w, s.h)));
@@ -423,6 +596,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_DPICHANGED => {
             st.dpi.set(((wp >> 16) & 0xffff) as u32);
+            st.refresh_mask();
             // SAFETY: for WM_DPICHANGED `lp` points to the suggested RECT.
             if let Some(r) = unsafe { (lp as *const RECT).as_ref() } {
                 // SAFETY: resizing our own window to the suggested rectangle.
@@ -518,6 +692,30 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 WM_MBUTTONUP => PointerKind::Up(Button::Middle),
                 _ => PointerKind::Move,
             };
+            // Transparent corners are outside the window: a press there is
+            // dropped, a move there becomes one Leave, a release always passes.
+            if st.shape.is_some() {
+                let (cx, cy) = (lo(lp), hi(lp));
+                let (cw, ch) = st.client.get();
+                let in_rect = cx >= 0 && cy >= 0 && cx < cw && cy < ch;
+                if in_rect && !st.hit(cx, cy) {
+                    match kind {
+                        PointerKind::Move if st.pointer_inside.get() => {
+                            st.pointer_inside.set(false);
+                            st.push(DisplayEvent::Ui(Event::Pointer(PointerEvent::new(
+                                st.scale(cx),
+                                st.scale(cy),
+                                PointerKind::Leave,
+                            ))));
+                            return 0;
+                        }
+                        PointerKind::Move | PointerKind::Down(_) => return 0,
+                        _ => {}
+                    }
+                } else if in_rect {
+                    st.pointer_inside.set(true);
+                }
+            }
             match kind {
                 PointerKind::Down(_) => {
                     if st.buttons_down.get() == 0 {
@@ -612,6 +810,11 @@ impl Win32Window {
             cursor: Cell::new(CursorShape::Default),
             composing: Cell::new(false),
             ime_area: Cell::new(Rect::default()),
+            kind: opts.kind,
+            shape: opts.shape,
+            mask: RefCell::new(Mask::full(0, 0)),
+            pointer_inside: Cell::new(true),
+            mask_key: Cell::new((u32::MAX, 0, 0)),
         });
         let class = wide(CLASS_NAME);
         // SAFETY: a null module name asks for the current executable's handle.
@@ -635,11 +838,32 @@ impl Win32Window {
         // zero return is "already registered" on a second window, which is fine.
         unsafe { RegisterClassExW(&wc) };
 
-        let style = if opts.frameless {
+        let shaped = opts.shape.is_some();
+        let transient = opts.kind.is_transient();
+        // A squircle window is layered with per-pixel alpha (anti-aliased) and
+        // has no caption: WS_POPUP, plus a thick frame only so the system offers
+        // edge resizing and snapping (WM_NCCALCSIZE removes the frame area).
+        // Menus, popups and tooltips are tool windows that never take focus.
+        let style = if shaped && transient {
+            WS_POPUP
+        } else if shaped {
+            WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+        } else if opts.frameless {
             WS_POPUP
         } else {
             WS_OVERLAPPEDWINDOW
         };
+        let mut ex_style = 0;
+        if shaped {
+            ex_style |= WS_EX_LAYERED;
+        }
+        if transient {
+            ex_style |= WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
+        }
+        if opts.kind == WindowKind::Tooltip {
+            ex_style |= WS_EX_TRANSPARENT;
+        }
+        let (x, y) = opts.position.unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
         let mut r = RECT {
             left: 0,
             top: 0,
@@ -648,7 +872,10 @@ impl Win32Window {
         };
         // SAFETY: `r` is a valid RECT adjusted in place; 96 dpi until the
         // window exists and WM_DPICHANGED/GetDpiForWindow say otherwise.
-        unsafe { AdjustWindowRectExForDpi(&mut r, style, 0, 0, 96) };
+        // A shaped window has no non-client area, so its size is its client size.
+        if !shaped {
+            unsafe { AdjustWindowRectExForDpi(&mut r, style, 0, 0, 96) };
+        }
         let title = wide(&opts.title);
         // SAFETY: class and title are NUL-terminated and outlive the call;
         // `lpParam` is the address of the boxed State, which stays put (the
@@ -656,12 +883,12 @@ impl Win32Window {
         // and outlives the window (Drop destroys the window first).
         let hwnd = unsafe {
             CreateWindowExW(
-                0,
+                ex_style,
                 class.as_ptr(),
                 title.as_ptr(),
                 style,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
+                x,
+                y,
                 r.right - r.left,
                 r.bottom - r.top,
                 null_mut(),
@@ -678,12 +905,22 @@ impl Win32Window {
         let dpi = unsafe { GetDpiForWindow(hwnd) };
         state.dpi.set(if dpi == 0 { 96 } else { dpi });
         state.client.set(client_size(hwnd));
+        state.refresh_mask();
         // Start with the input method off; the chrome enables it for the
         // address field (set_ime_allowed).
         // SAFETY: disassociating the default context from our own window.
         unsafe { ImmAssociateContextEx(hwnd, null_mut(), 0) };
         // SAFETY: showing our own window.
-        unsafe { ShowWindow(hwnd, SW_SHOW) };
+        unsafe {
+            ShowWindow(
+                hwnd,
+                if transient {
+                    SW_SHOWNOACTIVATE
+                } else {
+                    SW_SHOW
+                },
+            )
+        };
         Ok(Win32Window { state })
     }
 

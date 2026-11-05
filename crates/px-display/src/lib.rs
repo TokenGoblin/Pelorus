@@ -23,6 +23,9 @@ use px_ui::geom::Rect;
 use px_ui::input::Event;
 use px_ui::platform::PlatformWindow;
 
+pub mod shape;
+pub use shape::{Mask, WindowKind, WindowShape};
+
 #[cfg(unix)]
 pub mod x11;
 
@@ -81,18 +84,51 @@ pub struct WindowOptions {
     pub height: u32,
     /// Ask the window manager for no decorations. The chrome draws its own
     /// controls, but the seam has no "begin move/resize" request yet, so a
-    /// frameless window cannot be dragged (ADR 044 follow-up).
+    /// frameless window cannot be dragged (ADR 044 follow-up). A shaped window
+    /// is always frameless, whatever this says.
     pub frameless: bool,
+    /// What the window is for (main, dialog, popup, menu, tooltip).
+    pub kind: WindowKind,
+    /// The window outline. `Some` for every window by default: all top-level
+    /// windows are squircles (ui-direction.md). `None` only for tests that read
+    /// raw pixels and for a platform that cannot shape.
+    pub shape: Option<WindowShape>,
+    /// Screen position of the window's top-left corner, for popups, menus and
+    /// tooltips; `None` lets the window manager place it.
+    pub position: Option<(i32, i32)>,
 }
 
 impl WindowOptions {
+    /// A squircle window of the main kind.
     pub fn new(title: &str, width: u32, height: u32) -> WindowOptions {
+        WindowOptions::of_kind(WindowKind::Main, title, width, height)
+    }
+
+    /// A window of `kind` with that kind's squircle radius.
+    pub fn of_kind(kind: WindowKind, title: &str, width: u32, height: u32) -> WindowOptions {
         WindowOptions {
             title: title.to_string(),
             width,
             height,
             frameless: false,
+            kind,
+            shape: Some(WindowShape::for_kind(kind)),
+            position: None,
         }
+    }
+
+    /// A popup, menu or tooltip at screen position `(x, y)`.
+    pub fn transient(kind: WindowKind, width: u32, height: u32, x: i32, y: i32) -> WindowOptions {
+        let mut o = WindowOptions::of_kind(kind, "", width, height);
+        o.frameless = true;
+        o.position = Some((x, y));
+        o
+    }
+
+    /// A plain rectangular window (no shape). Tests and unsupported platforms.
+    pub fn square(mut self) -> WindowOptions {
+        self.shape = None;
+        self
     }
 }
 

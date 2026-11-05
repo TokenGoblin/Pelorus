@@ -28,3 +28,4 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   until Windows CI has exercised it.
 - Tests: `tests/xvfb.rs` starts a real Xvfb per test and skips (loudly) without
   one. `px-chrome-demo` (`--features demo`) shows the chrome in a window.
+- Every window is a squircle (ui-direction.md): `WindowOptions` carries a `WindowShape` by default; `ShapeMode` says how it was realised and nothing falls back to a rectangle silently. See docs/research/phase-18-squircle-windows.md.

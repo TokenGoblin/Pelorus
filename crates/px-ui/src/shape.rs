@@ -346,8 +346,9 @@ impl Shape for Path {
     }
 }
 
-/// 4 x 4 coverage of one pixel, 0..=255.
-fn coverage(shape: &dyn Shape, px: i32, py: i32) -> u8 {
+/// 4 x 4 coverage of one pixel, 0..=255. Public so the window layer
+/// (px-display) shapes OS windows with exactly the chrome's squircle arithmetic.
+pub fn coverage(shape: &dyn Shape, px: i32, py: i32) -> u8 {
     if let Some(a) = shape.hint(px, py) {
         return a;
     }
