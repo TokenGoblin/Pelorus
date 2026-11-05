@@ -368,7 +368,17 @@ fn draw_border(
             }
             _ => {
                 // Corner square: split along the diagonal (doubled coordinates so
-                // pixel centres are integers).
+                // pixel centres are integers). A pixel inside the inner box (the
+                // cut-away part of a rounded inner corner) belongs to the nearest
+                // corner's quadrant.
+                let (l, t) = if l || r || t || b {
+                    (l, t)
+                } else {
+                    (
+                        2 * px + 1 < outer.x0 + outer.x1,
+                        2 * py + 1 < outer.y0 + outer.y1,
+                    )
+                };
                 let (dx, vband) = if l {
                     (2 * (px - outer.x0) + 1, ix0 - outer.x0)
                 } else {

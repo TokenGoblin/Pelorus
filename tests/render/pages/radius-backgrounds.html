@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<title>border-radius on backgrounds</title>
+<style>
+body { margin: 16px; background: #fff }
+div { display: inline-block; width: 100px; height: 70px; margin: 0 12px 12px 0; background: #36c }
+#a { border-radius: 10px }
+#b { border-radius: 35px; background: #c33 }
+#c { border-radius: 20px 4px 40px 0; background: #393 }
+#d { border-radius: 50px / 20px; background: #c60 }
+#e { border-radius: 50%; background: #639 }
+#f { border-radius: 999px; background: #069 }
+#g { border-radius: 30px 10px; background: #996; border: 6px solid #333; background-clip: padding-box }
+#h { border-radius: 12px; background: rgba(200, 0, 0, 0.5) }
+#i { width: 6px; height: 6px; border-radius: 3px; background: #000 }
+#j { width: 1px; height: 1px; border-radius: 4px; background: #000 }
+#k { border-radius: 8px 40px; background: #36c }
+#l { border-radius: 10% 30% 50% 70%; background: #c33 }
+</style>
+<div id="a"></div><div id="b"></div><div id="c"></div><div id="d"></div><div id="e"></div><div id="f"></div><div id="g"></div><div id="h"></div><div id="i"></div><div id="j"></div><div id="k"></div><div id="l"></div>
