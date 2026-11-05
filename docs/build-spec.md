@@ -147,7 +147,7 @@ pelorus/                    ← directory name is cosmetic
 │  ├─ px-brand/         ONLY crate containing the product name
 │  ├─ px-broker/        parent, capability broker, policy, frame tree
 │  ├─ px-ipc/           typed channels, postcard codec, handle passing
-│  ├─ px-sandbox/       the ONLY crate allowed `unsafe`
+│  ├─ px-sandbox/       audited unsafe core: OS sandbox primitives (ADR 008)
 │  ├─ px-net/           rustls, DoH, HTTP/1.1+2, partitioned pools
 │  ├─ px-dom/           generational arena DOM
 │  ├─ px-css/           stylo integration, cascade, computed values
@@ -160,7 +160,8 @@ pelorus/                    ← directory name is cosmetic
 │  ├─ px-websec/        SOP, CORS, CSP, mixed content, referrer, COOP/COEP
 │  ├─ px-a11y/          platform-independent a11y tree + UIA/AT-SPI
 │  ├─ px-content/       content process binary
-│  ├─ px-ui/            browser chrome (winit + wgpu, thin widgets)
+│  ├─ px-ui/            browser chrome (thin widgets; window layer in px-display)
+│  ├─ px-display/       window layer: hand-written X11 + Win32 (ADR 044; unsafe on Windows only)
 │  ├─ px-store/         partitioned storage + config-dir migration
 │  ├─ px-block/         content blocking, tracker mitigations
 │  ├─ px-update/        signed manifest fetch, data-file updates
@@ -339,7 +340,7 @@ Branch `phase/NN-slug`. Gate must pass on both OSes in CI. ADRs precede implemen
 **Phase 0 — Skeleton and policy**
 Workspace, CI matrix, `cargo-deny`/`cargo-vet`/`cargo-auditable`/unsafe-count baseline, ADR template, `000-name.md`, `001-threat-model.md`, root and per-crate `CLAUDE.md`, `px-brand` and the brand-leak gate, `LEGACY_CONFIG_DIRS` stub, compat site list, release profile flags from §4.2, reproducible-build proof.
 *Threat model names the adversaries:* malicious page; malicious ad or third-party script; network observer; cross-site tracker; malicious MCP server; compromised agent; local unprivileged process. *And who you are not defending against:* local admin, physical access, hostile kernel, targeted state actor with a full 0-day chain.
-*Gate:* builds on both OSes; hashes reproducible across two machines with different paths and usernames; supply-chain checks green; the per-crate unsafe rules hold (`forbid(unsafe_code)` everywhere except the two crates ADR 008 and ADR 024 name, each with its own stated rule); brand-leak gate proven by a deliberate violation failing CI.
+*Gate:* builds on both OSes; hashes reproducible across two machines with different paths and usernames; supply-chain checks green; the per-crate unsafe rules hold (`forbid(unsafe_code)` everywhere except the three crates ADR 008, ADR 024 and ADR 044 name, each with its own stated rule); brand-leak gate proven by a deliberate violation failing CI.
 
 **Phase 1 — Process and IPC skeleton** *(was Phase 12)*
 A real separate content process that does nothing but echo. `px-ipc` typed channels, handle passing, broker request/response shape, channel-keyed capability table, frame tree with `FrameId` that may resolve remotely, crash detection and restart.
@@ -545,7 +546,7 @@ These were argued and closed. They are recorded here so they are not re-proposed
 | Ground-up engine in Rust | Embed Chromium via CEF | Google's engine, Manifest V3's blocking limits, and a mandatory ~4-week rebase treadmill or knowingly shipped CVEs |
 | Reuse `html5ever`, `stylo`, `rustls`, `harfrust`/`skrifa` (was `swash`; amended by the user, ADR 036, 2026-11-04) | Write parsers and TLS from scratch | Writing your own HTML tokenizer or TLS stack buys bugs, not sovereignty. "Ground up" means the DOM, layout, compositor, process model, and security model — not Unicode tables |
 | Boa, interpreter only | SpiderMonkey or V8 bindings | Imports the largest CVE surface in any browser: a C++ JIT. No JIT also removes attacker-controlled gadget generation, the practical Spectre path |
-| Hand-rolled widgets on winit + wgpu | iced, egui, gtk-rs, Slint | A general toolkit imports its own redesigns and breaking changes into your chrome. The widget set here is tiny and you already own a compositor |
+| Hand-rolled widgets on a hand-written Win32 + X11 window layer (`px-display`; amended by the user, ADR 044, 2026-11-05; was winit + wgpu) | iced, egui, gtk-rs, Slint, winit, softbuffer | A general toolkit imports its own redesigns and breaking changes into your chrome. The widget set here is tiny and you already own a compositor |
 | Partitioning as a type-level property | A "block third-party cookies" setting | A setting can be wrong; a keyed type has no unpartitioned code path to leave enabled |
 | MCP at Phase 21 | MCP early, as a feature | It consumes the capability broker. Built before the broker and sandbox, it necessarily has ambient authority, and retrofitting constraint never works |
 | Process boundary at Phase 1 | Multi-process after the engine works | Converting synchronous engine calls into async IPC is a rewrite. This was the most expensive error in v1 of the plan |

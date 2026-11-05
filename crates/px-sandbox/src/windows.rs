@@ -26,7 +26,7 @@
 //! passed, and the handle list is what makes that true rather than merely
 //! intended.
 //!
-//! # The Phase 17 profile (ADR 044)
+//! # The Phase 17 profile (ADR 048)
 //!
 //! Everything below is applied at creation and then **read back from the
 //! operating system by the parent** before `spawn` returns; a rung is listed in
@@ -49,7 +49,7 @@
 //!
 //! Not an AppContainer and not a restricted-SID set. A low-integrity process
 //! can still *read* what the user's DACLs allow, so file read isolation on
-//! Windows is not claimed. ADR 044 records why and what choosing AppContainer
+//! Windows is not claimed. ADR 048 records why and what choosing AppContainer
 //! would cost. Nothing here has been run on Windows by the author; see
 //! `docs/research/phase-17-windows-unverified.md`.
 
@@ -128,7 +128,7 @@ const ACTIVE_PROCESS_LIMIT: u32 = 1;
 ///
 /// Deliberately absent: `PROHIBIT_DYNAMIC_CODE` (the engine has no JIT, but
 /// sanitizer builds and some allocators map executable memory; it is a
-/// follow-up once measured, ADR 044) and `CONTROL_FLOW_GUARD` (needs a binary
+/// follow-up once measured, ADR 048) and `CONTROL_FLOW_GUARD` (needs a binary
 /// built for it).
 const MITIGATIONS: u64 = 0x1 // DEP_ENABLE
     | 0x2 // DEP_ATL_THUNK_ENABLE
@@ -252,7 +252,7 @@ fn create_job() -> Option<OwnedHandle> {
 /// under a looser job. The memory cap is `ProcessMemoryLimit`: the most
 /// *committed* memory any one process in the job may hold. That is not the
 /// Linux cap's address space (reserved-but-uncommitted pages are free here), so
-/// the two figures measure different things; ADR 044 says so.
+/// the two figures measure different things; ADR 048 says so.
 fn apply_limits(job: &OwnedHandle, memory: MemoryLimit) -> Result<(), PolicyError> {
     let bytes = usize::try_from(memory.bytes()).map_err(|_| {
         failed(

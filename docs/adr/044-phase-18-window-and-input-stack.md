@@ -1,8 +1,11 @@
 # 044 — Phase 18 window and input stack: hand-written over winit, with the numbers
 
-- **Status:** proposed. Nothing in `Cargo.toml` or `Cargo.lock` has been changed.
-  Waits for the user; two of its decisions touch a settled row of Appendix A and a
-  hard rule of `/CLAUDE.md`, so nothing starts until they are made.
+- **Status:** accepted, 2026-11-05. The user chose option 1 of the ranking below
+  (hand-written Win32 + X11, XWayland for Wayland sessions; no `winit`, `wgpu` or
+  `softbuffer`, no native Wayland in v1) and approved the third unsafe crate,
+  `px-display`. Appendix A of the build spec and the `/CLAUDE.md` unsafe rule are
+  amended accordingly. Decisions 3 to 5 below keep their recommendations
+  (broker process for Phase 18, XWayland first, D-Bus client as its own ADR).
 - **Date:** 2026-11-04
 - **Phase:** 18 (decision needed before Phase 9 units 9b/9c, which build the IME
   backends in the same layer)
