@@ -285,3 +285,7 @@ source = "tests/render/pages/site-sizing.html"
 [[page]]
 id = "site-centering"
 source = "tests/render/pages/site-centering.html"
+
+[[page]]
+id = "site-stacking"
+source = "tests/render/pages/site-stacking.html"

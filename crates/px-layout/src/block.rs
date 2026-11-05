@@ -3935,6 +3935,93 @@ mod tests {
         );
     }
 
+    /// §8.3.1 edge cases real pages hit, each with its hand-computed answer.
+    #[test]
+    fn block_margin_collapsing_edge_cases() {
+        let reset = "html, body, div { display: block; margin: 0; padding: 0 } ";
+        let tops = |html: &str, css: &str| -> Vec<(i32, i32)> {
+            let (tree, _) = layout(html, &format!("{reset}{css}"));
+            rects_of(&tree, FragmentKind::Block)
+                .into_iter()
+                .map(|r| (r.1.0 / 60, r.3.0 / 60))
+                .collect()
+        };
+        // A parent's top margin collapses with its first child's: 10 and 20 give 20.
+        let v = tops(
+            "<html><body><div id=p><div id=c></div></div></body></html>",
+            "#p { margin-top: 10px } #c { margin-top: 20px; height: 5px }",
+        );
+        assert!(v.contains(&(20, 5)), "parent/child top collapse: {v:?}");
+        // An empty block's margins collapse through itself and with its siblings:
+        // 20, (10 and 30 collapsed through) and 5 give 30.
+        let v = tops(
+            "<html><body><div id=a></div><div id=e></div><div id=b></div></body></html>",
+            "#a { height: 10px; margin-bottom: 20px } #e { margin: 10px 0 30px } \
+             #b { height: 10px; margin-top: 5px }",
+        );
+        assert!(
+            v.contains(&(40, 10)),
+            "empty block collapses through: {v:?}"
+        );
+        // Positive and negative: 30 and -10 give 20.
+        let v = tops(
+            "<html><body><div id=a></div><div id=b></div></body></html>",
+            "#a { height: 10px; margin-bottom: 30px } #b { height: 10px; margin-top: -10px }",
+        );
+        assert!(v.contains(&(30, 10)), "30 and -10 give 20: {v:?}");
+        // `overflow: hidden` makes a formatting context root: no parent/child collapse.
+        let v = tops(
+            "<html><body><div id=p><div id=c></div></div></body></html>",
+            "#p { overflow: hidden } #c { margin-top: 20px; height: 5px }",
+        );
+        assert!(
+            v.contains(&(20, 5)) && v.contains(&(0, 25)),
+            "overflow:hidden contains: {v:?}"
+        );
+        // Padding between parent and child stops the collapse.
+        let v = tops(
+            "<html><body><div id=p><div id=c></div></div></body></html>",
+            "#p { padding-top: 1px; margin-top: 10px } #c { margin-top: 20px; height: 5px }",
+        );
+        assert!(v.contains(&(31, 5)), "padding stops the collapse: {v:?}");
+        // A parent with a definite height does not collapse its last child's bottom
+        // margin into its own.
+        let v = tops(
+            "<html><body><div id=p><div id=c></div></div><div id=n></div></body></html>",
+            "#p { height: 50px } #c { height: 5px; margin-bottom: 40px } #n { height: 1px }",
+        );
+        assert!(
+            v.contains(&(50, 1)),
+            "definite height keeps the margin inside: {v:?}"
+        );
+    }
+
+    /// `min-height`/`max-height` with percentages and `overflow` clipping do not
+    /// change the layout of what follows.
+    #[test]
+    fn block_min_and_max_height_bound_the_used_height() {
+        let (tree, _) = layout(
+            "<html><body><div id=a></div><div id=b><div id=c></div></div><div id=d></div></body></html>",
+            "html, body, div { display: block; margin: 0; padding: 0 } \
+             #a { min-height: 30px } \
+             #b { max-height: 20px; overflow: hidden } #c { height: 100px } \
+             #d { height: 10px }",
+        );
+        let rects = rects_of(&tree, FragmentKind::Block);
+        assert!(
+            rects.contains(&(px(0), px(0), px(800), px(30))),
+            "{rects:?}"
+        );
+        assert!(
+            rects.contains(&(px(0), px(30), px(800), px(20))),
+            "{rects:?}"
+        );
+        assert!(
+            rects.contains(&(px(0), px(50), px(800), px(10))),
+            "{rects:?}"
+        );
+    }
+
     /// §10.4: `min-width` raises it.
     #[test]
     fn block_min_width_raises_the_used_width() {
