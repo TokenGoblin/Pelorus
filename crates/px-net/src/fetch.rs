@@ -126,6 +126,54 @@ pub fn fetch_with_hsts(
     path: &str,
     preload: Option<&crate::hsts::PreloadList>,
 ) -> Result<Response, FetchError> {
+    fetch_request(key, &RequestSpec::get(path), preload)
+}
+
+/// One request to send: what [`crate::secure`] builds after every policy
+/// check has passed. `fetch` and `fetch_with_hsts` are the `GET` special case.
+///
+/// Header names and values are validated here, at the last point before the
+/// bytes are written, and not trusted to have been validated by the caller:
+/// a CR, LF or NUL in any of them is request splitting.
+#[derive(Debug, Clone)]
+pub struct RequestSpec {
+    /// Request method (an RFC 9110 token).
+    pub method: String,
+    /// Origin-relative request target.
+    pub path: String,
+    /// Extra headers. `Host`, `Connection`, `Content-Length` and
+    /// `Transfer-Encoding` are written by this module and refused here.
+    pub headers: Vec<(String, String)>,
+    /// Request body. A non-empty body, or `POST`/`PUT`, writes
+    /// `Content-Length`.
+    pub body: Vec<u8>,
+    /// Test-only: connect here instead of resolving the key's host. Lets a
+    /// test give a non-loopback name to a loopback server, which mixed-content
+    /// and cross-site scenarios need. Absent from a build without `testing`.
+    #[cfg(feature = "testing")]
+    pub connect_to: Option<std::net::SocketAddr>,
+}
+
+impl RequestSpec {
+    /// A bare `GET`.
+    pub fn get(path: &str) -> Self {
+        Self {
+            method: "GET".to_string(),
+            path: path.to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            #[cfg(feature = "testing")]
+            connect_to: None,
+        }
+    }
+}
+
+/// Send `spec` to the origin named by `key`. See [`fetch_with_hsts`].
+pub fn fetch_request(
+    key: &PartitionKey,
+    spec: &RequestSpec,
+    preload: Option<&crate::hsts::PreloadList>,
+) -> Result<Response, FetchError> {
     let origin = key.origin();
 
     // Before anything is built or connected. A plaintext request to a
@@ -138,9 +186,16 @@ pub fn fetch_with_hsts(
         return Err(FetchError::PlaintextToPreloadedHost);
     }
 
-    let request = build_request(origin.host(), path)?;
+    let request = build_request(origin.host(), spec)?;
 
     let address = format!("{}:{}", origin.host(), origin.port());
+    #[cfg(feature = "testing")]
+    let stream = match spec.connect_to {
+        Some(addr) => TcpStream::connect(addr),
+        None => TcpStream::connect(&address),
+    }
+    .map_err(FetchError::Connect)?;
+    #[cfg(not(feature = "testing"))]
     let stream = TcpStream::connect(&address).map_err(FetchError::Connect)?;
     stream
         .set_read_timeout(Some(TIMEOUT))
@@ -162,8 +217,33 @@ pub fn fetch_with_hsts(
     }
 }
 
+fn is_token(text: &str) -> bool {
+    !text.is_empty()
+        && text.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
 /// Build the request bytes, refusing anything that could split the request.
-fn build_request(host: &str, path: &str) -> Result<Vec<u8>, FetchError> {
+fn build_request(host: &str, spec: &RequestSpec) -> Result<Vec<u8>, FetchError> {
+    let path = spec.path.as_str();
     if path.is_empty() || !path.starts_with('/') {
         return Err(FetchError::BadRequest("the path must be origin-relative"));
     }
@@ -180,6 +260,9 @@ fn build_request(host: &str, path: &str) -> Result<Vec<u8>, FetchError> {
             "the host contains a control character",
         ));
     }
+    if !is_token(&spec.method) {
+        return Err(FetchError::BadRequest("the method is not a token"));
+    }
 
     // Deliberately minimal. Every header sent is a bit of entropy, and
     // invariant 4's "no identifiers" is easier to keep by not adding them in
@@ -187,11 +270,42 @@ fn build_request(host: &str, path: &str) -> Result<Vec<u8>, FetchError> {
     // Connection: close because pooling is the caller's business and this
     // primitive does one exchange.
     let mut request = Vec::new();
-    request.extend_from_slice(b"GET ");
+    request.extend_from_slice(spec.method.as_bytes());
+    request.push(b' ');
     request.extend_from_slice(path.as_bytes());
     request.extend_from_slice(b" HTTP/1.1\r\nHost: ");
     request.extend_from_slice(host.as_bytes());
-    request.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
+    request.extend_from_slice(b"\r\nConnection: close\r\n");
+    for (name, value) in &spec.headers {
+        if !is_token(name) {
+            return Err(FetchError::BadRequest("a header name is not a token"));
+        }
+        if matches!(
+            name.to_ascii_lowercase().as_str(),
+            "host" | "connection" | "content-length" | "transfer-encoding"
+        ) {
+            return Err(FetchError::BadRequest(
+                "that header is written by the transport",
+            ));
+        }
+        if value
+            .bytes()
+            .any(|byte| (byte < 0x20 && byte != b'\t') || byte == 0x7f)
+        {
+            return Err(FetchError::BadRequest(
+                "a header value contains a control character",
+            ));
+        }
+        request.extend_from_slice(name.as_bytes());
+        request.extend_from_slice(b": ");
+        request.extend_from_slice(value.as_bytes());
+        request.extend_from_slice(b"\r\n");
+    }
+    if !spec.body.is_empty() || matches!(spec.method.as_str(), "POST" | "PUT") {
+        request.extend_from_slice(format!("Content-Length: {}\r\n", spec.body.len()).as_bytes());
+    }
+    request.extend_from_slice(b"\r\n");
+    request.extend_from_slice(&spec.body);
     Ok(request)
 }
 
