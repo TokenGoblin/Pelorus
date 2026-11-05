@@ -188,6 +188,7 @@ impl Chrome {
                 }
             }
             Event::Pointer(p) => self.pointer(p, shaper),
+            Event::Wheel { .. } => Outcome::default(),
         };
         if out.consumed {
             if self.address.is_editing() {

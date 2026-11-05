@@ -270,7 +270,16 @@ impl X11Window {
                     1 => Button::Primary,
                     2 => Button::Middle,
                     3 => Button::Secondary,
-                    _ => return Ok(()), // wheel and extra buttons: no chrome event
+                    4 | 5 => {
+                        // Wheel: one press per detent (the release is ignored).
+                        if ev.code == proto::EV_BUTTON_PRESS {
+                            let notches = if e.detail == 4 { -1 } else { 1 };
+                            self.out
+                                .push_back(DisplayEvent::Ui(Event::Wheel { notches }));
+                        }
+                        return Ok(());
+                    }
+                    _ => return Ok(()), // sideways wheel and extra buttons: no event
                 };
                 let kind = if ev.code == proto::EV_BUTTON_PRESS {
                     PointerKind::Down(button)
