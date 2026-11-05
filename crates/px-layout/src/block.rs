@@ -229,6 +229,11 @@ struct Tables {
     /// `visible` (which puts its baseline at the bottom margin edge, §10.8.1) and
     /// `align` its `vertical-align`.
     atomic: Vec<Option<(bool, crate::inline::VAlign)>>,
+    /// Whether this fragment is a list marker outside its item (generated
+    /// content, see `px_css::generated`): it sits on a line like an
+    /// inline-block but takes no room, hanging left of the line start by its
+    /// own width.
+    outside_marker: Vec<bool>,
 }
 
 impl Tables {
@@ -254,6 +259,7 @@ impl Tables {
             inline_runs: vec![None],
             edges: vec![Edges::ZERO],
             atomic: vec![None],
+            outside_marker: vec![false],
         }
     }
 
@@ -277,6 +283,7 @@ impl Tables {
             self.inline_runs.push(None);
             self.edges.push(Edges::ZERO);
             self.atomic.push(None);
+            self.outside_marker.push(false);
         }
     }
 }
@@ -741,6 +748,8 @@ pub fn layout_document_in(
                     tables.grow_to(fragment.index());
                     tables.inline_sizes[fragment.index()] = content_inline;
                     tables.float_sides[fragment.index()] = side;
+                    tables.outside_marker[fragment.index()] =
+                        px_css::generated::is_outside_marker(arena, node);
                     tables.atomic[fragment.index()] = (inline_block && !absolute && side.is_none())
                         .then(|| {
                             (
@@ -1996,10 +2005,25 @@ fn place_run(
             crate::inline::AtomicInfo {
                 fragment,
                 align,
-                margin: tables
-                    .edges
-                    .get(fragment.index())
-                    .map_or(LogicalEdges::ZERO, |e| e.margin),
+                margin: {
+                    let mut margin = tables
+                        .edges
+                        .get(fragment.index())
+                        .map_or(LogicalEdges::ZERO, |e| e.margin);
+                    // An outside list marker hangs left of the line start: its
+                    // margin box is zero wide, so what follows it does not move.
+                    if tables
+                        .outside_marker
+                        .get(fragment.index())
+                        .copied()
+                        .unwrap_or(false)
+                    {
+                        let width = tree.get(fragment).map_or(Au(0), |f| f.size.inline);
+                        let gap = margin.inline_end;
+                        margin.inline_start = Au(0) - width - gap;
+                    }
+                    margin
+                },
                 size: tree.get(fragment).map_or(LogicalSize::ZERO, |f| f.size),
                 // No line box (or a clipped box): the bottom margin edge.
                 baseline: atomic_baseline(tree, fragment, clips).unwrap_or_else(|| {

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<title>Generated content: list markers</title>
+<style>
+body { margin: 0; background: #fff; font: 16px/20px Ahem; color: #222 }
+ul, ol { margin: 0; padding-left: 40px }
+li { display: list-item }
+ol { list-style-type: decimal }
+.col { float: left; width: 180px; margin: 10px; background: #eef }
+.disc { list-style-type: disc }
+.circle { list-style-type: circle }
+.square { list-style-type: square }
+.lroman { list-style-type: lower-roman }
+.ualpha { list-style-type: upper-alpha }
+.inside { list-style-position: inside }
+.none { list-style-type: none }
+.red li { color: #c00 }
+</style>
+<div class="col"><ul class="disc"><li>aa</li><li>bb</li></ul><ul class="circle"><li>aa</li><li>bb</li></ul><ul class="square red"><li>aa</li><li>bb</li></ul></div>
+<div class="col"><ol><li>aa</li><li>bb</li><li>cc</li></ol><ol class="lroman"><li>aa</li><li>bb</li><li>cc</li><li>dd</li></ol><ol class="ualpha" start="3"><li>aa</li><li>bb</li></ol></div>
+<div class="col"><ul class="inside"><li>aa</li><li>bb</li></ul><ol class="inside"><li>aa</li><li value="9">bb</li><li>cc</li></ol><ul class="none"><li>aa</li></ul><ol reversed><li>aa</li><li>bb</li><li>cc</li></ol></div>
+<div class="col"><ol><li>aa<ol class="lroman"><li>bb</li><li>cc</li></ol></li><li>dd<ul><li>ee</li></ul></li></ol></div>

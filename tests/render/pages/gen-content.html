@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<title>Generated content: strings, attr(), counters, quotes, br</title>
+<style>
+body { margin: 8px; background: #fff; font: 16px/24px Ahem; color: #222 }
+div { margin-bottom: 8px; background: #eee }
+.s::before { content: "AB"; background: #9c9; padding: 0 3px; }
+.s::after { content: "CD" "E"; background: #c99; padding: 0 3px; }
+.a::before { content: attr(data-x); background: #99c; padding: 0 3px; }
+.a::after { content: attr(data-y, "none") "!"; background: #cc9; padding: 0 3px; }
+.c { counter-reset: n }
+.c span { counter-increment: n }
+.c span::before { content: counter(n) ")"; background: #9cc; padding: 0 3px; margin-right: 8px }
+.q::before { content: open-quote; background: #c9c; padding: 0 3px; }
+.q::after { content: close-quote; background: #c9c; padding: 0 3px; }
+.q { quotes: "<" ">" }
+.b::before { content: "x"; background: #9c9; padding: 0 3px; }
+.b::after { content: "y"; background: #c99; padding: 0 3px; }
+.blk::before { content: "head"; display: block; background: #9c9; padding: 0 3px; }
+.blk::after { content: "foot"; display: block; background: #c99; padding: 0 3px; }
+.sp::before { content: " lead"; background: #9c9; padding: 0 3px; }
+.sp::after { content: "trail "; background: #c99; padding: 0 3px; }
+</style>
+<div class="s">mid</div>
+<div class="a" data-x="XYZ">mid</div>
+<div class="c"><span>a</span> <span>b</span> <span>c</span></div>
+<div class="q">q<span class="q">r</span></div>
+<div class="b">one<br>two</div>
+<div class="blk">body</div>
+<div class="sp">mid</div>

@@ -726,6 +726,12 @@ impl MarkerShape {
                 String::new(),
             ),
             Self::Square => (shape_css("background-color:currentcolor"), String::new()),
+            // Outside, the gap to the item is a margin (a trailing space inside a
+            // shrink-to-fit box does not survive); inside it stays text.
+            Self::Text(t) if outside => (
+                format!("display:{display};white-space:pre;text-indent:0;text-align:start;margin-right:0.35em"),
+                t.trim_end().to_owned(),
+            ),
             Self::Text(t) => (
                 format!("display:{display};white-space:pre;text-indent:0;text-align:start"),
                 t.clone(),

@@ -313,3 +313,15 @@ source = "tests/render/pages/site-centering.html"
 [[page]]
 id = "site-stacking"
 source = "tests/render/pages/site-stacking.html"
+
+[[page]]
+id = "gen-clearfix"
+source = "tests/render/pages/gen-clearfix.html"
+
+[[page]]
+id = "gen-lists"
+source = "tests/render/pages/gen-lists.html"
+
+[[page]]
+id = "gen-content"
+source = "tests/render/pages/gen-content.html"

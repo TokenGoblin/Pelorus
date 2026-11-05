@@ -161,7 +161,7 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
         return Err("parse abandoned".into());
     }
     let quirks = px_css::engine::quirks_mode_of(&dom);
-    let arena = dom.arena;
+    let mut arena = dom.arena;
     let mut engine = px_css::engine::StyleEngine::new_with_color_scheme(
         WIDTH as f32,
         MIN_HEIGHT as f32,
@@ -172,9 +172,8 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     for css in stylesheets(root, path, &arena) {
         engine.add_author_stylesheet(&css, "https://corpus.invalid/page.css");
     }
-    let style_root = engine.style_root_for(&arena);
-    engine
-        .resolve(&arena, &style_root)
+    let style_root = engine
+        .style_document(&mut arena)
         .ok_or("style resolve failed")?;
     // Only the corpus' own pages get pictures. A vendored WPT page that names an
     // image (`grid-abspos-staticpos-align-self-img-001`) tests the layout mode
