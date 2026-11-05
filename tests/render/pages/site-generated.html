@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<title>Real-page generated content: breadcrumbs, quotes, icons, nested lists</title>
+<style>
+body { margin: 0; background: #fff; font: 16px/24px Ahem; color: #223 }
+ul, ol { margin: 0; padding-left: 40px }
+li { display: list-item }
+.crumbs { list-style: none; padding: 8px 12px; margin: 0; background: #eef }
+.crumbs li { display: inline-block }
+.crumbs li:not(:last-child)::after { content: ">"; margin: 0 8px; color: #99a }
+.quote { margin: 12px; padding: 8px 8px 8px 24px; background: #ffe; border-left: 4px solid #cc6; position: relative }
+.quote::before { content: open-quote; position: absolute; left: 4px; top: 8px; color: #cc6 }
+.quote::after { content: close-quote; color: #cc6 }
+.badge { display: inline-block; padding: 0 6px; background: #3a6; color: #fff }
+.badge::before { content: "+"; margin-right: 4px }
+.card { margin: 12px; padding: 8px; background: #efe; width: 300px }
+.card h3 { margin: 0; font-size: 16px }
+.card h3::after { content: ""; display: block; height: 3px; width: 40px; background: #3a6; margin: 4px 0 }
+.steps { counter-reset: step; list-style: none; padding: 0 12px }
+.steps li { display: block; counter-increment: step }
+.steps li::before { content: "Step " counter(step) ": "; color: #a36 }
+.toc { counter-reset: h }
+.toc li { display: block; counter-increment: h; counter-reset: sub }
+.toc li li { counter-increment: sub }
+.toc li::before { content: counter(h) "."; margin-right: 8px }
+.toc li li::before { content: counter(h) "." counter(sub); margin-right: 8px }
+.clear::after { content: ""; display: block; clear: both }
+.fl { float: left; width: 60px; height: 30px; background: #9ac; margin: 0 8px 8px 0 }
+</style>
+<ul class="crumbs"><li>ab</li><li>cde</li><li>f</li></ul>
+<div class="quote">quoted text</div>
+<p style="margin:12px">label <span class="badge">new</span></p>
+<div class="card"><h3>title</h3>text</div>
+<ol class="steps"><li>ab</li><li>cd</li></ol>
+<ul class="toc"><li>one<ul><li>a</li><li>b</li></ul></li><li>two</li></ul>
+<ul><li><p style="margin:0">para in item</p></li><li>plain<ol><li>x</li></ol></li></ul>
+<div class="clear" style="margin:12px;background:#eee"><div class="fl"></div><div class="fl"></div></div>
