@@ -157,3 +157,7 @@ source = "tests/render/pages/inline-decoration.html"
 [[page]]
 id = "inline-spacing-transform"
 source = "tests/render/pages/inline-spacing-transform.html"
+
+[[page]]
+id = "inline-white-space-justify"
+source = "tests/render/pages/inline-white-space-justify.html"

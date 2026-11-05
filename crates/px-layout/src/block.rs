@@ -289,6 +289,10 @@ struct PendingRun {
     style: crate::text::TextStyle,
     /// The element whose computed colour paints the run.
     node: Option<NodeId>,
+    /// `text-indent`, resolved against the container's content width: how far the
+    /// run's first line is pushed in from its start edge. Zero for a run that is
+    /// not the first thing in its container (CSS Text 3, section 7.1).
+    indent: Au,
     /// Where this run sits among its container's content items.
     ///
     /// Only meaningful for a run held directly by a block container — one wrapped
@@ -753,6 +757,23 @@ pub fn layout_document(
                         grids.insert(fragment.index(), container);
                     }
 
+                    // `text-indent` belongs to the first formatted line of the
+                    // container: runs after an in-flow block child get none.
+                    let first_block = items
+                        .iter()
+                        .position(|i| matches!(i, Content::Block(_)))
+                        .unwrap_or(usize::MAX);
+                    let indent_of = |slot: usize| {
+                        let hanging_or_none =
+                            style.as_ref().is_none_or(|s| s.clone_text_indent().hanging);
+                        match style.as_ref() {
+                            Some(s) if slot < first_block && !hanging_or_none => {
+                                s.clone_text_indent().length.to_used_value(available)
+                            }
+                            _ => Au(0),
+                        }
+                    };
+
                     for (slot, item) in items.into_iter().enumerate() {
                         match item {
                             Content::Block(child)
@@ -794,6 +815,7 @@ pub fn layout_document(
                                     run,
                                     style: text_style,
                                     node: Some(node),
+                                    indent: indent_of(slot),
                                     slot,
                                 });
                             }
@@ -815,6 +837,7 @@ pub fn layout_document(
                                     run,
                                     style: text_style,
                                     node: Some(node),
+                                    indent: indent_of(slot),
                                     slot,
                                 });
                                 // No `Children` step, because an anonymous block
@@ -1645,6 +1668,7 @@ fn place_run(
         },
         block_origin,
         content,
+        indent: run.indent,
     };
     let (lines, height) = crate::inline::layout_lines(tree, &context);
 

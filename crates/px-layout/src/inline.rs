@@ -497,6 +497,9 @@ pub(crate) struct InlineContext<'a> {
     pub block_origin: Au,
     /// The inline boxes and inline-blocks of the run, if it has any.
     pub content: Option<RunContent<'a>>,
+    /// `text-indent`: the first line starts this far in from the block's start edge
+    /// (the right edge in a right-to-left block) and has that much less room.
+    pub indent: Au,
 }
 
 /// Lay `context` out into line fragments, appended to `tree`.
@@ -555,6 +558,8 @@ pub(crate) fn layout_lines(
     let strut_above = strut.baseline_in(style.line_height);
     let strut_below = style.line_height - strut_above;
     let mut from = 0usize;
+    // `text-indent` is spent by the first line that has content.
+    let mut indent = context.indent;
     // Inline boxes that reach the current line, outermost first.
     let mut active: Vec<usize> = Vec::new();
     let mut next_box = 0usize;
@@ -582,7 +587,7 @@ pub(crate) fn layout_lines(
         }
 
         let room = end - start;
-        let Some(line) = prepared.next_line(from, room) else {
+        let Some(line) = prepared.next_line(from, room - indent) else {
             break;
         };
         // §9.5: "If a shortened line box is too small to contain any content,
@@ -590,7 +595,7 @@ pub(crate) fn layout_lines(
         // either some content fits or there are no more floats present." The line
         // overflows its room only when its first unbreakable piece does not fit;
         // the next float edge is strictly below, so this cannot spin.
-        if line.width > room
+        if line.width > room - indent
             && room < context.available
             && let Some(below) = context.floats.and_then(|f| f.next_edge_below(block_cursor))
         {
@@ -613,30 +618,38 @@ pub(crate) fn layout_lines(
         }
 
         // `text-align`. Overflowing lines align to their start edge.
-        let slack = (room - line.width).max(Au(0));
+        // The indent takes room on the start side of the first line only.
+        let line_indent = std::mem::replace(&mut indent, Au(0));
+        let indent_left = if style.rtl { Au(0) } else { line_indent };
+        let slack = (room - line_indent - line.width).max(Au(0));
         let spaces = context
             .text
             .get(line.start..line.content_end)
             .map_or(0, |s| s.bytes().filter(|b| *b == b' ').count());
         let justify = style.align == Align::Justify && !line.last && !line.forced && spaces > 0;
-        let (shift, extra_space, _width) = match style.align {
-            Align::Justify if justify => {
-                let n = i32::try_from(spaces).unwrap_or(i32::MAX);
-                let each = slack / n;
-                (Au(0), each, line.width + each * n)
-            }
-            Align::Right => (slack, Au(0), line.width),
-            Align::Center => (slack / 2, Au(0), line.width),
-            Align::Justify if style.rtl => (slack, Au(0), line.width),
-            Align::Left | Align::Justify => (Au(0), Au(0), line.width),
+        // Justification spreads the slack over the spaces in whole app units: every
+        // space gets `each`, and the first `remainder` spaces one unit more, so the
+        // line is exactly full.
+        let n = i32::try_from(spaces).unwrap_or(i32::MAX).max(1);
+        let (shift, extra_space, remainder) = match style.align {
+            Align::Justify if justify => (
+                Au(0),
+                Au(slack.0 / n),
+                usize::try_from(slack.0 % n).unwrap_or(0),
+            ),
+            Align::Right => (slack, Au(0), 0),
+            Align::Center => (slack / 2, Au(0), 0),
+            Align::Justify if style.rtl => (slack, Au(0), 0),
+            Align::Left | Align::Justify => (Au(0), Au(0), 0),
         };
+        let shift = shift + indent_left;
         let width = if justify {
-            line.width + extra_space * i32::try_from(spaces).unwrap_or(i32::MAX)
+            line.width + slack
         } else {
             line.width
         };
 
-        let content = prepared.line_runs(&line, extra_space);
+        let content = prepared.line_runs(&line, extra_space, remainder);
 
         // The inline boxes that reach this line. Boxes are in open order, so
         // those starting before the line's end are exactly a prefix; a box that
@@ -1004,6 +1017,7 @@ mod tests {
             floats: None,
             block_origin: Au(0),
             content: None,
+            indent: Au(0),
         }
     }
 
