@@ -23,10 +23,15 @@ enum Enc {
 }
 
 fn label(l: &str) -> Option<Enc> {
-    match l.trim().trim_matches(['"', '\'']).to_ascii_lowercase().as_str() {
+    match l
+        .trim()
+        .trim_matches(['"', '\''])
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "utf-8" | "utf8" | "unicode-1-1-utf-8" => Some(Enc::Utf8),
-        "windows-1252" | "iso-8859-1" | "latin1" | "us-ascii" | "ascii" | "iso8859-1"
-        | "l1" | "cp1252" | "x-cp1252" => Some(Enc::Latin),
+        "windows-1252" | "iso-8859-1" | "latin1" | "us-ascii" | "ascii" | "iso8859-1" | "l1"
+        | "cp1252" | "x-cp1252" => Some(Enc::Latin),
         "utf-16le" | "utf-16" => Some(Enc::Utf16Le),
         "utf-16be" => Some(Enc::Utf16Be),
         _ => None,
@@ -95,15 +100,11 @@ pub fn decode_html(bytes: &[u8], content_type: Option<&str>) -> String {
             })
             .collect(),
         Enc::Utf16Le | Enc::Utf16Be => {
-            let units = body.chunks_exact(2).map(|c| {
-                let (a, b) = (
-                    c.first().copied().unwrap_or(0),
-                    c.get(1).copied().unwrap_or(0),
-                );
+            let units = body.as_chunks::<2>().0.iter().map(|&pair| {
                 if enc == Enc::Utf16Le {
-                    u16::from_le_bytes([a, b])
+                    u16::from_le_bytes(pair)
                 } else {
-                    u16::from_be_bytes([a, b])
+                    u16::from_be_bytes(pair)
                 }
             });
             char::decode_utf16(units)
@@ -126,14 +127,20 @@ mod tests {
     #[test]
     fn header_charset_wins_over_meta() {
         assert_eq!(
-            decode_html(b"<meta charset=utf-8>\xE9", Some("text/html; charset=ISO-8859-1")),
+            decode_html(
+                b"<meta charset=utf-8>\xE9",
+                Some("text/html; charset=ISO-8859-1")
+            ),
             "<meta charset=utf-8>é"
         );
     }
 
     #[test]
     fn meta_charset_is_prescanned() {
-        assert_eq!(decode_html(b"<meta charset=\"windows-1252\">\x93x\x94", None).chars().skip(21).collect::<String>(), "\u{201C}x\u{201D}");
+        assert!(
+            decode_html(b"<meta charset=\"windows-1252\">\x93x\x94", None)
+                .ends_with("\u{201C}x\u{201D}")
+        );
         assert_eq!(
             decode_html(
                 b"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=iso-8859-1\">\xE9",

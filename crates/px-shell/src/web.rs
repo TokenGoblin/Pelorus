@@ -58,9 +58,13 @@ impl Net {
             Err(e) => return failed(url, &e.reason()),
         };
         let ct = doc.content_type.clone();
-        let kind = ct
-            .as_deref()
-            .map(|c| c.split(';').next().unwrap_or("").trim().to_ascii_lowercase());
+        let kind = ct.as_deref().map(|c| {
+            c.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        });
         let source = match kind.as_deref() {
             None | Some("" | "text/html" | "application/xhtml+xml") => {
                 decode_html(&doc.body, ct.as_deref())

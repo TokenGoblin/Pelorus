@@ -5,7 +5,7 @@
 //! proxy that re-terminates TLS with its own CA. This module lets the live-web
 //! checks run there. It exists only under `#[cfg(feature = "testing")]` (§14.4):
 //! the proxy is read from `HTTPS_PROXY`, the extra trust anchors from the PEM
-//! file named by `PELORUS_TEST_CA_BUNDLE`, and neither is looked at in a
+//! file named by `PX_TEST_CA_BUNDLE`, and neither is looked at in a
 //! shipping build, where this whole module is absent and `cargo xtask network`
 //! scans for it. Certificate verification is never switched off: the proxy CA
 //! is simply one more anchor, added to the normal store.
@@ -80,10 +80,10 @@ fn tunnel(proxy: &str, host: &str, port: u16) -> std::io::Result<TcpStream> {
     Ok(stream)
 }
 
-/// The normal trust store plus every certificate in `PELORUS_TEST_CA_BUNDLE`.
+/// The normal trust store plus every certificate in `PX_TEST_CA_BUNDLE`.
 pub fn config() -> Result<Arc<ClientConfig>, FetchError> {
     let (mut roots, _source): (RootCertStore, _) = tls::root_store();
-    if let Ok(path) = std::env::var("PELORUS_TEST_CA_BUNDLE") {
+    if let Ok(path) = std::env::var("PX_TEST_CA_BUNDLE") {
         let pem = std::fs::read_to_string(&path)
             .map_err(|e| FetchError::Tls(format!("test CA bundle unreadable: {e}")))?;
         for der in pem_certificates(&pem) {

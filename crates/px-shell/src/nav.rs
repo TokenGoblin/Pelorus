@@ -244,7 +244,11 @@ mod tests {
             Location::parse("file:///tmp/a.html"),
             Ok(Location::File("/tmp/a.html".into()))
         );
-        assert!(Location::parse("https://example.com/").is_err());
+        assert_eq!(
+            Location::parse("https://example.com"),
+            Ok(Location::Web("https://example.com/".into()))
+        );
+        assert!(Location::parse("ftp://example.com/").is_err());
         assert!(Location::parse("").is_err());
         // A drive letter is a path.
         assert!(Location::parse("C:\\pages\\a.html").is_ok());
@@ -267,6 +271,18 @@ mod tests {
         );
         assert_eq!(here.resolve("#frag"), None);
         assert_eq!(here.resolve("https://example.com/x"), None);
+        let web = Location::Web("https://example.com/a/b.html".into());
+        assert_eq!(
+            web.resolve("../c.html?x#y"),
+            Some(Location::Web("https://example.com/c.html?x".into()))
+        );
+        assert_eq!(web.resolve("#frag"), None);
+        assert_eq!(web.resolve("javascript:alert(1)"), None);
+        assert_eq!(web.resolve("mailto:a@b.c"), None);
+        assert_eq!(
+            web.resolve("//other.org/"),
+            Some(Location::Web("https://other.org/".into()))
+        );
         assert_eq!(here.resolve("//example.com/x"), None);
         assert_eq!(here.resolve("javascript:alert(1)"), None);
         assert_eq!(here.resolve("mailto:a@b.c"), None);
@@ -274,17 +290,21 @@ mod tests {
 
     #[test]
     fn failures_are_pages() {
-        let l = Location::About("nope".into()).load();
+        let l = Location::About("nope".into()).load(&mut Net::default());
         assert!(l.failed);
         assert!(l.source.contains("no built-in page"));
-        let l = Location::File("/nonexistent/x.html".into()).load();
+        let l = Location::File("/nonexistent/x.html".into()).load(&mut Net::default());
         assert!(l.failed);
     }
 
     #[test]
     fn every_builtin_loads() {
         for (n, _) in BUILTIN {
-            assert!(!Location::About((*n).into()).load().failed);
+            assert!(
+                !Location::About((*n).into())
+                    .load(&mut Net::default())
+                    .failed
+            );
         }
     }
 }

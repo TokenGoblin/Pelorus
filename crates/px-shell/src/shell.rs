@@ -644,9 +644,9 @@ mod tests {
     }
 
     #[test]
-    fn network_addresses_are_refused_with_a_page() {
+    fn unsupported_schemes_are_refused_with_a_page() {
         let mut s = shell(&[Location::welcome()]);
-        s.apply(AppRequest::Navigate("https://example.com/".into()));
+        s.apply(AppRequest::Navigate("ftp://example.com/".into()));
         s.frame();
         assert_eq!(s.active_location(), Some(&Location::welcome()));
         assert!(
@@ -655,8 +655,20 @@ mod tests {
                 .unwrap()
                 .doc
                 .source
-                .contains("local files only")
+                .contains("web (http, https)")
         );
+    }
+
+    #[test]
+    fn a_failed_web_load_is_the_error_page() {
+        // A closed loopback port: refused at once, no external network.
+        let mut s = shell(&[Location::welcome()]);
+        s.apply(AppRequest::Navigate("http://127.0.0.1:9/".into()));
+        s.frame();
+        let src = &s.tabs.first().unwrap().doc.source;
+        assert!(src.contains("could not be opened"), "{src}");
+        assert!(src.contains("http://127.0.0.1:9/"));
+        assert!(!src.contains("<script"));
     }
 
     #[test]

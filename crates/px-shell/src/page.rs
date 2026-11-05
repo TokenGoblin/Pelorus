@@ -4,8 +4,8 @@
 //! Everything here is in-process (see this crate's CLAUDE.md). Local files only:
 //! a stylesheet `href` with a scheme or a host is skipped, never fetched.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::collections::{HashMap, HashSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use px_layout::block::layout_document;
@@ -208,12 +208,7 @@ pub fn layout(source: &str, page: &Resources, width: u32, height: u32) -> Result
     .map_err(|_| "the engine panicked on this page".to_string())?
 }
 
-fn layout_inner(
-    source: &str,
-    page: &Resources,
-    width: u32,
-    height: u32,
-) -> Result<Laid, String> {
+fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Result<Laid, String> {
     let width = width.max(1);
     let height = height.max(1);
     let dom = px_dom::parse(source);

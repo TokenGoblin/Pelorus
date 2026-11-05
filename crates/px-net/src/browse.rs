@@ -175,6 +175,12 @@ fn failure(out: FetchOutcome) -> LoadError {
 }
 
 impl Loader<'_> {
+    /// Test-only: send every connection of this loader to `addr`.
+    #[cfg(feature = "testing")]
+    pub fn connect_to(&mut self, addr: std::net::SocketAddr) {
+        self.fetcher.connect_to = Some(addr);
+    }
+
     /// Navigate to `url` (an absolute http(s) URL): the browser-initiated
     /// top-level fetch, no referrer.
     pub fn navigate(&mut self, url: &str) -> Result<Document, LoadError> {
@@ -248,7 +254,15 @@ impl Loader<'_> {
 // -- URL reference resolution ------------------------------------------------
 
 fn encode_path_char(c: char, out: &mut String) {
-    if c <= ' ' || c == '"' || c == '<' || c == '>' || c == '`' || c == '{' || c == '}' || c == '\u{7f}' {
+    if c <= ' '
+        || c == '"'
+        || c == '<'
+        || c == '>'
+        || c == '`'
+        || c == '{'
+        || c == '}'
+        || c == '\u{7f}'
+    {
         let mut buf = [0u8; 4];
         for b in c.encode_utf8(&mut buf).bytes() {
             out.push_str(&format!("%{b:02X}"));
@@ -311,9 +325,7 @@ pub fn resolve(base: &str, reference: &str) -> Option<String> {
         None => (r, None),
     };
     let base_query = base.query().map(|q| format!("?{q}")).unwrap_or_default();
-    let mut s = if r.is_empty() {
-        format!("{origin}{}{base_query}", base.path())
-    } else if r.starts_with('#') {
+    let mut s = if r.is_empty() || r.starts_with('#') {
         format!("{origin}{}{base_query}", base.path())
     } else if let Some(rest) = r_no_frag.strip_prefix("//") {
         format!("{}://{rest}", base.scheme())
@@ -391,15 +403,33 @@ mod tests {
     fn references_resolve() {
         let r = |x: &str| resolve(B, x);
         assert_eq!(r("d.css").as_deref(), Some("https://example.com/a/b/d.css"));
-        assert_eq!(r("../d.css").as_deref(), Some("https://example.com/a/d.css"));
-        assert_eq!(r("../../../d.css").as_deref(), Some("https://example.com/d.css"));
+        assert_eq!(
+            r("../d.css").as_deref(),
+            Some("https://example.com/a/d.css")
+        );
+        assert_eq!(
+            r("../../../d.css").as_deref(),
+            Some("https://example.com/d.css")
+        );
         assert_eq!(r("/d.css").as_deref(), Some("https://example.com/d.css"));
         assert_eq!(r("//other.org/x").as_deref(), Some("https://other.org/x"));
-        assert_eq!(r("http://other.org/x").as_deref(), Some("http://other.org/x"));
-        assert_eq!(r("?y=2").as_deref(), Some("https://example.com/a/b/c.html?y=2"));
-        assert_eq!(r("#top").as_deref(), Some("https://example.com/a/b/c.html?x=1#top"));
+        assert_eq!(
+            r("http://other.org/x").as_deref(),
+            Some("http://other.org/x")
+        );
+        assert_eq!(
+            r("?y=2").as_deref(),
+            Some("https://example.com/a/b/c.html?y=2")
+        );
+        assert_eq!(
+            r("#top").as_deref(),
+            Some("https://example.com/a/b/c.html?x=1#top")
+        );
         assert_eq!(r("./").as_deref(), Some("https://example.com/a/b/"));
-        assert_eq!(r("d e.css").as_deref(), Some("https://example.com/a/b/d%20e.css"));
+        assert_eq!(
+            r("d e.css").as_deref(),
+            Some("https://example.com/a/b/d%20e.css")
+        );
         assert_eq!(r("javascript:alert(1)"), None);
         assert_eq!(r("mailto:a@b.c"), None);
         assert_eq!(r("data:text/css,a{}"), None);
