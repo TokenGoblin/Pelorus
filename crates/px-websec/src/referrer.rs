@@ -112,6 +112,11 @@ pub fn parse_attribute(value: &str) -> Option<ReferrerPolicy> {
     )
 }
 
+/// STUB
+pub fn parse_meta_content(value: &str) -> Option<ReferrerPolicy> {
+    parse_attribute(value)
+}
+
 /// The policy that applies: the request's own (attribute) policy, else the
 /// document's, else the default.
 pub fn effective_policy(

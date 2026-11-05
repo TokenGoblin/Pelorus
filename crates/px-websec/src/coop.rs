@@ -452,6 +452,11 @@ pub fn coep_check_response(
     }
 }
 
+/// STUB
+pub fn coep_navigation_check(_parent: Coep, _response: Coep) -> CorpVerdict {
+    CorpVerdict::Allowed
+}
+
 // ------------------------------------------------------------ secure context
 
 /// Secure-context gating. `chain[0]` is the document itself, the rest are

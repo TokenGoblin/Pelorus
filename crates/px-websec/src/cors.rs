@@ -455,6 +455,15 @@ pub fn should_send_origin_header(request: &CorsRequest, taint: Tainting) -> bool
     taint == Tainting::Cors || !matches!(request.method.as_str(), "GET" | "HEAD")
 }
 
+/// STUB
+pub fn origin_header_value(
+    request: &CorsRequest,
+    taint: Tainting,
+    _p: crate::referrer::ReferrerPolicy,
+) -> Option<String> {
+    should_send_origin_header(request, taint).then(|| serialize_request_origin(request))
+}
+
 // ------------------------------------------------------------ preflight
 
 /// The constructed preflight request.
