@@ -22,3 +22,5 @@ px-dom = { path = "../px-dom", version = "0.0.0" }
 # is no cycle. The library itself does not depend on it (it reads outlines
 # through `raster::GlyphSource`).
 px-text = { path = "../px-text", version = "0.0.0" }
+# The render corpus decodes its pictures with the first-party decoders.
+px-image = { path = "../px-image", version = "0.0.0" }

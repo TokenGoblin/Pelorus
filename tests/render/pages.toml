@@ -221,3 +221,27 @@ source = "tests/render/pages/radius-clamp.html"
 [[page]]
 id = "corner-shape"
 source = "tests/render/pages/corner-shape.html"
+
+[[page]]
+id = "img-sizing"
+source = "tests/render/pages/img-sizing.html"
+
+[[page]]
+id = "img-object-fit"
+source = "tests/render/pages/img-object-fit.html"
+
+[[page]]
+id = "img-radius-alpha"
+source = "tests/render/pages/img-radius-alpha.html"
+
+[[page]]
+id = "img-alt"
+source = "tests/render/pages/img-alt.html"
+
+[[page]]
+id = "bg-image"
+source = "tests/render/pages/bg-image.html"
+
+[[page]]
+id = "img-formats"
+source = "tests/render/pages/img-formats.html"

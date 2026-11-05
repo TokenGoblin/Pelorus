@@ -1504,6 +1504,7 @@ version = "0.0.0"
 dependencies = [
  "px-css",
  "px-dom",
+ "px-image",
  "px-layout",
  "px-text",
 ]

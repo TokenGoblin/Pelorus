@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<title>img: alt text when the picture is not available</title>
+<style>
+body { margin: 8px; font: 20px/1.3 "Noto Sans"; color: #222 }
+p { margin: 0 0 8px 0 }
+.lead { color: #06c }
+</style>
+<p>before <img src="img/not-there.png" alt="[missing picture]"> after, and a good one <img src="img/quad8.png" alt="never shown" width="24"> here</p>
+<p><img src="img/also-missing.png" alt="[a longer description of a picture that did not load so that it wraps onto a second line]"></p>
+<p class="lead"><img src="img/nope.gif" alt="coloured alt"> inherits the colour</p>
+<p>empty alt: [<img src="img/gone.png" alt="">] and none: [<img src="img/gone2.png">] draw nothing</p>
+<p>not an image: [<img src="img/not-an-image.html" alt="html is refused">] and an escape: [<img src="../../README.md" alt="stays home">]</p>

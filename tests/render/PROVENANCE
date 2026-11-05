@@ -56,3 +56,17 @@ Canvas: 800 px wide, max(600, document height) tall, capped at 2400.
 each in the light and the dark scheme (a `#dark` suffix on the source renders with
 prefers-color-scheme: dark). They are used in place, not copied. PNG copies for
 review are in docs/brand/ui-page-*.png.
+
+Image pages (Phase 15): img-sizing, img-object-fit, img-radius-alpha, img-alt,
+bg-image and img-formats, six hand-written pages that use the pictures in
+tests/render/pages/img/. The pictures are written by a Rust test
+(crates/px-paint/tests/render_fixture_images.rs: our PNG encoder, plus a few
+lines of BMP and GIF writing); `PX_BLESS_FIXTURE_IMAGES=1 cargo test -p px-paint
+--test render_fixture_images` rewrites them and the same test fails when a
+committed file differs from its generator. photo.jpg is a copy of
+crates/px-image/tests/fixtures/jpeg/base_420.jpg (made with Pillow; see that
+directory's PROVENANCE.txt). not-an-image.html is a page named as a picture, to
+show it is refused. Only pages under tests/render/ load pictures: the vendored
+WPT pages render without them as they always did (their image tests, such as
+grid-abspos-staticpos-align-self-img-001, are about grid placement, which a
+picture would only make visible; see docs/backlog.md). Corpus floor: 58 pages.

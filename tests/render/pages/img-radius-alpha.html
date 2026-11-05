@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<title>img: border-radius clip, alpha over backgrounds, padding and border</title>
+<style>
+body { margin: 8px; font: 14px/1.2 "Noto Sans"; color: #222; background: #fff }
+.s { display: inline-block; margin: 0 10px 10px 0; padding: 8px; vertical-align: top }
+img { display: block; width: 96px; height: 96px; image-rendering: pixelated }
+.r1 img { border-radius: 48px }
+.r2 img { border-radius: 24px 4px 24px 4px }
+.r3 img { border-radius: 20px; border: 6px solid #36c; padding: 6px; background: #fd8 }
+.r4 img { border-radius: 20px; object-fit: cover; object-position: 0 0 }
+.a1 { background: #2a7 }
+.a2 img { background: #36c }
+.a3 { background: #222 }
+.a3 img { border-radius: 12px; image-rendering: auto }
+</style>
+<div class="s r1"><img src="img/quad8.png"></div><div class="s r2"><img src="img/wide.png"></div><div class="s r3"><img src="img/quad8.png"></div><div class="s r4"><img src="img/wide.png"></div>
+<div class="s a1"><img src="img/alpha.png"></div><div class="s a2"><img src="img/alpha.png"></div><div class="s a3"><img src="img/alpha.png"></div>
