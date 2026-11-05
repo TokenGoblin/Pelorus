@@ -151,7 +151,7 @@ impl State {
                 let cell = &t.cells[ci];
                 let end = (cell.col + cell.colspan).min(t.col_widths.len());
                 let mut width: Au = t.col_widths[cell.col.min(end)..end].iter().copied().sum();
-                width += t.spacing.0 * (end.saturating_sub(cell.col) as i32 - 1).max(0);
+                width += t.spacing.inline * (end.saturating_sub(cell.col) as i32 - 1).max(0);
                 match &cell.src {
                     CellSrc::Node(n) => {
                         let e = cell.edges;
@@ -288,8 +288,8 @@ impl Table {
                 continue;
             }
             let end = (c.row + c.rowspan).min(nrows);
-            let have: Au =
-                row_base[c.row..end].iter().copied().sum::<Au>() + sp.1 * (end - c.row - 1) as i32;
+            let have: Au = row_base[c.row..end].iter().copied().sum::<Au>()
+                + sp.block * (end - c.row - 1) as i32;
             if natural[ci] > have {
                 let ones = vec![1i64; end - c.row];
                 for (k, d) in columns::split(natural[ci] - have, &ones)
@@ -306,7 +306,7 @@ impl Table {
         let spacing_total = if nrows == 0 {
             Au(0)
         } else {
-            sp.1 * (nrows as i32 + 1)
+            sp.block * (nrows as i32 + 1)
         };
         let frame = self.edges.border.block_sum() + self.edges.padding.block_sum();
         let base = frame + spacing_total + rows_sum;
@@ -331,25 +331,25 @@ impl Table {
         let x0 = self.edges.border.inline_start + self.edges.padding.inline_start;
         let y0 = self.edges.border.block_start + self.edges.padding.block_start;
         let mut col_x: Vec<Au> = Vec::with_capacity(self.ncols + 1);
-        let mut x = x0 + sp.0;
+        let mut x = x0 + sp.inline;
         for w in &self.col_widths {
             col_x.push(x);
-            x += *w + sp.0;
+            x += *w + sp.inline;
         }
         col_x.push(x);
-        let grid_w: Au =
-            self.col_widths.iter().copied().sum::<Au>() + sp.0 * (self.ncols as i32 - 1).max(0);
-        let grid_x = x0 + sp.0;
+        let grid_w: Au = self.col_widths.iter().copied().sum::<Au>()
+            + sp.inline * (self.ncols as i32 - 1).max(0);
+        let grid_x = x0 + sp.inline;
 
         let mut row_y: Vec<Au> = vec![Au(0); nrows];
-        let mut y = y0 + if nrows > 0 { sp.1 } else { Au(0) };
+        let mut y = y0 + if nrows > 0 { sp.block } else { Au(0) };
         for r in 0..nrows {
             row_y[r] = y;
-            y += self.rows[r].height + sp.1;
+            y += self.rows[r].height + sp.block;
         }
-        let rows_end = if nrows > 0 { y - sp.1 } else { y0 };
+        let rows_end = if nrows > 0 { y - sp.block } else { y0 };
         let grid_h = if nrows > 0 {
-            rows_end - (y0 + sp.1)
+            rows_end - (y0 + sp.block)
         } else {
             Au(0)
         };
@@ -384,10 +384,10 @@ impl Table {
                     let c = &self.cells[ci];
                     let Some(cf) = c.frag else { continue };
                     let cend = (c.col + c.colspan).min(self.ncols);
-                    let cw = col_x[cend] - col_x[c.col] - sp.0;
+                    let cw = col_x[cend] - col_x[c.col] - sp.inline;
                     let rend = (c.row + c.rowspan).min(nrows);
                     let ch: Au = (c.row..rend).map(|k| self.rows[k].height).sum::<Au>()
-                        + sp.1 * (rend - c.row - 1) as i32;
+                        + sp.block * (rend - c.row - 1) as i32;
                     let natural_h = natural[ci].min(ch);
                     let extra = (ch - tree.get(cf).map_or(Au(0), |f| f.size.block)).max(Au(0));
                     let shift = match c.valign {
@@ -434,7 +434,7 @@ impl Table {
 
         // Columns and column groups paint under the cells.
         let mut grid_kids: Vec<FragmentId> = Vec::new();
-        let (cols_top, cols_h) = (y0 + sp.1.min(grid_h), grid_h);
+        let (cols_top, cols_h) = (y0 + sp.block.min(grid_h), grid_h);
         for cn in &self.col_nodes {
             if cn.count == 0 || cn.first >= self.ncols {
                 continue;
@@ -442,7 +442,7 @@ impl Table {
             let end = (cn.first + cn.count).min(self.ncols);
             let mut f = Fragment::new(
                 FragmentKind::Block,
-                LogicalSize::new(col_x[end] - col_x[cn.first] - sp.0, cols_h),
+                LogicalSize::new(col_x[end] - col_x[cn.first] - sp.inline, cols_h),
             );
             f.node = Some(cn.node);
             f.inline_offset = col_x[cn.first];

@@ -6,6 +6,13 @@
 
 use app_units::Au;
 
+use crate::geom::au;
+
+/// An `Au` from a 64-bit count, clamped into range (never a raw construction).
+pub(crate) fn au64(v: i64) -> Au {
+    au(i32::try_from(v.clamp(-(1 << 29), 1 << 29)).unwrap_or(0))
+}
+
 /// What the cells and `<col>` elements say about one grid column.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Col {
@@ -45,7 +52,7 @@ pub(crate) fn split(total: Au, weights: &[i64]) -> Vec<Au> {
         let mut prev = 0i64;
         for i in 1..=weights.len() {
             let cum = t * i as i64 / n.max(1);
-            out.push(Au(i32::try_from(cum - prev).unwrap_or(0)));
+            out.push(au64(cum - prev));
             prev = cum;
         }
         return out;
@@ -54,7 +61,7 @@ pub(crate) fn split(total: Au, weights: &[i64]) -> Vec<Au> {
     for w in weights {
         cum_w += (*w).max(0);
         let cum = t * cum_w / sum;
-        out.push(Au(i32::try_from(cum - prev).unwrap_or(0)));
+        out.push(au64(cum - prev));
         prev = cum;
     }
     out
@@ -134,8 +141,8 @@ pub(crate) fn apply_spans(cols: &mut [Col], spans: &[Span], spacing: Au) {
                         .iter()
                         .map(|i| i64::from(cols[*i].max.0.max(1)))
                         .collect();
-                    let total = i32::try_from(s.pct - have).unwrap_or(0);
-                    for (i, d) in free.iter().zip(split(Au(total), &w)) {
+                    let total = s.pct - have;
+                    for (i, d) in free.iter().zip(split(au64(total), &w)) {
                         cols[*i].pct = i64::from(d.0);
                     }
                 }
@@ -155,7 +162,7 @@ pub(crate) fn table_intrinsic(cols: &[Col], extra: Au) -> (Au, Au) {
     for c in cols {
         if c.pct > 0 {
             let needed = i64::from(c.max.0) * 10_000 / c.pct;
-            max = max.max(Au(i32::try_from(needed.min(1 << 29)).unwrap_or(0)));
+            max = max.max(au64(needed));
         }
     }
     if pct_total > 0 && pct_total < 10_000 {
@@ -165,7 +172,7 @@ pub(crate) fn table_intrinsic(cols: &[Col], extra: Au) -> (Au, Au) {
             .map(|c| i64::from(c.max.0))
             .sum();
         let needed = non_pct * 10_000 / (10_000 - pct_total);
-        max = max.max(Au(i32::try_from(needed.min(1 << 29)).unwrap_or(0)));
+        max = max.max(au64(needed));
     }
     (min + extra, max + extra)
 }
@@ -190,7 +197,7 @@ pub(crate) fn distribute(cols: &[Col], total: Au) -> Vec<Au> {
             } else {
                 c.pct
             };
-            let target = Au(i32::try_from(i64::from(total.0) * scaled / 10_000).unwrap_or(0));
+            let target = au64(i64::from(total.0) * scaled / 10_000);
             w[i] = target.max(c.min);
         }
     }
@@ -212,10 +219,7 @@ pub(crate) fn distribute(cols: &[Col], total: Au) -> Vec<Au> {
             .collect();
         let total_slack: i64 = slack.iter().sum();
         if total_slack > 0 {
-            let take = split(
-                over.min(Au(i32::try_from(total_slack).unwrap_or(0))),
-                &slack,
-            );
+            let take = split(over.min(au64(total_slack)), &slack);
             for (x, d) in w.iter_mut().zip(take) {
                 *x -= d;
             }
@@ -256,7 +260,7 @@ pub(crate) fn distribute(cols: &[Col], total: Au) -> Vec<Au> {
         if total_want == 0 {
             continue;
         }
-        let give = remaining.min(Au(i32::try_from(total_want).unwrap_or(i32::MAX)));
+        let give = remaining.min(au64(total_want));
         for (i, d) in idx.iter().zip(split(give, &want)) {
             w[*i] += d;
         }
@@ -330,8 +334,8 @@ mod tests {
 
     #[test]
     fn table_columns_split_is_exact() {
-        let s = split(Au(100), &[1, 1, 1]);
-        assert_eq!(s.iter().copied().sum::<Au>(), Au(100));
+        let s = split(px(100), &[1, 1, 1]);
+        assert_eq!(s.iter().copied().sum::<Au>(), px(100));
     }
 
     #[test]

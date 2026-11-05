@@ -307,7 +307,7 @@ impl Resolved {
         col_x: &[Au],
         row_y: &[Au],
         row_h: &[Au],
-        sp: (Au, Au),
+        sp: Gap,
     ) -> Vec<FragmentId> {
         let _ = sp;
         let nrows = row_h.len();

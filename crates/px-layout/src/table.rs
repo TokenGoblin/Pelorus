@@ -149,7 +149,7 @@ fn width_spec(style: &ComputedValues) -> Spec {
         Size::LengthPercentage(ref lp) => match lp.0.maybe_to_used_value(None) {
             Some(a) => Spec::Length(a.max(Au(0))),
             None => {
-                let basis = Au(60_000_000);
+                let basis = crate::geom::au(60_000_000);
                 Spec::Percent((i64::from(lp.0.to_used_value(basis).0) + 3000) / 6000)
             }
         },
@@ -232,7 +232,7 @@ pub(crate) struct Table {
     node: Option<NodeId>,
     style_node: NodeId,
     collapsed: bool,
-    spacing: (Au, Au),
+    spacing: Gap,
     ncols: usize,
     cols: Vec<ColSpec>,
     groups: Vec<Group>,
@@ -248,6 +248,20 @@ pub(crate) struct Table {
     wrapper_inline: Au,
     grid_inline: Au,
     borders: Option<borders::Resolved>,
+}
+
+/// `border-spacing`: the gap between cells along each axis.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Gap {
+    pub(crate) inline: Au,
+    pub(crate) block: Au,
+}
+
+impl Gap {
+    const ZERO: Self = Self {
+        inline: Au(0),
+        block: Au(0),
+    };
 }
 
 /// What `plan` hands the block algorithm.
@@ -469,12 +483,12 @@ fn collapsed_of(style: &ComputedValues) -> bool {
         == style::computed_values::border_collapse::T::Collapse
 }
 
-fn spacing_of(style: &ComputedValues) -> (Au, Au) {
+fn spacing_of(style: &ComputedValues) -> Gap {
     let s = style.get_inherited_table().border_spacing;
-    (
-        Au(s.0.width.0.to_i32_au()).max(Au(0)),
-        Au(s.0.height.0.to_i32_au()).max(Au(0)),
-    )
+    Gap {
+        inline: crate::geom::au(s.0.width.0.to_i32_au()).max(Au(0)),
+        block: crate::geom::au(s.0.height.0.to_i32_au()).max(Au(0)),
+    }
 }
 
 fn valign_of(style: &ComputedValues) -> VAlign {
@@ -506,7 +520,7 @@ fn build(
     let shape = shape(dom, arena, nodes);
     let collapsed = collapsed_of(inherit);
     let spacing = if collapsed {
-        (Au(0), Au(0))
+        Gap::ZERO
     } else {
         spacing_of(inherit)
     };

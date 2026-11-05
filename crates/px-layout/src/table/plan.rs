@@ -128,7 +128,7 @@ impl Table {
         let spacing = if self.ncols == 0 {
             Au(0)
         } else {
-            self.spacing.0 * (self.ncols as i32 + 1)
+            self.spacing.inline * (self.ncols as i32 + 1)
         };
         self.edges.border.inline_sum() + self.edges.padding.inline_sum() + spacing
     }
@@ -136,7 +136,7 @@ impl Table {
     /// The table's min-content and max-content (border-box) widths.
     fn intrinsic_widths(&self) -> (Au, Au) {
         let (mut cols, spans) = self.column_constraints();
-        columns::apply_spans(&mut cols, &spans, self.spacing.0);
+        columns::apply_spans(&mut cols, &spans, self.spacing.inline);
         columns::table_intrinsic(&cols, self.inline_extra())
     }
 }
@@ -299,7 +299,7 @@ pub(crate) fn plan(
 
     let extra = table.inline_extra();
     let (mut cols, spans) = table.column_constraints();
-    columns::apply_spans(&mut cols, &spans, table.spacing.0);
+    columns::apply_spans(&mut cols, &spans, table.spacing.inline);
     let (tmin, tmax) = columns::table_intrinsic(&cols, extra);
 
     let avail = (containing - margins.inline_sum()).max(Au(0));
@@ -311,7 +311,7 @@ pub(crate) fn plan(
             l + table.edges.border.inline_sum() + table.edges.padding.inline_sum()
         }),
         Spec::Percent(p) => {
-            let w = Au(i32::try_from(i64::from(containing.0) * p / 10_000).unwrap_or(0));
+            let w = columns::au64(i64::from(containing.0) * p / 10_000);
             Some(if border_box_sizing(style) {
                 w
             } else {
@@ -356,9 +356,7 @@ pub(crate) fn plan(
         for (i, c) in table.cols.iter().enumerate() {
             known[i] = match c.spec {
                 Spec::Length(l) => Some(l),
-                Spec::Percent(p) => Some(Au(
-                    i32::try_from(i64::from(avail_cols.0) * p / 10_000).unwrap_or(0)
-                )),
+                Spec::Percent(p) => Some(columns::au64(i64::from(avail_cols.0) * p / 10_000)),
                 Spec::Auto => None,
             };
         }
@@ -367,14 +365,11 @@ pub(crate) fn plan(
                 let cell = &table.cells[ci];
                 let w = match cell.spec_w {
                     Spec::Length(l) => Some(l),
-                    Spec::Percent(p) => Some(Au(i32::try_from(
-                        i64::from(avail_cols.0) * p / 10_000,
-                    )
-                    .unwrap_or(0))),
+                    Spec::Percent(p) => Some(columns::au64(i64::from(avail_cols.0) * p / 10_000)),
                     Spec::Auto => None,
                 };
                 if let Some(w) = w {
-                    let share = (w - table.spacing.0 * (cell.colspan as i32 - 1)).max(Au(0));
+                    let share = (w - table.spacing.inline * (cell.colspan as i32 - 1)).max(Au(0));
                     let ones = vec![1i64; cell.colspan];
                     for (k, part) in columns::split(share, &ones).into_iter().enumerate() {
                         if let Some(slot) = known.get_mut(cell.col + k)
