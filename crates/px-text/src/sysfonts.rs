@@ -255,7 +255,12 @@ pub fn default_roots(platform: Platform, env: &dyn Fn(&str) -> Option<String>) -
                 push(Path::new(&r).join("Fonts"));
             }
             if let Some(l) = nonempty("LOCALAPPDATA") {
-                push(Path::new(&l).join("Microsoft").join("Windows").join("Fonts"));
+                push(
+                    Path::new(&l)
+                        .join("Microsoft")
+                        .join("Windows")
+                        .join("Fonts"),
+                );
             }
         }
     }
@@ -309,7 +314,8 @@ impl SystemFonts {
         self.faces
             .iter()
             .filter(|f| {
-                f.family.eq_ignore_ascii_case(family) || f.legacy_family.eq_ignore_ascii_case(family)
+                f.family.eq_ignore_ascii_case(family)
+                    || f.legacy_family.eq_ignore_ascii_case(family)
             })
             .min_by_key(|f| {
                 let w = i32::from(f.weight) - i32::from(weight);
@@ -546,12 +552,11 @@ fn name_string(name: &[u8], id: u16) -> Option<String> {
 }
 
 fn utf16be(raw: &[u8]) -> Option<String> {
-    if raw.len() % 2 != 0 {
+    if !raw.len().is_multiple_of(2) {
         return None;
     }
-    let units = raw
-        .chunks_exact(2)
-        .map(|c| u16::from_be_bytes([c.first().copied().unwrap_or(0), c.get(1).copied().unwrap_or(0)]));
+    let (pairs, _) = raw.as_chunks::<2>();
+    let units = pairs.iter().copied().map(u16::from_be_bytes);
     char::decode_utf16(units)
         .take(MAX_NAME_CHARS * 2)
         .collect::<Result<String, _>>()
@@ -589,7 +594,8 @@ impl FakeFs {
     /// Add a file, creating its parent directories.
     pub fn file(&mut self, path: &str, bytes: Vec<u8>) -> &mut FakeFs {
         self.parents(Path::new(path));
-        self.entries.insert(PathBuf::from(path), FakeEntry::File(bytes));
+        self.entries
+            .insert(PathBuf::from(path), FakeEntry::File(bytes));
         self
     }
 

@@ -37,11 +37,7 @@ fn tables(name: Vec<u8>, weight: u16, fs_selection: u16) -> Vec<(&'static [u8; 4
     let mut os2 = vec![0u8; 78];
     os2[4..6].copy_from_slice(&weight.to_be_bytes());
     os2[62..64].copy_from_slice(&fs_selection.to_be_bytes());
-    vec![
-        (b"OS/2", os2),
-        (b"head", vec![0u8; 54]),
-        (b"name", name),
-    ]
+    vec![(b"OS/2", os2), (b"head", vec![0u8; 54]), (b"name", name)]
 }
 
 /// One sfnt whose table offsets are absolute in the final file when placed at
@@ -73,10 +69,7 @@ fn sfnt_at(base: usize, tabs: &[(&'static [u8; 4], Vec<u8>)]) -> Vec<u8> {
 fn font(family: &str, style: &str, weight: u16, italic: bool) -> Vec<u8> {
     let f = utf16(family);
     let s = utf16(style);
-    let name = name_table(&[
-        (3, 1, 0x409, 1, &f),
-        (3, 1, 0x409, 2, &s),
-    ]);
+    let name = name_table(&[(3, 1, 0x409, 1, &f), (3, 1, 0x409, 2, &s)]);
     sfnt_at(0, &tables(name, weight, if italic { 1 } else { 0 }))
 }
 
@@ -97,7 +90,11 @@ fn typographic_family_wins_and_legacy_is_kept() {
     let a = utf16("Foo Light");
     let b = utf16("Foo");
     let c = utf16("Light");
-    let name = name_table(&[(3, 1, 0x409, 1, &a), (3, 1, 0x409, 16, &b), (3, 1, 0x409, 17, &c)]);
+    let name = name_table(&[
+        (3, 1, 0x409, 1, &a),
+        (3, 1, 0x409, 16, &b),
+        (3, 1, 0x409, 17, &c),
+    ]);
     let data = sfnt_at(0, &tables(name, 300, 0));
     let (_, f) = parse_faces(&data).remove(0);
     assert_eq!(f.family, "Foo");
@@ -136,7 +133,10 @@ fn collections_yield_each_face() {
     file.extend_from_slice(&f1);
     file.extend_from_slice(&f2);
     let faces = parse_faces(&file);
-    let names: Vec<_> = faces.iter().map(|(i, f)| (*i, f.family.as_str(), f.weight)).collect();
+    let names: Vec<_> = faces
+        .iter()
+        .map(|(i, f)| (*i, f.family.as_str(), f.weight))
+        .collect();
     assert_eq!(names, [(0, "One", 400), (1, "Two", 700)]);
 }
 
@@ -202,7 +202,11 @@ fn scan_is_sorted_and_skips_non_fonts_and_symlinks() {
 
 #[test]
 fn missing_root_is_empty_not_an_error() {
-    let s = SystemFonts::scan(&FakeFs::new(), &[PathBuf::from("/nope")], &ScanLimits::default());
+    let s = SystemFonts::scan(
+        &FakeFs::new(),
+        &[PathBuf::from("/nope")],
+        &ScanLimits::default(),
+    );
     assert!(s.is_empty());
 }
 
@@ -210,9 +214,18 @@ fn missing_root_is_empty_not_an_error() {
 fn best_match_weighs_weight_then_slant() {
     let fs = fake();
     let s = SystemFonts::scan(&fs, &[PathBuf::from("/fonts")], &ScanLimits::default());
-    assert_eq!(s.best_match("zeta", 400, false).map(|f| f.style.as_str()), Some("Regular"));
-    assert_eq!(s.best_match("ZETA", 600, false).map(|f| f.style.as_str()), Some("Bold"));
-    assert_eq!(s.best_match("Zeta", 400, true).map(|f| f.style.as_str()), Some("Italic"));
+    assert_eq!(
+        s.best_match("zeta", 400, false).map(|f| f.style.as_str()),
+        Some("Regular")
+    );
+    assert_eq!(
+        s.best_match("ZETA", 600, false).map(|f| f.style.as_str()),
+        Some("Bold")
+    );
+    assert_eq!(
+        s.best_match("Zeta", 400, true).map(|f| f.style.as_str()),
+        Some("Italic")
+    );
     assert!(s.best_match("Absent", 400, false).is_none());
 }
 
@@ -221,37 +234,55 @@ fn generic_families_use_our_preference_lists() {
     let fs = fake();
     let s = SystemFonts::scan(&fs, &[PathBuf::from("/fonts")], &ScanLimits::default());
     // Only DejaVu Sans is installed; it is in the sans-serif list.
-    assert_eq!(s.lookup("sans-serif", 400, false).map(|f| f.family.as_str()), Some("DejaVu Sans"));
-    assert_eq!(s.lookup("SANS-SERIF", 400, false).map(|f| f.family.as_str()), Some("DejaVu Sans"));
+    assert_eq!(
+        s.lookup("sans-serif", 400, false)
+            .map(|f| f.family.as_str()),
+        Some("DejaVu Sans")
+    );
+    assert_eq!(
+        s.lookup("SANS-SERIF", 400, false)
+            .map(|f| f.family.as_str()),
+        Some("DejaVu Sans")
+    );
     assert!(s.lookup("monospace", 400, false).is_none());
-    assert_eq!(GenericFamily::from_keyword("system-ui"), Some(GenericFamily::SystemUi));
+    assert_eq!(
+        GenericFamily::from_keyword("system-ui"),
+        Some(GenericFamily::SystemUi)
+    );
     assert_eq!(GenericFamily::from_keyword("Zeta"), None);
     // Preference order, not scan order, decides.
     let mut fs = FakeFs::new();
     fs.file("/f/a.ttf", font("Noto Sans", "Regular", 400, false));
     fs.file("/f/b.ttf", font("Arial", "Regular", 400, false));
     let s = SystemFonts::scan(&fs, &[PathBuf::from("/f")], &ScanLimits::default());
-    assert_eq!(s.resolve_generic(GenericFamily::SansSerif).map(|f| f.family.as_str()), Some("Arial"));
+    assert_eq!(
+        s.resolve_generic(GenericFamily::SansSerif)
+            .map(|f| f.family.as_str()),
+        Some("Arial")
+    );
 }
 
 #[test]
 fn limits_bound_the_scan() {
     let fs = fake();
     let root = [PathBuf::from("/fonts")];
-    let mut l = ScanLimits::default();
-    l.max_depth = 0;
-    assert_eq!(SystemFonts::scan(&fs, &root, &l).len(), 1, "depth 0 reads only the root's files");
-    let mut l = ScanLimits::default();
-    l.max_faces = 2;
+    let d = ScanLimits::default();
+    let l = ScanLimits { max_depth: 0, ..d };
+    assert_eq!(
+        SystemFonts::scan(&fs, &root, &l).len(),
+        1,
+        "depth 0 reads only the root's files"
+    );
+    let l = ScanLimits { max_faces: 2, ..d };
     assert_eq!(SystemFonts::scan(&fs, &root, &l).len(), 2);
-    let mut l = ScanLimits::default();
-    l.max_file_bytes = 10;
+    let l = ScanLimits {
+        max_file_bytes: 10,
+        ..d
+    };
     assert!(SystemFonts::scan(&fs, &root, &l).is_empty());
-    let mut l = ScanLimits::default();
-    l.max_files = 1;
+    let l = ScanLimits { max_files: 1, ..d };
     assert!(SystemFonts::scan(&fs, &root, &l).len() <= 1);
-    let mut l = ScanLimits::default();
-    l.max_dirs = 1;
+    let l = ScanLimits { max_dirs: 1, ..d };
     assert_eq!(SystemFonts::scan(&fs, &root, &l).len(), 1);
 }
 
@@ -262,7 +293,10 @@ fn deep_trees_stop_at_the_depth_cap() {
     for i in 0..20 {
         p.push_str(&format!("/d{i}"));
     }
-    fs.file(&format!("{p}/deep.ttf"), font("Deep", "Regular", 400, false));
+    fs.file(
+        &format!("{p}/deep.ttf"),
+        font("Deep", "Regular", 400, false),
+    );
     let s = SystemFonts::scan(&fs, &[PathBuf::from("/r")], &ScanLimits::default());
     assert!(s.is_empty());
 }

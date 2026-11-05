@@ -27,7 +27,7 @@ use px_text::registry::{
     BUNDLED_FAMILIES, FALLBACK_ORDER, NOTO_SANS_ARABIC_BYTES, NOTO_SANS_BYTES,
     NOTO_SANS_DEVANAGARI_BYTES, NOTO_SANS_HEBREW_BYTES,
 };
-use px_text::shaper::{Direction, HarfrustShaper, ShapeInput, ShapedRun, Shaper, Script};
+use px_text::shaper::{Direction, HarfrustShaper, Script, ShapeInput, ShapedRun, Shaper};
 use px_text::{Font, FontId, FontRegistry};
 use skrifa::MetadataProvider;
 
@@ -132,7 +132,9 @@ fn cyrillic_is_plain_with_two_byte_clusters() {
     assert_eq!(ids(&word), f.nominal("Привет"));
     assert_eq!(
         f.names_of(&word),
-        ["uni041F", "uni0440", "uni0438", "uni0432", "uni0435", "uni0442"]
+        [
+            "uni041F", "uni0440", "uni0438", "uni0432", "uni0435", "uni0442"
+        ]
     );
 }
 
@@ -246,7 +248,13 @@ fn devanagari_short_i_matra_is_reordered_before_its_base() {
     // the base ha, the half-form of na (virama folded into it), da, long ii.
     assert_eq!(
         f.names_of(&r),
-        ["iMatra-deva.03", "ha-deva", "n-deva", "da-deva", "iiMatra-deva"]
+        [
+            "iMatra-deva.03",
+            "ha-deva",
+            "n-deva",
+            "da-deva",
+            "iiMatra-deva"
+        ]
     );
     // Clusters are byte offsets (each character is 3 bytes): the matra shares
     // ha's cluster 0, the half-na starts at byte 6, da and long ii at 12.
@@ -257,11 +265,26 @@ fn devanagari_short_i_matra_is_reordered_before_its_base() {
 #[test]
 fn no_notdef_for_any_character_of_the_test_strings() {
     for (bytes, script, dir, text) in [
-        (NOTO_SANS_BYTES, Script::LATIN, LTR, "The quick brown fox, 0123456789."),
-        (NOTO_SANS_BYTES, Script::CYRILLIC, LTR, "Съешь ещё этих мягких французских булок"),
+        (
+            NOTO_SANS_BYTES,
+            Script::LATIN,
+            LTR,
+            "The quick brown fox, 0123456789.",
+        ),
+        (
+            NOTO_SANS_BYTES,
+            Script::CYRILLIC,
+            LTR,
+            "Съешь ещё этих мягких французских булок",
+        ),
         (NOTO_SANS_HEBREW_BYTES, Script::HEBREW, RTL, "שלום עולם"),
         (NOTO_SANS_ARABIC_BYTES, Script::ARABIC, RTL, "مرحبا بالعالم"),
-        (NOTO_SANS_DEVANAGARI_BYTES, Script::DEVANAGARI, LTR, "नमस्ते दुनिया"),
+        (
+            NOTO_SANS_DEVANAGARI_BYTES,
+            Script::DEVANAGARI,
+            LTR,
+            "नमस्ते दुनिया",
+        ),
     ] {
         let f = face(bytes);
         let r = f.shape(text, script, dir);

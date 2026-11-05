@@ -11,13 +11,19 @@
 //!
 //! # Font resolution policy (the documented fallback)
 //!
-//! The only font the engine bundles is Ahem (`tests/fonts`, ADR 036 (g)). So
-//! **every `font-family` resolves to Ahem**: a named family is looked up in the
-//! registry (so a name that *is* registered wins), and an unknown family, a
-//! generic family (`serif`, `sans-serif`, `monospace`, ...) and the initial value
-//! all fall back to the first registered font. System fonts, the Noto subsets and
-//! per-character fallback are later units (plan units 8 and 1's follow-ups); when
-//! they land they change [`resolve_font`] and nothing else here.
+//! The registry is `FontRegistry::with_bundled()`: Ahem (id 0) and the Noto faces
+//! (`tests/fonts`, ADR 036 (g)); **never system fonts**. A named family is looked
+//! up in the registry (so `font-family: "Noto Sans"` selects it and `Ahem` selects
+//! Ahem), and an unknown family, a generic family (`serif`, `sans-serif`,
+//! `monospace`, ...) and the initial value all fall back to the first registered
+//! font, **Ahem**, so every page that does not name a bundled face keeps its
+//! existing geometry and baseline.
+//!
+//! Per-character fallback applies when the resolved face is not Ahem: each bidi
+//! run is split where the face changes (see `split_by_font`), a character the
+//! face does not map going to the registry's `fallback_for` (Noto Sans, then
+//! Hebrew, Arabic, Devanagari). Ahem is never split: WPT names it and expects its
+//! boxes. Line metrics come from the primary face only.
 //!
 //! The consequence is deliberate and visible: with Ahem every glyph is one em
 //! wide, a space included, and the font has ascent 0.8 em and descent 0.2 em, so
@@ -37,8 +43,8 @@
 //! Not done, and named: `letter-spacing`, `word-spacing`, `text-transform`,
 //! `text-indent`, `tab-size` (a tab is eight spaces), font features and
 //! `font-variant`, `hyphens: auto`, script itemisation finer than a bidi run
-//! (one script per run, taken from its first strong character), per-character
-//! font fallback, and shaping across an inline element boundary (the content of
+//! (one script per run, taken from its first strong character; now per face
+//! segment), and shaping across an inline element boundary (the content of
 //! a block's inline elements is flattened into one run measured with the block's
 //! own style, as it was in Phase 6).
 //!
@@ -72,7 +78,10 @@ struct Fonts {
 fn fonts() -> &'static Fonts {
     static FONTS: OnceLock<Fonts> = OnceLock::new();
     FONTS.get_or_init(|| {
-        let registry = FontRegistry::with_ahem().unwrap_or_default();
+        // The bundled set only (Ahem, then the Noto faces): never system fonts.
+        let registry = FontRegistry::with_bundled()
+            .or_else(|_| FontRegistry::with_ahem())
+            .unwrap_or_default();
         let shapers = (0..registry.len())
             .map(|i| {
                 let id = FontId(u32::try_from(i).unwrap_or(u32::MAX));
@@ -82,6 +91,13 @@ fn fonts() -> &'static Fonts {
             .collect();
         Fonts { registry, shapers }
     })
+}
+
+/// The family names of the registry layout resolves from, in id order. A test
+/// pins that these are exactly the bundled set (no system fonts).
+#[must_use]
+pub fn registered_families() -> Vec<&'static str> {
+    fonts().registry.families().collect()
 }
 
 /// The font a `font-family` list resolves to. See the module documentation for
@@ -312,6 +328,9 @@ impl Metrics {
 /// One shaped glyph, with the advance already in app units.
 #[derive(Clone, Copy, Debug)]
 struct Glyph {
+    /// The face the glyph id belongs to (per-character fallback can change it
+    /// within a line).
+    font: FontId,
     id: u32,
     /// Byte offset in the whole text of the glyph's cluster.
     cluster: usize,
@@ -369,6 +388,43 @@ fn script_of(text: &str) -> px_text::shaper::Script {
     Script::COMMON
 }
 
+/// Split `text` into maximal ranges drawn by one face (per-character fallback).
+///
+/// The rule, pure and deterministic: start in `primary`; a character the
+/// current face maps stays in it (so spaces, digits and marks do not fragment a
+/// run); otherwise `primary` if it maps the character; otherwise the registry's
+/// `fallback_for(c, &[])` (Noto Sans first, then Hebrew, Arabic, Devanagari);
+/// otherwise `primary` again, which draws `.notdef`. **Ahem is exempt**: it is
+/// the test font, WPT names it explicitly and expects its own box for every
+/// character, so a primary of Ahem is never split.
+fn split_by_font(
+    registry: &FontRegistry,
+    primary: FontId,
+    text: &str,
+) -> Vec<(std::ops::Range<usize>, FontId)> {
+    let mut out: Vec<(std::ops::Range<usize>, FontId)> = Vec::new();
+    if registry.family(primary) == Some("Ahem") {
+        out.push((0..text.len(), primary));
+        return out;
+    }
+    let mut cur = primary;
+    for (i, c) in text.char_indices() {
+        if !registry.covers(cur, c) {
+            cur = if registry.covers(primary, c) {
+                primary
+            } else {
+                registry.fallback_for(c, &[]).unwrap_or(primary)
+            };
+        }
+        let end = i + c.len_utf8();
+        match out.last_mut() {
+            Some((range, font)) if *font == cur => range.end = end,
+            _ => out.push((i..end, cur)),
+        }
+    }
+    out
+}
+
 impl<'a> Prepared<'a> {
     /// Shape `text` (already white-space processed) and find its break
     /// opportunities.
@@ -403,8 +459,7 @@ impl<'a> Prepared<'a> {
         };
 
         let mut runs = Vec::with_capacity(logical.len());
-        if let (Some(font), Some(shaper)) = (font, shaper) {
-            let upem = font.units_per_em();
+        if let (Some(_), Some(_)) = (font, shaper) {
             let size = style.size.0;
             for run in logical {
                 let Some(slice) = text.get(run.range.clone()) else {
@@ -428,36 +483,54 @@ impl<'a> Prepared<'a> {
                 } else {
                     std::borrow::Cow::Borrowed(slice)
                 };
-                let input = ShapeInput {
-                    text: &shaped_text,
-                    script: script_of(slice),
-                    language: None,
-                    direction: if rtl {
-                        Direction::RightToLeft
-                    } else {
-                        Direction::LeftToRight
-                    },
-                    features: &[],
-                };
-                let Ok(out) = shaper.shape(&input) else {
-                    continue;
-                };
-                let glyphs = out
-                    .glyphs
-                    .iter()
-                    .map(|g| Glyph {
-                        id: g.glyph_id,
-                        cluster: run.range.start + usize::try_from(g.cluster).unwrap_or(0),
-                        advance: au(font_units_to_au(g.x_advance, upem, size)),
-                        x_offset: au(font_units_to_au(g.x_offset, upem, size)),
-                        y_offset: au(font_units_to_au(g.y_offset, upem, size)),
-                    })
-                    .collect();
-                runs.push(ShapedRun {
-                    range: run.range,
-                    rtl,
-                    glyphs,
-                });
+                // One shaping call per (bidi run, face): per-character fallback
+                // splits the run where the face changes.
+                for (seg, seg_font) in split_by_font(&f.registry, style.font, &shaped_text) {
+                    let Some(seg_text) = shaped_text.get(seg.clone()) else {
+                        continue;
+                    };
+                    let (Some(sfont), Some(sshaper)) = (
+                        f.registry.get(seg_font),
+                        f.shapers
+                            .get(usize::try_from(seg_font.0).unwrap_or(usize::MAX))
+                            .and_then(Option::as_ref),
+                    ) else {
+                        continue;
+                    };
+                    let upem = sfont.units_per_em();
+                    let input = ShapeInput {
+                        text: seg_text,
+                        script: script_of(seg_text),
+                        language: None,
+                        direction: if rtl {
+                            Direction::RightToLeft
+                        } else {
+                            Direction::LeftToRight
+                        },
+                        features: &[],
+                    };
+                    let Ok(out) = sshaper.shape(&input) else {
+                        continue;
+                    };
+                    let base = run.range.start + seg.start;
+                    let glyphs = out
+                        .glyphs
+                        .iter()
+                        .map(|g| Glyph {
+                            font: seg_font,
+                            id: g.glyph_id,
+                            cluster: base + usize::try_from(g.cluster).unwrap_or(0),
+                            advance: au(font_units_to_au(g.x_advance, upem, size)),
+                            x_offset: au(font_units_to_au(g.x_offset, upem, size)),
+                            y_offset: au(font_units_to_au(g.y_offset, upem, size)),
+                        })
+                        .collect();
+                    runs.push(ShapedRun {
+                        range: base..run.range.start + seg.end,
+                        rtl,
+                        glyphs,
+                    });
+                }
             }
         }
 
@@ -679,7 +752,8 @@ impl<'a> Prepared<'a> {
         let mut pen = Au(0);
         for vr in visual {
             let rtl = vr.is_rtl();
-            let mut glyphs: Vec<GlyphPos> = Vec::new();
+            // (face, pen before the glyph, glyph); split by face below.
+            let mut glyphs: Vec<(FontId, Au, GlyphPos)> = Vec::new();
             let start_pen = pen;
             // The shaped runs that this visual run overlaps, in the order they
             // are drawn: logical order for left to right, reversed for right to
@@ -704,12 +778,15 @@ impl<'a> Prepared<'a> {
                 for g in picked {
                     let ch = self.text.get(g.cluster..).and_then(|s| s.chars().next());
                     let (id, mut advance) = (g.id, g.advance);
+                    let mut face = g.font;
                     let (id, advance_final) = if ch == Some(SOFT_HYPHEN) {
                         // Only the soft hyphen that ends the line is drawn.
                         if line.hyphen
                             && g.cluster + SOFT_HYPHEN.len_utf8() == line.content_end
                             && let Some((hid, hadv)) = self.hyphen
                         {
+                            // The hyphen glyph is the primary face's.
+                            face = self.style.font;
                             (hid, hadv)
                         } else {
                             continue;
@@ -720,26 +797,58 @@ impl<'a> Prepared<'a> {
                         }
                         (id, advance)
                     };
-                    glyphs.push(GlyphPos {
-                        glyph_id: id,
-                        x: pen + g.x_offset,
-                        // Positive y_offset is up; layout y grows down.
-                        y: Au(0) - g.y_offset,
-                        advance: advance_final,
-                    });
+                    glyphs.push((
+                        face,
+                        pen,
+                        GlyphPos {
+                            glyph_id: id,
+                            x: pen + g.x_offset,
+                            // Positive y_offset is up; layout y grows down.
+                            y: Au(0) - g.y_offset,
+                            advance: advance_final,
+                        },
+                    ));
                     pen += advance_final;
                 }
             }
-            // Positions are relative to the run, not the line.
-            for g in &mut glyphs {
-                g.x -= start_pen;
+            // One `LineRun` per maximal stretch drawn in one face, because a text
+            // run names exactly one font. Positions are relative to the run.
+            if glyphs.is_empty() {
+                out.push(LineRun {
+                    font: self.style.font,
+                    rtl,
+                    inline_offset: start_pen,
+                    width: pen - start_pen,
+                    glyphs: Vec::new(),
+                });
+                continue;
             }
-            out.push(LineRun {
-                rtl,
-                inline_offset: start_pen,
-                width: pen - start_pen,
-                glyphs,
-            });
+            let mut i = 0;
+            while i < glyphs.len() {
+                let Some(&(face, first_pen, _)) = glyphs.get(i) else {
+                    break;
+                };
+                let mut j = i;
+                while glyphs.get(j).is_some_and(|(f, _, _)| *f == face) {
+                    j += 1;
+                }
+                let group = glyphs.get(i..j).unwrap_or(&[]);
+                let end_pen = glyphs.get(j).map_or(pen, |(_, p, _)| *p);
+                out.push(LineRun {
+                    font: face,
+                    rtl,
+                    inline_offset: first_pen,
+                    width: end_pen - first_pen,
+                    glyphs: group
+                        .iter()
+                        .map(|(_, _, g)| GlyphPos {
+                            x: g.x - first_pen,
+                            ..*g
+                        })
+                        .collect(),
+                });
+                i = j;
+            }
         }
         out
     }
@@ -774,6 +883,9 @@ pub struct LineBreak {
 /// One directional run of a line, positioned relative to the line's start edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LineRun {
+    /// The face the glyph ids belong to (per-character fallback can give one
+    /// line several runs of different faces).
+    pub font: FontId,
     /// The run is drawn right to left.
     pub rtl: bool,
     /// Where the run starts, from the line's start edge.
@@ -820,6 +932,75 @@ mod tests {
         assert_eq!(m.ascent, px(16));
         assert_eq!(m.descent, px(4));
         assert_eq!(m.normal_line_height(), px(20) + m.line_gap);
+    }
+
+    fn noto(size_px: i32) -> TextStyle {
+        let mut s = ahem(size_px);
+        s.font = resolve_font(["Noto Sans"]);
+        s.line_height = s.metrics().normal_line_height();
+        s
+    }
+
+    #[test]
+    fn text_render_registry_is_the_bundled_set_and_never_system_fonts() {
+        assert_eq!(
+            registered_families(),
+            px_text::registry::BUNDLED_FAMILIES.to_vec()
+        );
+        // Layout cannot reach the system scan: px-layout does not depend on
+        // px-broker, where the only filesystem reader lives.
+        let manifest = include_str!("../Cargo.toml");
+        assert!(!manifest.contains("px-broker"));
+        assert!(!include_str!("text.rs").contains(concat!("System", "Fonts")));
+    }
+
+    #[test]
+    fn text_unknown_and_generic_families_stay_ahem() {
+        assert_eq!(resolve_font(["serif"]), FontId(0));
+        assert_eq!(resolve_font(["Nonexistent"]), FontId(0));
+        assert_ne!(resolve_font(["noto sans"]), FontId(0));
+    }
+
+    #[test]
+    fn text_fallback_splits_a_run_by_face_in_order() {
+        let r = &fonts().registry;
+        let sans = resolve_font(["Noto Sans"]);
+        let hebrew = resolve_font(["Noto Sans Hebrew"]);
+        let segs = split_by_font(r, sans, "ab שלום cd");
+        // Latin in Noto Sans, the Hebrew word (and the space, which the Hebrew face
+        // also maps, if it does) in the Hebrew face, Latin again.
+        let faces: Vec<FontId> = segs.iter().map(|(_, f)| *f).collect();
+        assert_eq!(faces.first(), Some(&sans));
+        assert!(faces.contains(&hebrew));
+        assert_eq!(faces.last(), Some(&sans));
+        // Segments tile the text exactly.
+        let mut at = 0;
+        for (range, _) in &segs {
+            assert_eq!(range.start, at);
+            at = range.end;
+        }
+        assert_eq!(at, "ab שלום cd".len());
+        // Ahem is never split.
+        let ahem_id = FontId(0);
+        assert_eq!(split_by_font(r, ahem_id, "ab שלום").len(), 1);
+    }
+
+    #[test]
+    fn text_mixed_line_has_one_run_per_face_with_the_right_ids() {
+        let p = Prepared::new("ab שלום", noto(20));
+        let l = p.next_line(0, px(1000)).expect("a line");
+        let runs = p.line_runs(&l, Au(0));
+        let hebrew = resolve_font(["Noto Sans Hebrew"]);
+        assert!(
+            runs.iter()
+                .any(|r| r.font == hebrew && !r.glyphs.is_empty())
+        );
+        assert!(runs.iter().any(|r| r.font == resolve_font(["Noto Sans"])));
+        // Runs abut: each starts where the previous ended (all one direction here
+        // except the Hebrew word, which is reordered but still contiguous).
+        let total: Au = runs.iter().map(|r| r.width).fold(Au(0), |a, b| a + b);
+        assert_eq!(total, l.width);
+        assert!(runs.iter().flat_map(|r| &r.glyphs).all(|g| g.glyph_id != 0));
     }
 
     #[test]
