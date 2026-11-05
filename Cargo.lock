@@ -1470,6 +1470,7 @@ name = "px-net"
 version = "0.0.0"
 dependencies = [
  "px-sandbox",
+ "px-websec",
  "rustls",
  "rustls-pki-types",
  "webpki-roots",

@@ -190,3 +190,12 @@ impl PublicSuffixList {
         Some(labels.get(start..)?.join("."))
     }
 }
+
+/// px-websec asks for the registrable domain through a trait so that it does
+/// not depend on this crate (and on rustls with it). This is the production
+/// implementation: the same list, with the same rules, that partitions state.
+impl px_websec::origin::SiteResolver for PublicSuffixList {
+    fn registrable_domain(&self, host: &str) -> Option<String> {
+        PublicSuffixList::registrable_domain(self, host)
+    }
+}

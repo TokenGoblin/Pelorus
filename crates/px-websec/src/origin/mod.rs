@@ -20,7 +20,7 @@
 
 pub mod url;
 
-pub(crate) mod trace;
+pub mod trace;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

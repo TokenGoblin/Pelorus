@@ -1304,3 +1304,29 @@ follows.
     not applied by `spawn`; the grandchild-orphan case in `SandboxedChild::kill` stays open.
   - Clipboard: Linux has none without a display; a display-server connection is the
     `socket_unix` / `connect_unix_display` attempts. Windows clipboard attempts do not exist.
+
+## Unify the two Origin types in px-websec; finish Phase 12 wiring outside the fetch path
+
+- **Found in:** phase 12 fetch integration (`crates/px-net/src/secure.rs`)
+- **Belongs to:** phase 12 (types), phase 13 (document / navigation / worker wiring)
+- **What:**
+  - `origin::Origin`/`origin::Url` and `csp::url::Origin`/`CspUrl` are separate
+    types. `secure.rs` crosses between them by serialising a URL and parsing it
+    again, and denies when the CSP engine cannot express it. CSP also drops the
+    query on re-parse, so the CSP engine's `upgrade_insecure_url` result is used
+    only as a yes/no and the upgrade is done on the websec URL. Unifying them
+    removes the round trip and a class of "parsed differently by two parsers"
+    bugs. Not done here: it touches every CSP test.
+  - `RequestOptions::integrity` (CSP hash-source allowing an external script by
+    its `integrity`) is passed empty.
+  - Not reachable from a fetch, left to the content process: `<meta>` CSP,
+    policy inheritance for `about:`/`blob:`/`data:`, `coop::group_switch`,
+    `referrer::parse_attribute`, CSP inline/eval/`form-action`/`base-uri`,
+    COEP report-only reporting, CSP report delivery.
+  - The fetch path does not use the connection pool and opens one connection
+    per request.
+  - WPT thresholds for `cors/`, `fetch/`, `mixed-content/`, `referrer-policy/`,
+    `content-security-policy/` (the Phase 12 gate) are unmeasured.
+- **Why deferred:** each needs a consumer (a document, a worker, a navigation)
+  that does not exist yet, or is a refactor wider than this integration.
+  `docs/phase-12-integration.md` lists what is and is not wired.

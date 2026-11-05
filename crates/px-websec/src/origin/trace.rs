@@ -7,10 +7,10 @@
 //! listed point was actually reached ([`assert_all_hit`]). In a non-test build
 //! `hit` is an empty function the optimiser removes.
 
-#[cfg(test)]
+#[cfg(any(test, feature = "trace"))]
 use std::cell::RefCell;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "trace"))]
 thread_local! {
     static HITS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
 }
@@ -18,10 +18,26 @@ thread_local! {
 /// Record that the enforcement point `name` was reached.
 #[inline]
 pub(crate) fn hit(name: &'static str) {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "trace"))]
     HITS.with(|h| h.borrow_mut().push(name));
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "trace")))]
     let _ = name;
+}
+
+/// Forget everything recorded on this thread. Present only with the `trace`
+/// feature, which px-net enables from its own `testing` feature so that an
+/// integration test can show an enforcement point was reached *through a
+/// fetch* (px-net's `tests/enforcement_points.rs`). The log is per thread:
+/// a fetch must run on the thread that reads the log.
+#[cfg(feature = "trace")]
+pub fn clear() {
+    HITS.with(|h| h.borrow_mut().clear());
+}
+
+/// Every enforcement point reached on this thread since [`clear`], in order.
+#[cfg(feature = "trace")]
+pub fn snapshot() -> Vec<&'static str> {
+    HITS.with(|h| h.borrow().clone())
 }
 
 /// Forget everything recorded on this thread.
