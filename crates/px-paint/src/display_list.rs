@@ -270,6 +270,10 @@ pub enum ListError {
     RunTooLong,
     /// A glyph run's `start + len` lies beyond the arena.
     RunOutOfBounds,
+    /// More than [`MAX_IMAGES`] images, or one whose bytes do not match its size.
+    BadImage,
+    /// An [`Item::Image`] names an image the list does not have.
+    ImageOutOfBounds,
 }
 
 impl std::fmt::Display for ListError {
@@ -278,11 +282,46 @@ impl std::fmt::Display for ListError {
             ListError::TooManyGlyphs => "glyph arena too large",
             ListError::RunTooLong => "glyph run too long",
             ListError::RunOutOfBounds => "glyph run outside the arena",
+            ListError::BadImage => "malformed or too many images",
+            ListError::ImageOutOfBounds => "image index outside the table",
         })
     }
 }
 
 impl std::error::Error for ListError {}
+
+/// A decoded raster image: non-premultiplied sRGB RGBA, row-major, `width *
+/// height * 4` bytes. Lives in [`DisplayList::images`] behind an `Arc`, so cloning
+/// a list (the shell clones one per frame) never copies pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageData {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+impl ImageData {
+    /// Whether `rgba` is exactly `width * height * 4` bytes and neither side is 0.
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        u64::from(self.width) * u64::from(self.height) * 4 == self.rgba.len() as u64
+            && self.width > 0
+            && self.height > 0
+    }
+}
+
+/// How an image is resampled to its destination. Both are integer-only and
+/// deterministic; see [`crate::image`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageFilter {
+    /// The source pixel under the destination pixel's centre.
+    Nearest,
+    /// Bilinear when magnifying, a box filter when minifying, per axis.
+    Smooth,
+}
+
+/// Most distinct images one list may carry.
+pub const MAX_IMAGES: usize = 1024;
 
 /// One paint operation. `Copy`, so a list never owns another list and dropping or
 /// walking one cannot recurse over nesting depth.
@@ -334,6 +373,16 @@ pub enum Item {
     PushRoundedClip {
         shape: RoundedRect,
     },
+    /// Draw image number `image` of [`DisplayList::images`] stretched over
+    /// `rect` (snapped like any box), resampled with `filter`, composited
+    /// source-over through the current clip, rounded clips included. A tile of a
+    /// repeating background is one item. The caller clips what must not show
+    /// (`object-fit: cover`, a background's painting area) with a clip.
+    Image {
+        rect: Rect,
+        image: u32,
+        filter: ImageFilter,
+    },
 }
 
 /// Items in paint order, back to front.
@@ -342,6 +391,8 @@ pub struct DisplayList {
     pub items: Vec<Item>,
     /// The glyphs [`Item::GlyphRun`] windows into. At most [`MAX_GLYPHS`].
     pub glyphs: Vec<PositionedGlyph>,
+    /// The images [`Item::Image`] names, by index. At most [`MAX_IMAGES`].
+    pub images: Vec<std::sync::Arc<ImageData>>,
 }
 
 impl DisplayList {
@@ -392,6 +443,23 @@ impl DisplayList {
         true
     }
 
+    /// Add an image to the list's table (the same `Arc` twice is one entry) and
+    /// return its index, or `None` when the table is full.
+    pub fn add_image(&mut self, image: &std::sync::Arc<ImageData>) -> Option<u32> {
+        if let Some(i) = self
+            .images
+            .iter()
+            .position(|have| std::sync::Arc::ptr_eq(have, image))
+        {
+            return u32::try_from(i).ok();
+        }
+        if self.images.len() >= MAX_IMAGES {
+            return None;
+        }
+        self.images.push(image.clone());
+        u32::try_from(self.images.len() - 1).ok()
+    }
+
     /// The glyphs of a run, or `None` if the window is outside the arena.
     pub fn run_glyphs(&self, start: u32, len: u32) -> Option<&[PositionedGlyph]> {
         let start = usize::try_from(start).ok()?;
@@ -405,14 +473,23 @@ impl DisplayList {
         if self.glyphs.len() > MAX_GLYPHS {
             return Err(ListError::TooManyGlyphs);
         }
+        if self.images.len() > MAX_IMAGES || self.images.iter().any(|i| !i.is_well_formed()) {
+            return Err(ListError::BadImage);
+        }
         for item in &self.items {
-            if let Item::GlyphRun { start, len, .. } = item {
-                if *len > MAX_GLYPHS_PER_RUN {
-                    return Err(ListError::RunTooLong);
+            match item {
+                Item::GlyphRun { start, len, .. } => {
+                    if *len > MAX_GLYPHS_PER_RUN {
+                        return Err(ListError::RunTooLong);
+                    }
+                    if self.run_glyphs(*start, *len).is_none() {
+                        return Err(ListError::RunOutOfBounds);
+                    }
                 }
-                if self.run_glyphs(*start, *len).is_none() {
-                    return Err(ListError::RunOutOfBounds);
+                Item::Image { image, .. } if (*image as usize) >= self.images.len() => {
+                    return Err(ListError::ImageOutOfBounds);
                 }
+                _ => {}
             }
         }
         Ok(())

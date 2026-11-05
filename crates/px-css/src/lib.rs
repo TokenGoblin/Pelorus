@@ -36,5 +36,6 @@ pub mod data;
 pub mod dom;
 pub mod element;
 pub mod engine;
+pub mod image_style;
 pub mod paint;
 pub mod view;
