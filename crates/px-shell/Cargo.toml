@@ -1,0 +1,28 @@
+[package]
+name = "px-shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The interim browser binary: the px-ui chrome in a px-display window with a real
+# page, rendered by our own engine, in its content area. Workspace paths only, no
+# third-party crate. Phase 18 integration; the process split is Phase 19 (see
+# CLAUDE.md in this directory).
+[dependencies]
+px-brand = { path = "../px-brand", version = "0.0.0" }
+px-css = { path = "../px-css", version = "0.0.0" }
+px-display = { path = "../px-display", version = "0.0.0" }
+px-dom = { path = "../px-dom", version = "0.0.0" }
+px-layout = { path = "../px-layout", version = "0.0.0" }
+px-paint = { path = "../px-paint", version = "0.0.0" }
+px-text = { path = "../px-text", version = "0.0.0" }
+px-ui = { path = "../px-ui", version = "0.0.0" }
+
+[lib]
+name = "px_shell"
+path = "src/lib.rs"
+
+[[bin]]
+name = "px-shell"
+path = "src/main.rs"

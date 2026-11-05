@@ -21,6 +21,7 @@ members = [
     "crates/px-paint",
     "crates/px-sandbox",
     "crates/px-script",
+    "crates/px-shell",
     "crates/px-store",
     "crates/px-text",
     "crates/px-ui",

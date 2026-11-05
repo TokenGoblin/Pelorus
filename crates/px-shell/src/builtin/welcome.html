@@ -1,0 +1,25 @@
+<!doctype html>
+<title>Welcome</title>
+<style>
+body { margin: 0; padding: 32px 40px; }
+h1 { margin: 0 0 8px 0; font-size: 34px; color: #14213d }
+.lead { margin: 0 0 24px 0; font-size: 18px; color: #4a4e69; width: 560px }
+.cards { display: flex; flex-direction: row; flex-wrap: wrap }
+.card { width: 200px; margin: 0 16px 16px 0; padding: 14px; background: #eef2fb; border: 2px solid #c5d0ee }
+.card b { color: #14213d }
+.card p { margin: 6px 0 0 0; font-size: 14px }
+.note { margin-top: 12px; padding: 10px 14px; background: #fff4d6; color: #5c4400; width: 560px }
+</style>
+<h1>A page drawn by our own engine</h1>
+<p class="lead">Everything in this area was parsed, styled, laid out, painted and rasterised by the
+engine in this repository. The tabs and the address bar around it are the browser chrome.</p>
+<div class="cards">
+  <div class="card"><b>Inline text</b><p>Spans, <a href="about:long">links</a>, wrapping and
+  line breaking at the window width. Resize the window to see it reflow.</p></div>
+  <div class="card"><b>Flexbox</b><p>These cards are a wrapping flex row. See also
+  <a href="about:flex">the flex page</a>.</p></div>
+  <div class="card"><b>Scrolling</b><p>Mouse wheel, Page Up and Down, Home, End and the arrow keys
+  scroll a long page: <a href="about:long">open it</a>.</p></div>
+</div>
+<div class="note">Links to local files work too. Open a file with
+<b>px-shell path/to/page.html</b> or type its path in the address bar.</div>

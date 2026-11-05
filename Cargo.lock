@@ -1515,6 +1515,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "px-shell"
+version = "0.0.0"
+dependencies = [
+ "px-brand",
+ "px-css",
+ "px-display",
+ "px-dom",
+ "px-layout",
+ "px-paint",
+ "px-text",
+ "px-ui",
+]
+
+[[package]]
 name = "px-store"
 version = "0.0.0"
 dependencies = [
