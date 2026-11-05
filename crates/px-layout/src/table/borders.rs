@@ -260,13 +260,22 @@ impl Table {
         for (ci, c) in self.cells.iter_mut().enumerate() {
             let end_col = (c.col + c.colspan).min(ncols);
             let end_row = (c.row + c.rowspan).min(nrows);
-            let top = (c.col..end_col).map(|k| width_of(&h[c.row][k])).max().unwrap_or(Au(0));
+            let top = (c.col..end_col)
+                .map(|k| width_of(&h[c.row][k]))
+                .max()
+                .unwrap_or(Au(0));
             let bottom = (c.col..end_col)
                 .map(|k| width_of(&h[end_row][k]))
                 .max()
                 .unwrap_or(Au(0));
-            let left = (c.row..end_row).map(|r| width_of(&v[r][c.col])).max().unwrap_or(Au(0));
-            let right = (c.row..end_row).map(|r| width_of(&v[r][end_col])).max().unwrap_or(Au(0));
+            let left = (c.row..end_row)
+                .map(|r| width_of(&v[r][c.col]))
+                .max()
+                .unwrap_or(Au(0));
+            let right = (c.row..end_row)
+                .map(|r| width_of(&v[r][end_col]))
+                .max()
+                .unwrap_or(Au(0));
             let _ = ci;
             c.edges.border = LogicalEdges {
                 block_start: top - top / 2,
@@ -322,14 +331,7 @@ impl Resolved {
             let y = line_y(line);
             for (k, s) in segs.iter().enumerate() {
                 let Some((w, color)) = drawn(s) else { continue };
-                rect(
-                    tree,
-                    col_x[k],
-                    y - w / 2,
-                    col_x[k + 1] - col_x[k],
-                    w,
-                    color,
-                );
+                rect(tree, col_x[k], y - w / 2, col_x[k + 1] - col_x[k], w, color);
             }
         }
         for (r, segs) in self.v.iter().enumerate() {
@@ -337,8 +339,16 @@ impl Resolved {
             for (line, s) in segs.iter().enumerate() {
                 let Some((w, color)) = drawn(s) else { continue };
                 let around = |l: usize| -> Au {
-                    let a = if line > 0 { width_of(&self.h[l][line - 1]) } else { Au(0) };
-                    let b = if line < ncols { width_of(&self.h[l][line]) } else { Au(0) };
+                    let a = if line > 0 {
+                        width_of(&self.h[l][line - 1])
+                    } else {
+                        Au(0)
+                    };
+                    let b = if line < ncols {
+                        width_of(&self.h[l][line])
+                    } else {
+                        Au(0)
+                    };
                     a.max(b)
                 };
                 let up = around(r) / 2;

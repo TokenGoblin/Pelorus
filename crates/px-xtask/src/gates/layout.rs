@@ -112,7 +112,51 @@ pub const SUITES: &[Suite] = &[
         "layout_inline_",
         "crates/px-layout/tests/inline.rs",
     ),
+    // CSS 2.1 chapter 17: table layout, its unit tests, and the WPT css-tables
+    // reftest and crashtest subsets (vendored with `vendor-wpt --module css-tables`).
+    (
+        "table-layout",
+        "layout_table_",
+        "crates/px-layout/tests/table.rs",
+    ),
+    (
+        "table-reftests",
+        "layout_table_reftest_",
+        "crates/px-layout/tests/table_reftest.rs",
+    ),
+    (
+        "table-crashtests",
+        "layout_table_crashtest_",
+        "crates/px-layout/tests/crashtest_tables.rs",
+    ),
 ];
+
+/// The css-tables corpora are committed and cannot quietly shrink: `(label,
+/// directory, floor of .html files)`. 139 and 33 were vendored.
+pub const TABLE_CORPORA: &[(&str, &str, usize)] = &[
+    ("the css-tables reftest subset", "tests/wpt/css-tables", 130),
+    (
+        "the css-tables crashtests",
+        "tests/wpt/css-tables-crashtests",
+        30,
+    ),
+];
+
+pub fn check_table_corpora(g: &mut Gate, root: &Path) {
+    for (label, dir, floor) in TABLE_CORPORA {
+        let files = git::ls_files(root, &[], &[dir]).unwrap_or_default();
+        let n = files.iter().filter(|f| f.ends_with(".html")).count();
+        if n < *floor {
+            g.fail(format!(
+                "{label} has {n} files in the index, floor is {floor}"
+            ));
+        } else {
+            g.ok(format!(
+                "{label} has {n} files in the index (floor {floor})"
+            ));
+        }
+    }
+}
 
 /// The reftest corpus is committed and cannot quietly shrink. ADR 019's
 /// pattern, third outing: a conformance threshold is only a threshold if the
@@ -385,6 +429,7 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
         _ => g.fail("tests failed"),
     }
     check_corpora(g, root);
+    check_table_corpora(g, root);
     check_sources(g, root);
 }
 

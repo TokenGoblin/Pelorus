@@ -10,13 +10,7 @@ fn surround(e: &Edges) -> Au {
 impl Table {
     /// Measure every cell and resolve the collapsed borders, so that `min`/`max`
     /// of each cell are final border-box widths.
-    fn measure_cells(
-        &mut self,
-        dom: px_css::view::Dom<'_>,
-        arena: &Arena,
-        containing: Au,
-        inherit: &ComputedValues,
-    ) {
+    fn measure_cells(&mut self, dom: px_css::view::Dom<'_>, arena: &Arena, containing: Au) {
         let mut inner: Vec<(Au, Au)> = Vec::with_capacity(self.cells.len());
         for i in 0..self.cells.len() {
             let (min_max, edges, spec_h, hide) = match &self.cells[i].src {
@@ -66,7 +60,10 @@ impl Table {
                 if bb {
                     (h, true)
                 } else {
-                    (h + c.edges.border.block_sum() + c.edges.padding.block_sum(), true)
+                    (
+                        h + c.edges.border.block_sum() + c.edges.padding.block_sum(),
+                        true,
+                    )
                 }
             });
             c.min = imin + sur;
@@ -128,9 +125,12 @@ impl Table {
 
     /// Total of everything in the table's inline axis that is not a column.
     fn inline_extra(&self) -> Au {
-        self.edges.border.inline_sum()
-            + self.edges.padding.inline_sum()
-            + self.spacing.0 * (self.ncols as i32 + 1)
+        let spacing = if self.ncols == 0 {
+            Au(0)
+        } else {
+            self.spacing.0 * (self.ncols as i32 + 1)
+        };
+        self.edges.border.inline_sum() + self.edges.padding.inline_sum() + spacing
     }
 
     /// The table's min-content and max-content (border-box) widths.
@@ -224,14 +224,14 @@ pub(crate) fn intrinsic(
         style,
         Au(0),
     );
-    t.measure_cells(dom, arena, Au(0), style);
+    t.measure_cells(dom, arena, Au(0));
     let (min, max) = t.intrinsic_widths();
     if !real {
         return Intrinsic { min, max };
     }
     let (mut min, mut max) = (min, max);
-    match width_spec(style) {
-        Spec::Length(l) => {
+    if let Spec::Length(l) = width_spec(style) {
+        {
             let l = if border_box_sizing(style) {
                 l
             } else {
@@ -241,7 +241,6 @@ pub(crate) fn intrinsic(
             min = w;
             max = w;
         }
-        _ => {}
     }
     // The caller adds the table's margin, as for any other box.
     let m = resolve_edges(style, Au(0)).margin.inline_sum();
@@ -296,7 +295,7 @@ pub(crate) fn plan(
         empty_table(style_node, style)
     };
     table.node = tnode;
-    table.measure_cells(dom, arena, containing, style);
+    table.measure_cells(dom, arena, containing);
 
     let extra = table.inline_extra();
     let (mut cols, spans) = table.column_constraints();
@@ -344,7 +343,11 @@ pub(crate) fn plan(
             max: b.max.map(|m| m + bb_extra),
         }
         .clamp(width);
-        width = if fixed_layout { clamped } else { clamped.max(tmin) };
+        width = if fixed_layout {
+            clamped
+        } else {
+            clamped.max(tmin)
+        };
     }
 
     let avail_cols = (width - extra).max(Au(0));
@@ -354,7 +357,7 @@ pub(crate) fn plan(
             known[i] = match c.spec {
                 Spec::Length(l) => Some(l),
                 Spec::Percent(p) => Some(Au(
-                    i32::try_from(i64::from(avail_cols.0) * p / 10_000).unwrap_or(0),
+                    i32::try_from(i64::from(avail_cols.0) * p / 10_000).unwrap_or(0)
                 )),
                 Spec::Auto => None,
             };
@@ -364,9 +367,10 @@ pub(crate) fn plan(
                 let cell = &table.cells[ci];
                 let w = match cell.spec_w {
                     Spec::Length(l) => Some(l),
-                    Spec::Percent(p) => Some(Au(
-                        i32::try_from(i64::from(avail_cols.0) * p / 10_000).unwrap_or(0),
-                    )),
+                    Spec::Percent(p) => Some(Au(i32::try_from(
+                        i64::from(avail_cols.0) * p / 10_000,
+                    )
+                    .unwrap_or(0))),
                     Spec::Auto => None,
                 };
                 if let Some(w) = w {
@@ -388,7 +392,11 @@ pub(crate) fn plan(
     };
     let sum: Au = widths.iter().copied().sum();
     let grid_inline = (sum + extra).max(width.min(sum + extra));
-    let grid_inline = if fixed_layout { grid_inline.max(width) } else { grid_inline };
+    let grid_inline = if fixed_layout {
+        grid_inline.max(width)
+    } else {
+        grid_inline
+    };
     table.col_widths = widths;
     table.grid_inline = grid_inline;
 
@@ -447,11 +455,4 @@ fn centre_margins(style: &ComputedValues, containing: Au, width: Au, m: &mut Log
     } else {
         m.inline_end = leftover;
     }
-}
-
-/// Whether `definite_inline_size` is worth having here (kept for the intrinsic
-/// walk's use of a table's stated width).
-#[allow(dead_code)]
-pub(crate) fn stated_width(style: &ComputedValues) -> Option<Au> {
-    definite_inline_size(style)
 }

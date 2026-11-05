@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<title>Collapsed borders</title>
+<style>
+body { margin: 20px; font: 16px Ahem }
+table { border-collapse: collapse; border: 6px solid #c33 }
+td { border: 2px solid #36c; padding: 8px }
+td.w { border: 10px solid #3a3 }
+tr.h td { border-bottom: 4px solid #000 }
+td.x { border-right: 8px solid #fa0 }
+</style>
+<table>
+<tr class="h"><td>AA<td class="w">BB<td>CC</tr>
+<tr><td class="x">DD<td>EE<td>FF</tr>
+<tr><td>GG<td>HH<td class="w">II</tr>
+</table>

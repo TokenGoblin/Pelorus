@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<title>Table vertical-align and caption</title>
+<style>
+body { margin: 20px; font: 16px Ahem }
+table { border-spacing: 4px; background: #333 }
+caption { background: #ccc; padding: 4px }
+td { background: #eee; padding: 4px; width: 90px }
+tr { height: 100px }
+</style>
+<table>
+<caption>top caption</caption>
+<tr>
+<td style="vertical-align:top">top
+<td style="vertical-align:middle">mid
+<td style="vertical-align:bottom">bot
+<td style="vertical-align:baseline">base<br>base<br>base
+<td style="vertical-align:baseline;font-size:28px">big
+</tr>
+</table>
+<table style="margin-top:20px">
+<tr><td>x</td></tr>
+<caption style="caption-side:bottom;background:#9cf">bottom caption</caption>
+</table>

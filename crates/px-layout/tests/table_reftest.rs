@@ -26,7 +26,7 @@ const SUITE: Suite = Suite {
 const EXPECTED_FAILURES: &[(&str, &str)] = &[];
 
 /// How many pairs must match. **It may not fall.**
-const MATCH_FLOOR: usize = 0;
+const MATCH_FLOOR: usize = 30;
 
 /// The vendored corpus has this many pairs or more.
 const MIN_PAIRS: usize = 70;

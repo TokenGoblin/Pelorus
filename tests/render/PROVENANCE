@@ -56,3 +56,7 @@ Canvas: 800 px wide, max(600, document height) tall, capped at 2400.
 each in the light and the dark scheme (a `#dark` suffix on the source renders with
 prefers-color-scheme: dark). They are used in place, not copied. PNG copies for
 review are in docs/brand/ui-page-*.png.
+
+8 pages (table-*): hand-written table fixtures (basic, spans, widths, collapsed
+borders, vertical-align and captions, anonymous boxes, spacing and empty-cells,
+legacy attributes). Each baseline was viewed before it was committed.

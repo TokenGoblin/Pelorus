@@ -320,6 +320,10 @@ fn build_units(tree: &FragmentTree, facts: &Facts, root: FragmentId) -> Vec<Unit
                 } else {
                     units[carried].blocks.push(Op::Boxed(id));
                 }
+            } else if fragment.fill.is_some() {
+                // A box with no element behind it that paints a solid colour:
+                // a collapsed table border segment.
+                units[carried].blocks.push(Op::Boxed(id));
             }
             for kid in tree.children(id).iter().rev() {
                 stack.push((*kid, kids_unit, false));
@@ -416,7 +420,16 @@ fn emit_ops(
         match *op {
             Op::Text(_) => emit_line(list, tree, facts, id, styles),
             Op::Boxed(_) => {
-                if let Some(style) = facts.style[id.index()]
+                if facts.style[id.index()].is_none()
+                    && let Some(fill) = fragment.fill
+                {
+                    if fill[3] > 0 {
+                        list.push(Item::FillRect {
+                            rect,
+                            color: color(fill),
+                        });
+                    }
+                } else if let Some(style) = facts.style[id.index()]
                     && style.visible
                 {
                     let skip_bg = fragment.node.is_some() && fragment.node == propagated;

@@ -106,8 +106,10 @@ impl State {
                     (key, i),
                     Forced {
                         honour_height: true,
-                        content_inline: (width - c.edges.border.inline_sum() - c.edges.padding.inline_sum())
-                            .max(Au(0)),
+                        content_inline: (width
+                            - c.edges.border.inline_sum()
+                            - c.edges.padding.inline_sum())
+                        .max(Au(0)),
                         edges: c.edges,
                     },
                 ));
@@ -157,8 +159,10 @@ impl State {
                             (row_frag.index(), slot),
                             Forced {
                                 honour_height: false,
-                                content_inline: (width - e.border.inline_sum() - e.padding.inline_sum())
-                                    .max(Au(0)),
+                                content_inline: (width
+                                    - e.border.inline_sum()
+                                    - e.padding.inline_sum())
+                                .max(Au(0)),
                                 edges: e,
                             },
                         ));
@@ -210,7 +214,11 @@ fn first_baseline(tree: &FragmentTree, root: FragmentId) -> Option<Au> {
     let mut stack = vec![(root, Au(0))];
     while let Some((id, top)) = stack.pop() {
         let f = tree.get(id)?;
-        let here = if id == root { top } else { top + f.block_offset };
+        let here = if id == root {
+            top
+        } else {
+            top + f.block_offset
+        };
         match f.kind {
             FragmentKind::Line => return Some(here + f.baseline),
             FragmentKind::Block | FragmentKind::AnonymousBlock => {
@@ -237,6 +245,7 @@ fn shift_content(tree: &mut FragmentTree, cell: FragmentId, delta: Au) {
 }
 
 impl Table {
+    #[allow(clippy::needless_range_loop)]
     fn place(&mut self, tree: &mut FragmentTree, fragment: FragmentId) {
         let sp = self.spacing;
         let nrows = self.rows.len();
@@ -279,11 +288,14 @@ impl Table {
                 continue;
             }
             let end = (c.row + c.rowspan).min(nrows);
-            let have: Au = row_base[c.row..end].iter().copied().sum::<Au>()
-                + sp.1 * (end - c.row - 1) as i32;
+            let have: Au =
+                row_base[c.row..end].iter().copied().sum::<Au>() + sp.1 * (end - c.row - 1) as i32;
             if natural[ci] > have {
                 let ones = vec![1i64; end - c.row];
-                for (k, d) in columns::split(natural[ci] - have, &ones).into_iter().enumerate() {
+                for (k, d) in columns::split(natural[ci] - have, &ones)
+                    .into_iter()
+                    .enumerate()
+                {
                     row_base[c.row + k] += d;
                 }
             }
@@ -291,14 +303,23 @@ impl Table {
 
         // The table's height: stated height and min/max-height add to the rows.
         let rows_sum: Au = row_base.iter().copied().sum();
-        let spacing_total = if nrows == 0 { Au(0) } else { sp.1 * (nrows as i32 + 1) };
+        let spacing_total = if nrows == 0 {
+            Au(0)
+        } else {
+            sp.1 * (nrows as i32 + 1)
+        };
         let frame = self.edges.border.block_sum() + self.edges.padding.block_sum();
         let base = frame + spacing_total + rows_sum;
-        let wanted = self.height_bounds.clamp(self.specified_height.unwrap_or(base));
+        let wanted = self
+            .height_bounds
+            .clamp(self.specified_height.unwrap_or(base));
         let target = base.max(wanted);
         if target > base && nrows > 0 {
             let weights: Vec<i64> = row_base.iter().map(|h| i64::from(h.0)).collect();
-            for (h, d) in row_base.iter_mut().zip(columns::split(target - base, &weights)) {
+            for (h, d) in row_base
+                .iter_mut()
+                .zip(columns::split(target - base, &weights))
+            {
                 *h += d;
             }
         }
@@ -316,8 +337,8 @@ impl Table {
             x += *w + sp.0;
         }
         col_x.push(x);
-        let grid_w: Au = self.col_widths.iter().copied().sum::<Au>()
-            + sp.0 * (self.ncols as i32 - 1).max(0);
+        let grid_w: Au =
+            self.col_widths.iter().copied().sum::<Au>() + sp.0 * (self.ncols as i32 - 1).max(0);
         let grid_x = x0 + sp.0;
 
         let mut row_y: Vec<Au> = vec![Au(0); nrows];
@@ -327,7 +348,11 @@ impl Table {
             y += self.rows[r].height + sp.1;
         }
         let rows_end = if nrows > 0 { y - sp.1 } else { y0 };
-        let grid_h = if nrows > 0 { rows_end - (y0 + sp.1) } else { Au(0) };
+        let grid_h = if nrows > 0 {
+            rows_end - (y0 + sp.1)
+        } else {
+            Au(0)
+        };
 
         // Groups.
         let mut group_frags: Vec<FragmentId> = Vec::new();
@@ -346,7 +371,9 @@ impl Table {
             }
             let mut row_frags = Vec::new();
             for r in first..=last {
-                let Some(rf) = self.rows[r].frag else { continue };
+                let Some(rf) = self.rows[r].frag else {
+                    continue;
+                };
                 if let Some(f) = tree.get_mut(rf) {
                     f.inline_offset = Au(0);
                     f.block_offset = row_y[r] - top;
@@ -431,7 +458,10 @@ impl Table {
 
         let height = (frame + spacing_total + rows_sum).max(target);
         let grid_box = if has_caption {
-            let mut f = Fragment::new(FragmentKind::Block, LogicalSize::new(self.grid_inline, height));
+            let mut f = Fragment::new(
+                FragmentKind::Block,
+                LogicalSize::new(self.grid_inline, height),
+            );
             f.node = self.node;
             tree.push(f)
         } else {

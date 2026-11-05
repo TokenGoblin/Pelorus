@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<title>Anonymous table boxes</title>
+<style>
+body { margin: 20px; font: 16px Ahem }
+.t { display: table; background: #888; border-spacing: 3px; margin-bottom: 14px }
+.r { display: table-row }
+.c { display: table-cell; padding: 4px; background: #fe9 }
+.rg { display: table-row-group }
+</style>
+<div class="t"><div class="r"><div class="c">cell</div><div class="c">cell two</div></div>
+<div class="r">loose text</div></div>
+<div class="r"><div class="c" style="background:#9ef">no table</div><div class="c" style="background:#9fe">around</div></div>
+<div class="c" style="background:#f9e;margin-top:14px">bare cell</div>
+<div class="t"><div class="rg"><div class="rg"><div class="c">in</div><div class="c">nested</div></div><div class="c">groups</div></div></div>

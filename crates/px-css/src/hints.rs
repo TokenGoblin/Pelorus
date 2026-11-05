@@ -140,7 +140,10 @@ pub fn css_for(arena: &Arena, id: NodeId) -> Option<String> {
             if let Some(c) = get("bordercolor").and_then(legacy_color) {
                 css.push_str(&format!("border-color:{c};"));
             }
-            match get("align").map(|a| a.trim().to_ascii_lowercase()).as_deref() {
+            match get("align")
+                .map(|a| a.trim().to_ascii_lowercase())
+                .as_deref()
+            {
                 Some("left") => css.push_str("float:left;"),
                 Some("right") => css.push_str("float:right;"),
                 Some("center" | "middle") => css.push_str("margin-left:auto;margin-right:auto;"),
@@ -200,10 +203,8 @@ pub fn css_for(arena: &Arena, id: NodeId) -> Option<String> {
             let table = table_ancestor(arena, id);
             let mut padding = "1px".to_owned();
             if let Some(t) = table {
-                if let Some(v) = attr(arena, t, "cellpadding") {
-                    if let Some(d) = dimension(v) {
-                        padding = d;
-                    }
+                if let Some(d) = attr(arena, t, "cellpadding").and_then(dimension) {
+                    padding = d;
                 }
                 let bordered = attr(arena, t, "border")
                     .map(|b| non_negative(b).is_none_or(|n| n > 0))
@@ -259,11 +260,7 @@ mod tests {
 
     #[test]
     fn hints_table_border_and_spacing() {
-        let css = css_of(
-            "<table border=3 cellspacing=5 width=50%><tr><td>x",
-            "table",
-        )
-        .unwrap();
+        let css = css_of("<table border=3 cellspacing=5 width=50%><tr><td>x", "table").unwrap();
         assert!(css.contains("border-width:3px;border-style:outset"));
         assert!(css.contains("border-spacing:5px"));
         assert!(css.contains("width:50%"));

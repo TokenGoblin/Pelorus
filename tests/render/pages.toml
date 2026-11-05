@@ -221,3 +221,35 @@ source = "tests/render/pages/radius-clamp.html"
 [[page]]
 id = "corner-shape"
 source = "tests/render/pages/corner-shape.html"
+
+[[page]]
+id = "table-basic"
+source = "tests/render/pages/table-basic.html"
+
+[[page]]
+id = "table-spans"
+source = "tests/render/pages/table-spans.html"
+
+[[page]]
+id = "table-widths"
+source = "tests/render/pages/table-widths.html"
+
+[[page]]
+id = "table-collapse"
+source = "tests/render/pages/table-collapse.html"
+
+[[page]]
+id = "table-valign-caption"
+source = "tests/render/pages/table-valign-caption.html"
+
+[[page]]
+id = "table-anonymous"
+source = "tests/render/pages/table-anonymous.html"
+
+[[page]]
+id = "table-spacing-empty"
+source = "tests/render/pages/table-spacing-empty.html"
+
+[[page]]
+id = "table-legacy"
+source = "tests/render/pages/table-legacy.html"

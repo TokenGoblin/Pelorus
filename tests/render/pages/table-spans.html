@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<title>Table colspan and rowspan</title>
+<style>
+body { margin: 20px; font: 16px Ahem }
+table { border-spacing: 4px; background: #333 }
+td { padding: 6px; background: #eee }
+.a { background: #e66 } .b { background: #6e6 } .c { background: #66e } .d { background: #ee6 }
+</style>
+<table>
+<tr><td class="a" colspan="2" rowspan="2">AAAA</td><td class="b">B</td><td class="c" rowspan="3">C<br>C<br>C</td></tr>
+<tr><td class="d">D</td></tr>
+<tr><td>E</td><td class="b" colspan="2">FFFF</td></tr>
+<tr><td class="c" colspan="4">GGGGGGGGGG</td></tr>
+</table>

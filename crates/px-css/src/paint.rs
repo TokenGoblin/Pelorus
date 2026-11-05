@@ -256,7 +256,11 @@ pub fn collapsed_sides(style: &ComputedValues) -> [CollapsedSide; 4] {
         }
     };
     [
-        side(b.border_top_width.0, b.border_top_style, &b.border_top_color),
+        side(
+            b.border_top_width.0,
+            b.border_top_style,
+            &b.border_top_color,
+        ),
         side(
             b.border_right_width.0,
             b.border_right_style,
@@ -267,7 +271,11 @@ pub fn collapsed_sides(style: &ComputedValues) -> [CollapsedSide; 4] {
             b.border_bottom_style,
             &b.border_bottom_color,
         ),
-        side(b.border_left_width.0, b.border_left_style, &b.border_left_color),
+        side(
+            b.border_left_width.0,
+            b.border_left_style,
+            &b.border_left_color,
+        ),
     ]
 }
 

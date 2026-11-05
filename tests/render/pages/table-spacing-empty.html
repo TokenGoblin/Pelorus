@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<title>border-spacing and empty-cells</title>
+<style>
+body { margin: 20px; font: 16px Ahem }
+table { background: #36c; margin-bottom: 20px }
+td { background: #fc3; width: 40px; height: 30px; padding: 0; border: 3px solid #c30 }
+</style>
+<table style="border-spacing:0"><tr><td>a<td>b<td>c</table>
+<table style="border-spacing:12px 4px"><tr><td>a<td>b<td>c<tr><td>d<td>e<td>f</table>
+<table style="border-spacing:6px;empty-cells:hide"><tr><td>a<td><td>c<tr><td><td>e<td></table>
+<table style="border-spacing:6px;empty-cells:show"><tr><td>a<td><td>c</table>

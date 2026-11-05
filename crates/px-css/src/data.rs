@@ -264,9 +264,8 @@ impl StyleData {
                 continue;
             }
             let Some(attrs) = node.attrs() else { continue };
-            let hint = style_attrs.and_then(|parser| {
-                crate::hints::css_for(arena, id).map(|css| parser.parse(&css))
-            });
+            let hint = style_attrs
+                .and_then(|parser| crate::hints::css_for(arena, id).map(|css| parser.parse(&css)));
             let Some(slot) = self.slots.get_mut(id.index() as usize) else {
                 continue;
             };

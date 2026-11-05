@@ -558,35 +558,35 @@ pub fn layout_document(
                             - resolved.padding.inline_sum())
                         .max(Au(0))
                     } else {
-                    match side {
-                        // §10.3.7. An absolutely positioned box is solved rather
-                        // than filled: its width comes from the equation relating
-                        // `left`, `width` and `right` to the containing block,
-                        // which is also where its inline position comes from.
-                        _ if absolute => {
-                            let intrinsic = intrinsic_inline_size(dom, arena, node);
-                            absolute_inline_size(&style, containing, &resolved, intrinsic)
+                        match side {
+                            // §10.3.7. An absolutely positioned box is solved rather
+                            // than filled: its width comes from the equation relating
+                            // `left`, `width` and `right` to the containing block,
+                            // which is also where its inline position comes from.
+                            _ if absolute => {
+                                let intrinsic = intrinsic_inline_size(dom, arena, node);
+                                absolute_inline_size(&style, containing, &resolved, intrinsic)
+                            }
+                            _ if (side.is_some() || is_inline_grid(&style) || inline_block)
+                                && definite_inline_size(&style).is_none() =>
+                            {
+                                let available = containing - resolved.inline_surround();
+                                let available = available.max(Au(0));
+                                let intrinsic = intrinsic_inline_size(dom, arena, node);
+                                // The intrinsic figures are border-box, and this box's
+                                // own surround is already counted in `available`.
+                                let surround =
+                                    resolved.border.inline_sum() + resolved.padding.inline_sum();
+                                shrink_to_fit(
+                                    Intrinsic {
+                                        min: (intrinsic.min - surround).max(Au(0)),
+                                        max: (intrinsic.max - surround).max(Au(0)),
+                                    },
+                                    available,
+                                )
+                            }
+                            _ => resolve_inline_size(&style, containing, &resolved),
                         }
-                        _ if (side.is_some() || is_inline_grid(&style) || inline_block)
-                            && definite_inline_size(&style).is_none() =>
-                        {
-                            let available = containing - resolved.inline_surround();
-                            let available = available.max(Au(0));
-                            let intrinsic = intrinsic_inline_size(dom, arena, node);
-                            // The intrinsic figures are border-box, and this box's
-                            // own surround is already counted in `available`.
-                            let surround =
-                                resolved.border.inline_sum() + resolved.padding.inline_sum();
-                            shrink_to_fit(
-                                Intrinsic {
-                                    min: (intrinsic.min - surround).max(Au(0)),
-                                    max: (intrinsic.max - surround).max(Au(0)),
-                                },
-                                available,
-                            )
-                        }
-                        _ => resolve_inline_size(&style, containing, &resolved),
-                    }
                     };
                     // §10.4. Applied to the *used* width rather than by recomputing
                     // §10.3 with the bound as the computed width, which is how the
@@ -697,9 +697,9 @@ pub fn layout_document(
                     tables.formatting_context_roots[fragment.index()] = table_part
                         || table_plan.is_some()
                         || establishes_formatting_context(&style)
-                            || inline_block
-                            || flex.is_item(node)
-                            || grid_item.is_some();
+                        || inline_block
+                        || flex.is_item(node)
+                        || grid_item.is_some();
                     // A flex item's block size is the flex algorithm's to decide.
                     if !flex.is_item(node)
                         && (!sized_elsewhere || forced.is_some_and(|f| f.honour_height))
@@ -2739,15 +2739,20 @@ fn intrinsic_walk(
                     continue;
                 }
 
+                let own_contents = if node == root {
+                    root_contents.take()
+                } else {
+                    None
+                };
                 // A table (or the start of an anonymous one) measures itself.
-                if crate::table::is_table(&style)
-                    || (node != root && crate::table::is_internal(&style))
+                if own_contents.is_none()
+                    && (crate::table::is_table(&style)
+                        || (node != root && crate::table::is_internal(&style)))
                 {
                     let value = crate::table::intrinsic(dom, arena, node, &style);
                     contribute(&mut frames, &mut result, value);
                     continue;
                 }
-                let own_contents = if node == root { root_contents.take() } else { None };
                 let edges = resolve_edges(&style, Au(0));
                 let surround = if own_contents.is_some() {
                     Au(0)

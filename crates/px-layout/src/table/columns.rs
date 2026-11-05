@@ -75,9 +75,16 @@ pub(crate) fn apply_spans(cols: &mut [Col], spans: &[Span], spacing: Au) {
         // their own (all of them, if every one has).
         let free: Vec<usize> = {
             let f: Vec<usize> = range.clone().filter(|i| cols[*i].fixed.is_none()).collect();
-            if f.is_empty() { range.clone().collect() } else { f }
+            if f.is_empty() {
+                range.clone().collect()
+            } else {
+                f
+            }
         };
-        let weights: Vec<i64> = free.iter().map(|i| i64::from(cols[*i].max.0.max(1))).collect();
+        let weights: Vec<i64> = free
+            .iter()
+            .map(|i| i64::from(cols[*i].max.0.max(1)))
+            .collect();
 
         let have: Au = cols[range.clone()].iter().map(|c| c.min).sum();
         let need = s.min - inner;
@@ -104,12 +111,12 @@ pub(crate) fn apply_spans(cols: &mut [Col], spans: &[Span], spacing: Au) {
                 .sum();
             let need = f - inner;
             if need > have {
-                let free: Vec<usize> = range
-                    .clone()
-                    .filter(|i| cols[*i].fixed.is_none())
-                    .collect();
+                let free: Vec<usize> = range.clone().filter(|i| cols[*i].fixed.is_none()).collect();
                 if !free.is_empty() {
-                    let w: Vec<i64> = free.iter().map(|i| i64::from(cols[*i].max.0.max(1))).collect();
+                    let w: Vec<i64> = free
+                        .iter()
+                        .map(|i| i64::from(cols[*i].max.0.max(1)))
+                        .collect();
                     for (i, d) in free.iter().zip(split(need - have, &w)) {
                         let c = &mut cols[*i];
                         c.fixed = Some(c.min + d);
@@ -123,7 +130,10 @@ pub(crate) fn apply_spans(cols: &mut [Col], spans: &[Span], spacing: Au) {
             if s.pct > have {
                 let free: Vec<usize> = range.clone().filter(|i| cols[*i].pct == 0).collect();
                 if !free.is_empty() {
-                    let w: Vec<i64> = free.iter().map(|i| i64::from(cols[*i].max.0.max(1))).collect();
+                    let w: Vec<i64> = free
+                        .iter()
+                        .map(|i| i64::from(cols[*i].max.0.max(1)))
+                        .collect();
                     let total = i32::try_from(s.pct - have).unwrap_or(0);
                     for (i, d) in free.iter().zip(split(Au(total), &w)) {
                         cols[*i].pct = i64::from(d.0);
@@ -192,11 +202,20 @@ pub(crate) fn distribute(cols: &[Col], total: Au) -> Vec<Au> {
         let slack: Vec<i64> = cols
             .iter()
             .zip(&w)
-            .map(|(c, w)| if c.pct > 0 { i64::from((*w - c.min).0.max(0)) } else { 0 })
+            .map(|(c, w)| {
+                if c.pct > 0 {
+                    i64::from((*w - c.min).0.max(0))
+                } else {
+                    0
+                }
+            })
             .collect();
         let total_slack: i64 = slack.iter().sum();
         if total_slack > 0 {
-            let take = split(over.min(Au(i32::try_from(total_slack).unwrap_or(0))), &slack);
+            let take = split(
+                over.min(Au(i32::try_from(total_slack).unwrap_or(0))),
+                &slack,
+            );
             for (x, d) in w.iter_mut().zip(take) {
                 *x -= d;
             }
@@ -225,7 +244,11 @@ pub(crate) fn distribute(cols: &[Col], total: Au) -> Vec<Au> {
             .iter()
             .map(|i| {
                 let c = &cols[*i];
-                let target = if pass == 0 { c.fixed.unwrap_or(c.max).max(c.min) } else { c.max };
+                let target = if pass == 0 {
+                    c.fixed.unwrap_or(c.max).max(c.min)
+                } else {
+                    c.max
+                };
                 i64::from((target - w[*i]).0.max(0))
             })
             .collect();

@@ -41,8 +41,8 @@ use px_dom::{Arena, NodeId};
 use style::properties::ComputedValues;
 
 use crate::block::{
-    Bounds, Edges, Intrinsic, block_bounds, children_in_order, computed_style,
-    definite_inline_size, inline_bounds, is_display_none, resolve_block_size, resolve_edges,
+    Bounds, Edges, Intrinsic, block_bounds, children_in_order, computed_style, inline_bounds,
+    is_display_none, resolve_block_size, resolve_edges,
 };
 use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree};
 use crate::geom::{LogicalEdges, LogicalSize};
@@ -280,9 +280,9 @@ fn tokenize(dom: px_css::view::Dom<'_>, arena: &Arena, nodes: &[NodeId]) -> Vec<
     let mut run: Vec<NodeId> = Vec::new();
     let flush = |run: &mut Vec<NodeId>, out: &mut Vec<Tok>| {
         let meaningful = run.iter().any(|id| {
-            arena
-                .get(*id)
-                .is_some_and(|n| n.element_name().is_some() || n.text().is_some_and(|t| !t.trim().is_empty()))
+            arena.get(*id).is_some_and(|n| {
+                n.element_name().is_some() || n.text().is_some_and(|t| !t.trim().is_empty())
+            })
         });
         if meaningful {
             out.push(Tok::Content(std::mem::take(run)));
@@ -350,8 +350,17 @@ fn rows_from(dom: px_css::view::Dom<'_>, arena: &Arena, toks: &[Tok]) -> Vec<Row
             loose.clear();
         }
     };
-    for t in toks {
+    // A row group inside a row group contributes its children as if they were
+    // the outer group's own (the inner group's box is dropped), which is what
+    // browsers do with `display: table-row-group` nested in one.
+    let mut work: Vec<Tok> = toks.iter().rev().cloned().collect();
+    while let Some(t) = work.pop() {
+        let t = &t;
         match t {
+            Tok::Group(n, _) => {
+                let kids = tokenize(dom, arena, &children_in_order(arena, *n));
+                work.extend(kids.into_iter().rev());
+            }
             Tok::Row(n) => {
                 end_loose(&mut loose, &mut rows);
                 let kids = tokenize(dom, arena, &children_in_order(arena, *n));
@@ -453,12 +462,7 @@ thread_local! {
 /// Nested tables measure their cells recursively (a cell's min-content width is
 /// the min-content width of the table inside it). A page can nest them without
 /// bound, so past this depth a table measures as empty.
-const MAX_NESTING: u32 = 64;
-
-struct Measured {
-    cols: Vec<Col>,
-    extra: Au,
-}
+const MAX_NESTING: u32 = 20;
 
 fn collapsed_of(style: &ComputedValues) -> bool {
     style.get_inherited_table().clone_border_collapse()
@@ -466,7 +470,7 @@ fn collapsed_of(style: &ComputedValues) -> bool {
 }
 
 fn spacing_of(style: &ComputedValues) -> (Au, Au) {
-    let s = style.get_inherited_table().border_spacing.clone();
+    let s = style.get_inherited_table().border_spacing;
     (
         Au(s.0.width.0.to_i32_au()).max(Au(0)),
         Au(s.0.height.0.to_i32_au()).max(Au(0)),
@@ -488,6 +492,7 @@ fn valign_of(style: &ComputedValues) -> VAlign {
 /// `node` is the table element (`None` for an anonymous table), `nodes` the boxes
 /// that make it up, `own` the table's own style (`None` for anonymous) and
 /// `inherit` the style the inherited table properties come from.
+#[allow(clippy::too_many_arguments)]
 fn build(
     dom: px_css::view::Dom<'_>,
     arena: &Arena,
@@ -560,8 +565,14 @@ fn build(
                 }
             } else {
                 // Bodies, and the repeats of header/footer demoted above.
-                let first_h = shape.groups.iter().position(|(_, kk, _)| *kk == GroupKind::Header);
-                let first_f = shape.groups.iter().position(|(_, kk, _)| *kk == GroupKind::Footer);
+                let first_h = shape
+                    .groups
+                    .iter()
+                    .position(|(_, kk, _)| *kk == GroupKind::Header);
+                let first_f = shape
+                    .groups
+                    .iter()
+                    .position(|(_, kk, _)| *kk == GroupKind::Footer);
                 match *k {
                     GroupKind::Header if first_h != Some(i) => GroupKind::Body,
                     GroupKind::Footer if first_f != Some(i) => GroupKind::Body,
@@ -627,7 +638,11 @@ fn build(
                     x += 1;
                 }
                 let colspan = colspan.min(MAX_COLUMNS.saturating_sub(x).max(1));
-                let rowspan = if colspan * rowspan <= budget { rowspan } else { 1 };
+                let rowspan = if colspan * rowspan <= budget {
+                    rowspan
+                } else {
+                    1
+                };
                 for r in row_index..row_index + rowspan {
                     for c in x..x + colspan {
                         occupied.insert((r, c));
@@ -658,7 +673,26 @@ fn build(
             }
         }
     }
-    let ncols = max_col.min(MAX_COLUMNS);
+    let fixed_table = own.is_some_and(|s| {
+        s.get_table().clone_table_layout() == style::computed_values::table_layout::T::Fixed
+    });
+    // Under `table-layout: fixed` the columns are those the cells reach, but a
+    // spanning cell cannot create columns beyond the declared `<col>`s.
+    let ncols = if fixed_table && declared_cols > 0 {
+        let reach = cells.iter().map(|c| c.col + 1).max().unwrap_or(0);
+        for c in &mut cells {
+            c.colspan = c.colspan.min(declared_cols.saturating_sub(c.col).max(1));
+        }
+        let extent = cells
+            .iter()
+            .map(|c| c.col + c.colspan)
+            .max()
+            .unwrap_or(reach);
+        extent.min(declared_cols).max(reach).min(MAX_COLUMNS)
+    } else {
+        max_col.min(MAX_COLUMNS)
+    };
+    cols.truncate(ncols.max(declared_cols.min(ncols)));
     while cols.len() < ncols {
         cols.push(ColSpec { spec: Spec::Auto });
     }
@@ -688,7 +722,7 @@ fn build(
         })
         .collect();
 
-    let t = Table {
+    Table {
         node,
         style_node,
         collapsed,
@@ -707,15 +741,10 @@ fn build(
         wrapper_inline: Au(0),
         grid_inline: Au(0),
         borders: None,
-    };
-    t
+    }
 }
 
 fn style_caption_top(style: &ComputedValues) -> bool {
     use style::computed_values::caption_side::T as S;
-    !matches!(
-        style.get_inherited_table().clone_caption_side(),
-        S::Bottom
-    )
+    !matches!(style.get_inherited_table().clone_caption_side(), S::Bottom)
 }
-
