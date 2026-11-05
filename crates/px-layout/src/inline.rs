@@ -59,23 +59,29 @@
 //!
 //! # What is not done
 //!
-//! No `vertical-align` but `baseline`; `text-decoration`, `letter-spacing`,
-//! `word-spacing` and `text-transform` are not applied; `unicode-bidi` embeds and
-//! overrides on spans are not (the paragraph direction is the block's); a span's
-//! own `white-space` is used to collapse its text but the breaking options are the
-//! block's; a percentage margin, border or padding on an inline box resolves
-//! against zero; a float's band is queried with the block's strut height, not the
-//! line's final one; a mixed-direction line gives a box one fragment spanning the
-//! extent of its content rather than one per visual piece.
+//! `text-decoration-style`, `-thickness` and `text-underline-offset` (every line is
+//! solid, a sixteenth of the font size thick); `text-indent: hanging | each-line`
+//! and its share of intrinsic widths; `text-transform: full-width | full-size-kana`;
+//! `unicode-bidi` embeds and overrides on spans (the paragraph direction is the
+//! block's); a span's own `white-space` collapses its text but the breaking options
+//! are the block's; a percentage margin, border or padding on an inline box
+//! resolves against zero; a float's band is queried with the block's strut height,
+//! not the line's final one; a mixed-direction line gives a box one fragment
+//! spanning the extent of its content rather than one per visual piece; an atomic
+//! inline inside a `vertical-align: top | bottom` subtree is aligned to the
+//! baseline of its parent, not placed with the subtree; the subtree root of a box
+//! reopened after a block interrupts it keeps its old subtree index.
 
 use app_units::Au;
 use px_dom::{Arena, NodeId};
 use style::properties::ComputedValues;
 
 use crate::block::Edges;
-use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree, TextRun};
-use crate::geom::{LogicalEdges, LogicalSize};
-use crate::text::{self, Align, Atomic, Edge, OBJECT, Prepared, StyleRange, TextStyle, WhiteSpace};
+use crate::fragment::{Fragment, FragmentId, FragmentKind, FragmentTree, RunDeco, TextRun};
+use crate::geom::{LogicalEdges, LogicalSize, px};
+use crate::text::{
+    self, Align, Atomic, Deco, Edge, OBJECT, Prepared, StyleRange, TextStyle, WhiteSpace,
+};
 
 /// The forced break `<br>` stands for in a run's text.
 pub const LINE_BREAK: char = '\u{2028}';
@@ -99,6 +105,9 @@ pub(crate) struct InlineBox {
     /// How far `vertical-align` raises it (and so its text) above the baseline
     /// of the line, including its ancestors' shifts.
     pub raise: Au,
+    /// The `text-decoration` lines on its text: its own and those propagated
+    /// from its ancestors.
+    pub deco: Deco,
     /// First byte of its content in the run's text.
     pub start: usize,
     /// One past its last byte.
@@ -123,6 +132,11 @@ pub(crate) struct AtomicSpec {
     pub node: NodeId,
     /// Where its `U+FFFC` is.
     pub offset: usize,
+    /// The text style of the element it is inside: `vertical-align: middle`,
+    /// `text-top` and `text-bottom` are measured against it.
+    pub parent: TextStyle,
+    /// How far that element's baseline is raised above the line's.
+    pub parent_raise: Au,
 }
 
 /// A run of inline content: the text and the structure it came from.
@@ -167,13 +181,25 @@ impl InlineRunData {
         }
     }
 
-    fn extend_range(&mut self, start: usize, style: TextStyle, node: Option<NodeId>, raise: Au) {
+    fn extend_range(
+        &mut self,
+        start: usize,
+        style: TextStyle,
+        node: Option<NodeId>,
+        raise: Au,
+        deco: Deco,
+    ) {
         let end = self.text.len();
         if end <= start {
             return;
         }
         match self.ranges.last_mut() {
-            Some(last) if last.node == node && last.end == start && last.raise == raise => {
+            Some(last)
+                if last.node == node
+                    && last.end == start
+                    && last.raise == raise
+                    && last.deco == deco =>
+            {
                 last.end = end;
             }
             _ => self.ranges.push(StyleRange {
@@ -182,6 +208,7 @@ impl InlineRunData {
                 style,
                 node,
                 raise,
+                deco,
             }),
         }
     }
@@ -195,8 +222,16 @@ impl InlineRunData {
         style: TextStyle,
         node: Option<NodeId>,
         raise: Au,
+        deco: Deco,
     ) {
         let start = self.text.len();
+        let mapped;
+        let raw = if style.transform == text::Transform::None {
+            raw
+        } else {
+            mapped = style.transform.apply(raw, self.text.chars().next_back());
+            mapped.as_str()
+        };
         match white_space {
             WhiteSpace::Normal | WhiteSpace::Nowrap => {
                 // CSS Text 3 phase I: a collapsible space after another, or at
@@ -220,14 +255,21 @@ impl InlineRunData {
             }
             other => self.text.push_str(&collapse_for(raw, other)),
         }
-        self.extend_range(start, style, node, raise);
+        self.extend_range(start, style, node, raise, deco);
     }
 
     /// Append a single structural character (`U+2028` or `U+FFFC`).
-    pub fn push_char(&mut self, ch: char, style: TextStyle, node: Option<NodeId>, raise: Au) {
+    pub fn push_char(
+        &mut self,
+        ch: char,
+        style: TextStyle,
+        node: Option<NodeId>,
+        raise: Au,
+        deco: Deco,
+    ) {
         let start = self.text.len();
         self.text.push(ch);
-        self.extend_range(start, style, node, raise);
+        self.extend_range(start, style, node, raise, deco);
     }
 
     /// Start a box at the current end of the text; returns its index.
@@ -264,10 +306,16 @@ impl InlineRunData {
         style: TextStyle,
         range_node: Option<NodeId>,
         raise: Au,
+        deco: Deco,
     ) {
         let offset = self.text.len();
-        self.push_char(OBJECT, style, range_node, raise);
-        self.atomics.push(AtomicSpec { node, offset });
+        self.push_char(OBJECT, style, range_node, raise, deco);
+        self.atomics.push(AtomicSpec {
+            node,
+            offset,
+            parent: style,
+            parent_raise: raise,
+        });
     }
 
     /// Whether the run has nothing to lay out: no object, and no text but
@@ -326,6 +374,12 @@ pub(crate) enum VAlign {
     Top,
     /// Margin-box bottom at the line's bottom.
     Bottom,
+    /// Vertical midpoint at the parent's baseline plus half its x-height.
+    Middle,
+    /// Top at the top of the parent's content area.
+    TextTop,
+    /// Bottom at the bottom of the parent's content area.
+    TextBottom,
 }
 
 /// The `vertical-align` of an element, as far as this engine honours it.
@@ -335,8 +389,14 @@ pub(crate) enum VAlign {
 /// `baseline-shift` longhand. A percentage is of the element's own `line-height`;
 /// `sub` lowers by a fifth and `super` raises by a third of the font size.
 pub(crate) fn vertical_align_of(style: &ComputedValues, text: TextStyle) -> VAlign {
-    use style::values::computed::BaselineShift;
+    use style::values::computed::{AlignmentBaseline as A, BaselineShift};
     use style::values::generics::box_::BaselineShiftKeyword as K;
+    match style.clone_alignment_baseline() {
+        A::Middle => return VAlign::Middle,
+        A::TextTop => return VAlign::TextTop,
+        A::TextBottom => return VAlign::TextBottom,
+        _ => {}
+    }
     match style.clone_baseline_shift() {
         BaselineShift::Keyword(K::Top) => VAlign::Top,
         BaselineShift::Keyword(K::Bottom) => VAlign::Bottom,
@@ -433,6 +493,7 @@ fn ranges_of(
             style,
             node,
             raise: Au(0),
+            deco: Deco::default(),
         }],
     }
 }
@@ -462,6 +523,9 @@ pub(crate) struct InlineContext<'a> {
     pub block_origin: Au,
     /// The inline boxes and inline-blocks of the run, if it has any.
     pub content: Option<RunContent<'a>>,
+    /// `text-indent`: the first line starts this far in from the block's start edge
+    /// (the right edge in a right-to-left block) and has that much less room.
+    pub indent: Au,
 }
 
 /// Lay `context` out into line fragments, appended to `tree`.
@@ -516,10 +580,33 @@ pub(crate) fn layout_lines(
         .collect();
     let prepared = Prepared::paragraph(context.text, style, &ranges, &edge_list, &atomic_list);
 
+    // `vertical-align: middle | text-top | text-bottom` and the shifts, all as a
+    // raise from the line's baseline (the parent's own raise included); `top` and
+    // `bottom` stay as they are.
+    let effective: Vec<VAlign> = infos
+        .iter()
+        .zip(specs)
+        .map(|(i, sp)| match i.align {
+            VAlign::Raise(r) => VAlign::Raise(sp.parent_raise + r),
+            VAlign::Middle => VAlign::Raise(
+                sp.parent_raise + sp.parent.x_height() / 2 - (i.above() - i.below()) / 2,
+            ),
+            VAlign::TextTop => {
+                VAlign::Raise(sp.parent_raise + sp.parent.metrics().ascent - i.above())
+            }
+            VAlign::TextBottom => {
+                VAlign::Raise(sp.parent_raise - sp.parent.metrics().descent + i.below())
+            }
+            other => other,
+        })
+        .collect();
+
     let strut = style.metrics();
     let strut_above = strut.baseline_in(style.line_height);
     let strut_below = style.line_height - strut_above;
     let mut from = 0usize;
+    // `text-indent` is spent by the first line that has content.
+    let mut indent = context.indent;
     // Inline boxes that reach the current line, outermost first.
     let mut active: Vec<usize> = Vec::new();
     let mut next_box = 0usize;
@@ -547,7 +634,7 @@ pub(crate) fn layout_lines(
         }
 
         let room = end - start;
-        let Some(line) = prepared.next_line(from, room) else {
+        let Some(line) = prepared.next_line(from, room - indent) else {
             break;
         };
         // §9.5: "If a shortened line box is too small to contain any content,
@@ -555,7 +642,7 @@ pub(crate) fn layout_lines(
         // either some content fits or there are no more floats present." The line
         // overflows its room only when its first unbreakable piece does not fit;
         // the next float edge is strictly below, so this cannot spin.
-        if line.width > room
+        if line.width > room - indent
             && room < context.available
             && let Some(below) = context.floats.and_then(|f| f.next_edge_below(block_cursor))
         {
@@ -578,30 +665,37 @@ pub(crate) fn layout_lines(
         }
 
         // `text-align`. Overflowing lines align to their start edge.
-        let slack = (room - line.width).max(Au(0));
+        // The indent takes room on the start side of the first line only.
+        let line_indent = std::mem::replace(&mut indent, Au(0));
+        let indent_left = if style.rtl { Au(0) } else { line_indent };
+        let slack = (room - line_indent - line.width).max(Au(0));
         let spaces = context
             .text
             .get(line.start..line.content_end)
             .map_or(0, |s| s.bytes().filter(|b| *b == b' ').count());
         let justify = style.align == Align::Justify && !line.last && !line.forced && spaces > 0;
-        let (shift, extra_space, _width) = match style.align {
+        // Justification spreads the slack over the spaces in whole app units: every
+        // space gets `each`, and the first one also what did not divide, so the line
+        // is exactly full.
+        let n = i32::try_from(spaces).unwrap_or(i32::MAX).max(1);
+        let (shift, extra_space, remainder) = match style.align {
             Align::Justify if justify => {
-                let n = i32::try_from(spaces).unwrap_or(i32::MAX);
                 let each = slack / n;
-                (Au(0), each, line.width + each * n)
+                (Au(0), each, slack - each * n)
             }
-            Align::Right => (slack, Au(0), line.width),
-            Align::Center => (slack / 2, Au(0), line.width),
-            Align::Justify if style.rtl => (slack, Au(0), line.width),
-            Align::Left | Align::Justify => (Au(0), Au(0), line.width),
+            Align::Right => (slack, Au(0), Au(0)),
+            Align::Center => (slack / 2, Au(0), Au(0)),
+            Align::Justify if style.rtl => (slack, Au(0), Au(0)),
+            Align::Left | Align::Justify => (Au(0), Au(0), Au(0)),
         };
+        let shift = shift + indent_left;
         let width = if justify {
-            line.width + extra_space * i32::try_from(spaces).unwrap_or(i32::MAX)
+            line.width + slack
         } else {
             line.width
         };
 
-        let content = prepared.line_runs(&line, extra_space);
+        let content = prepared.line_runs(&line, extra_space, remainder);
 
         // The inline boxes that reach this line. Boxes are in open order, so
         // those starting before the line's end are exactly a prefix; a box that
@@ -622,27 +716,50 @@ pub(crate) fn layout_lines(
         // highest top and the lowest bottom.
         let mut above = strut_above;
         let mut below = strut_below;
+        // Boxes of a `top` or `bottom` subtree are placed against the finished line;
+        // only the subtree's own extent (about its root's baseline) can make the
+        // line taller.
+        let mut tallest_aligned = Au(0);
+        let mut pins: Vec<(usize, Au, Au)> = Vec::new();
         for &i in &active {
             let Some(b) = boxes.get(i) else { continue };
             let a = b.text.metrics().baseline_in(b.text.line_height);
+            if let Some(id) = b.deco.pin.id() {
+                let (pa, pb) = (a + b.raise, b.text.line_height - a - b.raise);
+                match pins.iter_mut().find(|p| p.0 == id) {
+                    Some(p) => {
+                        p.1 = p.1.max(pa);
+                        p.2 = p.2.max(pb);
+                    }
+                    None => pins.push((id, pa, pb)),
+                }
+                continue;
+            }
             above = above.max(a + b.raise);
             below = below.max(b.text.line_height - a - b.raise);
         }
+        for p in &pins {
+            tallest_aligned = tallest_aligned.max(p.1 + p.2);
+        }
+        let extent_of = |pin: text::Pin| {
+            pin.id()
+                .and_then(|id| pins.iter().find(|p| p.0 == id))
+                .map_or((Au(0), Au(0)), |p| (p.1, p.2))
+        };
         // Atomic inlines that `vertical-align: top | bottom` take out of the
         // baseline alignment: they only make the line taller if they must.
-        let mut tallest_aligned = Au(0);
         for slot in content.slots.iter().filter(|s| s.atomic) {
-            if let Some(info) = specs
+            if let Some((info, align)) = specs
                 .binary_search_by_key(&slot.cluster, |s| s.offset)
                 .ok()
-                .and_then(|k| infos.get(k))
+                .and_then(|k| infos.get(k).zip(effective.get(k)))
             {
-                match info.align {
+                match *align {
                     VAlign::Raise(r) => {
                         above = above.max(info.above() + r);
                         below = below.max(info.below() - r);
                     }
-                    VAlign::Top | VAlign::Bottom => {
+                    _ => {
                         tallest_aligned = tallest_aligned.max(info.margin_box_block());
                     }
                 }
@@ -677,9 +794,16 @@ pub(crate) fn layout_lines(
                 r.rtl,
                 range.node,
                 r.inline_offset,
-                baseline - range.raise,
+                baseline
+                    - range.raise
+                    - range.deco.pin.raise(
+                        extent_of(range.deco.pin),
+                        baseline,
+                        line_height - baseline,
+                    ),
                 r.width,
-            );
+            )
+            .with_deco(run_deco(&range.style, range.deco));
             tree.add_text_run(fragment, record, &r.glyphs);
         }
 
@@ -724,6 +848,9 @@ pub(crate) fn layout_lines(
             let m = b.text.metrics();
             let top = baseline
                 - b.raise
+                - b.deco
+                    .pin
+                    .raise(extent_of(b.deco.pin), baseline, line_height - baseline)
                 - m.ascent
                 - b.edges.padding.block_start
                 - b.edges.border.block_start;
@@ -739,19 +866,17 @@ pub(crate) fn layout_lines(
             kids.push(tree.push(f));
         }
         for slot in content.slots.iter().filter(|s| s.atomic) {
-            if let Some(info) = specs
+            if let Some((info, align)) = specs
                 .binary_search_by_key(&slot.cluster, |s| s.offset)
                 .ok()
-                .and_then(|k| infos.get(k))
+                .and_then(|k| infos.get(k).zip(effective.get(k)))
                 && let Some(f) = tree.get_mut(info.fragment)
             {
                 f.inline_offset = shift + slot.x0 + info.margin.inline_start;
-                f.block_offset = match info.align {
+                f.block_offset = match *align {
                     VAlign::Raise(r) => baseline - info.above() - r + info.margin.block_start,
                     VAlign::Top => info.margin.block_start,
-                    VAlign::Bottom => {
-                        line_height - info.margin_box_block() + info.margin.block_start
-                    }
+                    _ => line_height - info.margin_box_block() + info.margin.block_start,
                 };
                 kids.push(info.fragment);
             }
@@ -765,6 +890,38 @@ pub(crate) fn layout_lines(
     }
 
     (lines, block_cursor - context.block_origin)
+}
+
+/// The decoration lines of text in `style`, as geometry from the baseline.
+///
+/// The thickness is a sixteenth of the font size, rounded to whole pixels and at
+/// least one. An underline sits half way down the descent, an overline at the
+/// top of the ascent and a line-through a little over a quarter of the ascent
+/// above the baseline. Integer app-unit arithmetic throughout.
+pub(crate) fn run_deco(style: &TextStyle, deco: Deco) -> RunDeco {
+    if deco.is_none() {
+        return RunDeco::default();
+    }
+    let m = style.metrics();
+    let half = px(1) / 2;
+    let thickness = px((style.size / 16 + half).to_px().max(1));
+    // To whole pixels, half away from zero.
+    let snap = |v: Au| {
+        if v < Au(0) {
+            Au(0) - px((Au(0) - v + half).to_px())
+        } else {
+            px((v + half).to_px())
+        }
+    };
+    RunDeco {
+        under: deco.under,
+        over: deco.over,
+        through: deco.through,
+        thickness,
+        under_top: snap((m.descent / 2 - thickness / 2).max(thickness)),
+        over_top: Au(0) - m.ascent,
+        through_top: snap(Au(0) - m.ascent * 3 / 10 - thickness / 2),
+    }
 }
 
 /// The preferred minimum and maximum inline sizes of a run (CSS 2.1 §10.3.5):
@@ -943,6 +1100,7 @@ mod tests {
             floats: None,
             block_origin: Au(0),
             content: None,
+            indent: Au(0),
         }
     }
 

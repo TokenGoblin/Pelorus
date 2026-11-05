@@ -165,6 +165,140 @@ pub struct TextStyle {
     pub plaintext: bool,
     /// `text-align`.
     pub align: Align,
+    /// `letter-spacing`, added after every glyph; zero for `normal`.
+    pub letter_spacing: Au,
+    /// `word-spacing`, added to every word separator (U+0020 and U+00A0).
+    pub word_spacing: Au,
+    /// `text-transform`'s case mapping, applied when the run's text is built.
+    pub transform: Transform,
+}
+
+/// The case mapping of `text-transform` (`full-width` and `full-size-kana` are
+/// not implemented).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Transform {
+    /// `none`.
+    #[default]
+    None,
+    /// `uppercase`.
+    Uppercase,
+    /// `lowercase`.
+    Lowercase,
+    /// `capitalize`.
+    Capitalize,
+}
+
+impl Transform {
+    /// Map `raw`. `prev` is the character before it in the same run, which
+    /// decides whether the first letter of `raw` starts a word.
+    #[must_use]
+    pub fn apply(self, raw: &str, prev: Option<char>) -> String {
+        match self {
+            Transform::None => raw.to_owned(),
+            Transform::Uppercase => raw.to_uppercase(),
+            Transform::Lowercase => raw.to_lowercase(),
+            Transform::Capitalize => {
+                let mut out = String::with_capacity(raw.len());
+                // A letter starts a word unless a letter, digit or (inside a
+                // word) an apostrophe comes right before it.
+                let mut before = prev;
+                let mut before_that: Option<char> = None;
+                for c in raw.chars() {
+                    let inside = before.is_some_and(|b| {
+                        b.is_alphanumeric()
+                            || (matches!(b, '\'' | '\u{2019}')
+                                && before_that.is_some_and(char::is_alphanumeric))
+                    });
+                    if c.is_alphabetic() && !inside {
+                        out.extend(c.to_uppercase());
+                    } else {
+                        out.push(c);
+                    }
+                    before_that = before;
+                    before = Some(c);
+                }
+                out
+            }
+        }
+    }
+}
+
+/// Which of `text-decoration`'s lines apply to a stretch of text, each with the
+/// element whose `text-decoration-color` draws it: the innermost element, among
+/// the box and the in-flow ancestors it propagates from, that declared it
+/// (CSS Text Decoration 3, section 2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Deco {
+    /// `underline`.
+    pub under: Option<NodeId>,
+    /// `overline`.
+    pub over: Option<NodeId>,
+    /// `line-through`.
+    pub through: Option<NodeId>,
+    /// Whether the text is aligned to the line box's edge rather than a baseline
+    /// (`vertical-align: top | bottom` on it or an ancestor).
+    pub pin: Pin,
+}
+
+/// `vertical-align: top | bottom` on an inline box: the box and everything inside
+/// it is one aligned subtree, placed against the line box once the line's height
+/// is known. The number is the index of the subtree's root box in the run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pin {
+    /// Aligned on the baseline.
+    #[default]
+    None,
+    /// The subtree's top is the line's top.
+    Top(usize),
+    /// The subtree's bottom is the line's bottom.
+    Bottom(usize),
+}
+
+impl Pin {
+    /// The subtree this belongs to, if pinned.
+    #[must_use]
+    pub fn id(self) -> Option<usize> {
+        match self {
+            Pin::None => None,
+            Pin::Top(i) | Pin::Bottom(i) => Some(i),
+        }
+    }
+
+    /// How far a pinned box's baseline is raised, given the subtree's extent
+    /// above and below the root's baseline and the line's own (`line_above` is the
+    /// baseline's distance from the top, `line_below` from the bottom). Zero when
+    /// not pinned.
+    #[must_use]
+    pub fn raise(self, extent: (Au, Au), line_above: Au, line_below: Au) -> Au {
+        match self {
+            Pin::None => Au(0),
+            Pin::Top(_) => line_above - extent.0,
+            Pin::Bottom(_) => extent.1 - line_below,
+        }
+    }
+}
+
+impl Deco {
+    /// Whether no line applies.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.under.is_none() && self.over.is_none() && self.through.is_none()
+    }
+
+    /// `self` with the lines `style` declares on `node` added, `node` winning.
+    #[must_use]
+    pub fn with(self, style: &ComputedValues, node: NodeId) -> Self {
+        use style::values::specified::text::TextDecorationLine as L;
+        let line = style.get_text().clone_text_decoration_line();
+        let pick =
+            |flag: L, old: Option<NodeId>| if line.contains(flag) { Some(node) } else { old };
+        Deco {
+            under: pick(L::UNDERLINE, self.under),
+            over: pick(L::OVERLINE, self.over),
+            through: pick(L::LINE_THROUGH, self.through),
+            pin: self.pin,
+        }
+    }
 }
 
 impl TextStyle {
@@ -180,6 +314,9 @@ impl TextStyle {
             rtl: false,
             plaintext: false,
             align: Align::Left,
+            letter_spacing: Au(0),
+            word_spacing: Au(0),
+            transform: Transform::None,
         };
         s.line_height = s.metrics().normal_line_height();
         s
@@ -217,6 +354,9 @@ impl TextStyle {
             rtl,
             plaintext,
             align: align_of(style, rtl),
+            letter_spacing: style.clone_letter_spacing().0.to_used_value(size),
+            word_spacing: style.clone_word_spacing().to_used_value(size),
+            transform: transform_of(style),
         };
         out.line_height = match style.clone_line_height() {
             LineHeight::Normal => out.metrics().normal_line_height(),
@@ -226,6 +366,30 @@ impl TextStyle {
             LineHeight::Length(length) => Au::from(length.0),
         };
         out
+    }
+
+    /// The x-height at this size: the top of the face's `x`, or half an em when
+    /// it has none. `vertical-align: middle` uses it.
+    #[must_use]
+    pub fn x_height(&self) -> Au {
+        let Some(font) = fonts().registry.get(self.font) else {
+            return self.size / 2;
+        };
+        let top = font
+            .glyph_index('x')
+            .and_then(|g| font.outline(g).ok())
+            .and_then(|o| o.bounds())
+            .map(|(_, _, _, y1)| y1)
+            .filter(|y| *y > 0)
+            .and_then(|y| i16::try_from(y).ok());
+        match top {
+            Some(units) => au(font_units_to_au(
+                i32::from(units),
+                font.units_per_em(),
+                self.size.0,
+            )),
+            None => self.size / 2,
+        }
     }
 
     /// The font's vertical metrics at this size.
@@ -241,6 +405,16 @@ impl TextStyle {
             descent: conv(font.descent().saturating_neg()),
             line_gap: conv(font.line_gap()),
         }
+    }
+}
+
+fn transform_of(style: &ComputedValues) -> Transform {
+    use style::values::specified::text::TextTransformCase as C;
+    match style.clone_text_transform().case() {
+        C::None => Transform::None,
+        C::Uppercase => Transform::Uppercase,
+        C::Lowercase => Transform::Lowercase,
+        C::Capitalize => Transform::Capitalize,
     }
 }
 
@@ -360,6 +534,8 @@ pub struct StyleRange {
     /// (`sub`, `super`, a length or percentage), the sum over its inline
     /// ancestors. Negative lowers.
     pub raise: Au,
+    /// The `text-decoration` lines drawn over this text.
+    pub deco: Deco,
 }
 
 /// The start or end edge of an inline box: its margin, border and padding on
@@ -576,6 +752,20 @@ fn shape_piece(
                 .map(|g| {
                     let cluster = base + usize::try_from(g.cluster).unwrap_or(0);
                     let atomic = atomics.binary_search_by_key(&cluster, |a| a.offset).ok();
+                    // `letter-spacing` follows every glyph and `word-spacing` every
+                    // word separator; an atomic inline is neither.
+                    let spacing = if atomic.is_some() {
+                        Au(0)
+                    } else if matches!(
+                        seg_text
+                            .get(usize::try_from(g.cluster).unwrap_or(usize::MAX)..)
+                            .and_then(|t| t.chars().next()),
+                        Some(' ' | '\u{a0}')
+                    ) {
+                        style.letter_spacing + style.word_spacing
+                    } else {
+                        style.letter_spacing
+                    };
                     Glyph {
                         font: seg_font,
                         id: g.glyph_id,
@@ -583,7 +773,7 @@ fn shape_piece(
                         end: piece.end,
                         advance: match atomic.and_then(|i| atomics.get(i)) {
                             Some(a) => a.width,
-                            None => au(font_units_to_au(g.x_advance, upem, size)),
+                            None => au(font_units_to_au(g.x_advance, upem, size)) + spacing,
                         },
                         x_offset: au(font_units_to_au(g.x_offset, upem, size)),
                         y_offset: au(font_units_to_au(g.y_offset, upem, size)),
@@ -669,6 +859,7 @@ impl<'a> Prepared<'a> {
                 style,
                 node: None,
                 raise: Au(0),
+                deco: Deco::default(),
             }]
         } else {
             ranges.to_vec()
@@ -947,10 +1138,12 @@ impl<'a> Prepared<'a> {
     }
 
     /// The content of one line, in visual order, left to right, positioned from
-    /// the line's start edge. `extra_space` is added to every space
+    /// the line's start edge. `extra_space` is added to every space, and `remainder` as
+    /// well to the first one
     /// (justification).
     #[must_use]
-    pub fn line_runs(&self, line: &LineBreak, extra_space: Au) -> LineContent {
+    pub fn line_runs(&self, line: &LineBreak, extra_space: Au, remainder: Au) -> LineContent {
+        let mut remainder = remainder;
         let (a, e) = (line.start, line.content_end);
         let visual: Vec<bidi::Run> = match &self.bidi {
             Some(analysis) => analysis.reorder_line(a..e).unwrap_or_else(|| {
@@ -1062,6 +1255,8 @@ impl<'a> Prepared<'a> {
                                 }
                                 if ch == Some(' ') {
                                     advance += extra_space;
+                                    // What did not divide evenly goes to the first space.
+                                    advance += std::mem::replace(&mut remainder, Au(0));
                                 }
                                 if !g.atomic {
                                     placed.push((
@@ -1314,7 +1509,7 @@ mod tests {
     fn text_mixed_line_has_one_run_per_face_with_the_right_ids() {
         let p = Prepared::new("ab שלום", noto(20));
         let l = p.next_line(0, px(1000)).expect("a line");
-        let runs = p.line_runs(&l, Au(0)).runs;
+        let runs = p.line_runs(&l, Au(0), Au(0)).runs;
         let hebrew = resolve_font(["Noto Sans Hebrew"]);
         assert!(
             runs.iter()
@@ -1326,6 +1521,20 @@ mod tests {
         let total: Au = runs.iter().map(|r| r.width).fold(Au(0), |a, b| a + b);
         assert_eq!(total, l.width);
         assert!(runs.iter().flat_map(|r| &r.glyphs).all(|g| g.glyph_id != 0));
+    }
+
+    #[test]
+    fn text_transform_maps_case_and_capitalises_words() {
+        assert_eq!(Transform::Uppercase.apply("a\u{df}c", None), "ASSC");
+        assert_eq!(Transform::Lowercase.apply("ABC", None), "abc");
+        assert_eq!(
+            Transform::Capitalize.apply("hello wORLD don't a-b 3x", None),
+            "Hello WORLD Don't A-B 3x"
+        );
+        // A word continues across the boundary between two pieces of text.
+        assert_eq!(Transform::Capitalize.apply("bc", Some('a')), "bc");
+        assert_eq!(Transform::Capitalize.apply("bc", Some(' ')), "Bc");
+        assert_eq!(Transform::None.apply("aB", None), "aB");
     }
 
     #[test]

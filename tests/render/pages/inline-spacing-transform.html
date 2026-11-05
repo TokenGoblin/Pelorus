@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<title>letter-spacing, word-spacing, text-transform</title>
+<style>
+body { margin: 8px; font: 24px/1.4 "Noto Sans"; color: #222 }
+p { margin: 0 0 6px 0; width: 420px }
+.ls { letter-spacing: 4px }
+.neg { letter-spacing: -1px }
+.ws { word-spacing: 18px }
+.up { text-transform: uppercase }
+.lo { text-transform: lowercase }
+.cap { text-transform: capitalize }
+</style>
+<p>plain spacing sample</p>
+<p class="ls">letter spacing 4px</p>
+<p class="neg">letter spacing -1px</p>
+<p class="ws">word spacing is wide</p>
+<p class="up">upper <span class="lo">LOWER inside</span> straße</p>
+<p class="cap">capitalize each word: it's well-known</p>
+<p class="ls ws cap">all <span style="letter-spacing: 0">three</span> together</p>

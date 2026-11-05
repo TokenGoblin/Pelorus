@@ -149,3 +149,23 @@ source = "tests/render/pages/text-script-arabic.html"
 [[page]]
 id = "text-script-devanagari"
 source = "tests/render/pages/text-script-devanagari.html"
+
+[[page]]
+id = "inline-decoration"
+source = "tests/render/pages/inline-decoration.html"
+
+[[page]]
+id = "inline-spacing-transform"
+source = "tests/render/pages/inline-spacing-transform.html"
+
+[[page]]
+id = "inline-white-space-justify"
+source = "tests/render/pages/inline-white-space-justify.html"
+
+[[page]]
+id = "inline-vertical-align"
+source = "tests/render/pages/inline-vertical-align.html"
+
+[[page]]
+id = "inline-line-height"
+source = "tests/render/pages/inline-line-height.html"

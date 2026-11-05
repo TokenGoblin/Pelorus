@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<title>text-decoration: underline, overline, line-through, propagation</title>
+<style>
+body { margin: 8px; font: 28px/1.5 "Noto Sans"; color: #222 }
+p { margin: 0 0 4px 0; width: 380px }
+.u { text-decoration: underline }
+.o { text-decoration: overline; text-decoration-color: #c00 }
+.l { text-decoration: line-through }
+.all { text-decoration: underline overline line-through; text-decoration-color: #06c }
+.big { font-size: 48px }
+.box { display: inline-block; background: #fd8; padding: 0 4px }
+</style>
+<p class="u">under <span class="big">big</span> and <span class="l" style="color: #080">struck</span></p>
+<p class="o">over <span style="color: #00a">nested</span> line</p>
+<p class="all">all three lines</p>
+<p class="u">a <span class="box">block</span> b wraps around to another line</p>
+<div class="l"><p>block child</p></div>

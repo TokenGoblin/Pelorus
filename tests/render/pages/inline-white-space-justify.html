@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<title>white-space modes, text-align: justify, text-indent</title>
+<style>
+body { margin: 8px; font: 20px/1.3 "Noto Sans"; color: #222 }
+div { width: 330px; margin: 0 0 6px 0; background: #eef }
+.pre { white-space: pre }
+.nowrap { white-space: nowrap; overflow: hidden }
+.prewrap { white-space: pre-wrap }
+.preline { white-space: pre-line }
+.just { text-align: justify }
+.indent { text-indent: 40px }
+.neg { text-indent: -20px; margin-left: 20px; width: 310px }
+.rtl { direction: rtl; text-indent: 40px }
+</style>
+<div class="pre">pre:  two  spaces
+	tab then   text</div>
+<div class="nowrap">nowrap collapses   spaces and never wraps past the box edge</div>
+<div class="prewrap">pre-wrap  keeps   runs of spaces but still wraps at the box edge</div>
+<div class="preline">pre-line   collapses
+spaces but keeps the line breaks</div>
+<div class="just">justify spreads the spare room evenly over the spaces of every line except the last one</div>
+<div class="just indent">indent and justify together make the first line shorter by forty pixels of room</div>
+<div class="neg">negative indent hangs the first line out to the left of the rest of the paragraph</div>
+<div class="rtl">indent in a right to left block starts at the right edge</div>

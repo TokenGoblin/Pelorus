@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<title>vertical-align: middle, text-top, text-bottom, top, bottom on text and boxes</title>
+<style>
+body { margin: 8px; font: 20px/1.4 "Noto Sans"; color: #222 }
+p { margin: 0 0 10px 0; width: 480px; background: #f4f4f4; border-top: 1px solid #aaa; border-bottom: 1px solid #aaa }
+i { display: inline-block; width: 24px; height: 24px; background: #f80; margin: 0 4px }
+.mid i { vertical-align: middle }
+.tt i { vertical-align: text-top }
+.tb i { vertical-align: text-bottom }
+.top i { vertical-align: top }
+.bot i { vertical-align: bottom }
+.big { font-size: 36px; line-height: 40px; background: #cde }
+.small { font-size: 12px; background: #fdd }
+.s-top { vertical-align: top }
+.s-bot { vertical-align: bottom }
+.s-mid { vertical-align: middle }
+.s-tt { vertical-align: text-top }
+.s-tb { vertical-align: text-bottom }
+</style>
+<p class="mid">Mid <i></i> box <span class="small">small</span></p>
+<p class="tt">Text-top <i></i> box</p>
+<p class="tb">Text-bottom <i></i> box</p>
+<p class="top">Top <i></i> box <span class="big">Big</span></p>
+<p class="bot">Bottom <i></i> box <span class="big">Big</span></p>
+<p>base <span class="big">Big</span> <span class="small s-top">top</span> <span class="small s-bot">bottom</span> <span class="small s-mid">middle</span> <span class="small s-tt">text-top</span> <span class="small s-tb">text-bottom</span></p>
