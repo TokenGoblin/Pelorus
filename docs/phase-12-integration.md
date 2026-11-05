@@ -130,3 +130,25 @@ every module's `ENFORCEMENT_POINTS` and requires each to be reached through
   `csp::url::Origin`) are still separate; `secure.rs` converts at the CSP
   boundary (`CspUrl::parse` of the serialised URL). A URL the CSP engine cannot
   express is denied. See `docs/backlog.md`.
+
+## Live web in the shell
+
+`px-shell https://host/` is the first consumer of `SecureFetcher` outside its
+tests. The door is `px_net::browse` (`WebSession`, `Loader`): `navigate` is the
+browser-initiated top-level fetch (`Destination::Navigation`, no referrer) and
+`stylesheet` is a `Destination::Style` subresource whose `FetchContext` carries
+the navigation's CSP and Referrer-Policy (`DocumentFacts`). Every step of the
+enforcement order above runs; redirects follow `redirect::Chain`. The shell only
+decodes (BOM, `Content-Type` charset, `<meta>` prescan; UTF-8, UTF-16, Latin-1 /
+windows-1252), finds `<link rel=stylesheet>`, vets inline `<style>` with the
+document's CSP (`Loader::allows_inline_style`), lays out and paints. Scripts,
+images, fonts, frames and forms are never requested. A denial or transport
+failure becomes `px_pages::error_page(address, reason)`.
+
+Process model: in-process on the UI thread. Moving the loader into the network
+process and the layout into the content process is Phase 19.
+
+Testing behind a TLS-terminating egress proxy: `--features testing` adds
+`px_net::testing_proxy` (HTTP CONNECT through `HTTPS_PROXY`, extra anchors from
+the PEM file in `PX_TEST_CA_BUNDLE`, added to the normal store; verification is
+never disabled). `cargo xtask network` scans release artifacts for it.

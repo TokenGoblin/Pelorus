@@ -127,7 +127,23 @@ pub fn resolve_font<'a>(families: impl IntoIterator<Item = &'a str>) -> FontId {
             return id;
         }
     }
+    if WEB_FALLBACK.load(std::sync::atomic::Ordering::Relaxed)
+        && let Some(id) = f.registry.resolve("Noto Sans")
+    {
+        return id;
+    }
     FontId(0)
+}
+
+static WEB_FALLBACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Opt in to the browser policy for real web pages: a family list that names no
+/// registered face (an unknown family, `sans-serif`, the initial value) resolves
+/// to the bundled Noto Sans instead of Ahem. The default (off) is the
+/// conformance policy above, which WPT expectations depend on. A browser binary
+/// turns it on once at startup; it is process-wide.
+pub fn set_web_fallback(on: bool) {
+    WEB_FALLBACK.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The value of `text-align`, with `start` and `end` already resolved against

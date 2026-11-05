@@ -7,10 +7,12 @@
 //! process, broker-owned window and files, frames over IPC) is Phase 19
 //! integration. See this crate's CLAUDE.md.
 
+pub mod decode;
 pub mod fonts;
 pub mod nav;
 pub mod page;
 pub mod shell;
+pub mod web;
 
 pub use nav::Location;
 pub use shell::Shell;

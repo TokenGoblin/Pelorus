@@ -14,6 +14,8 @@ px-brand = { path = "../px-brand", version = "0.0.0" }
 px-css = { path = "../px-css", version = "0.0.0" }
 px-display = { path = "../px-display", version = "0.0.0" }
 px-dom = { path = "../px-dom", version = "0.0.0" }
+px-net = { path = "../px-net", version = "0.0.0" }
+px-pages = { path = "../px-pages", version = "0.0.0" }
 px-layout = { path = "../px-layout", version = "0.0.0" }
 px-paint = { path = "../px-paint", version = "0.0.0" }
 px-text = { path = "../px-text", version = "0.0.0" }
@@ -26,3 +28,8 @@ path = "src/lib.rs"
 [[bin]]
 name = "px-shell"
 path = "src/main.rs"
+
+[features]
+# Test-only: lets live-web checks run behind an egress proxy (px-net/testing).
+# Never in a shipping build; scanned for by cargo xtask network.
+testing = ["px-net/testing"]

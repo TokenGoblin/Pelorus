@@ -15,8 +15,21 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   is Phase 19 integration. Nothing here weakens a rule in another crate; no
   sandbox, IPC or broker code is touched or bypassed, and `px-content` still does
   not link `px-display` (`cargo tree -p px-content`).
-- No network. A link whose target is not a local file or an `about:` page does
-  nothing. Local files only, named on argv, typed in the address bar or linked.
+- Network only through `px-net`. `https://` and `http://` addresses (argv, address
+  bar, links on a web page) load via `px_net::browse`, which runs every request
+  through `SecureFetcher` (partitioned state, HSTS, CSP, mixed content, CORS,
+  referrer policy, SRI, redirect rules). This crate never opens a socket and has
+  no TLS code; the symbol audit (`cargo xtask network`) keeps it so. Only the
+  navigation and its `<link rel=stylesheet>` files are fetched. Scripts, images,
+  fonts, frames and forms are never requested and never run. Nothing persists:
+  the cookie jar lives for one page load, there is no cache and no history store.
+  A local page cannot link out to the web. Any failure shows `px-pages`' error
+  page. The loader is synchronous on the UI thread, in-process; the content /
+  network process split and a non-blocking load are Phase 19.
+- The `testing` feature (`px-net/testing`) adds proxy support and an extra trust
+  anchor file for sandboxes that only allow egress through a TLS-terminating
+  proxy (`HTTPS_PROXY`, `PX_TEST_CA_BUNDLE`). It is scanned for in release
+  artifacts and never enabled for a shipping build; verification is never off.
 - No script execution, no images, no forms: whatever the engine does not yet do
   is simply absent from the picture.
 - Page-controlled text (titles) reaches the chrome only through `px_ui::tabs::Tab`,

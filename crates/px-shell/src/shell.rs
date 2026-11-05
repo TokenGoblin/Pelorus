@@ -16,7 +16,8 @@ use px_ui::{Chrome, PlatformConfig};
 
 use crate::fonts::{ChromeFont, LayoutFonts};
 use crate::nav::{self, Location};
-use crate::page::{self, Laid};
+use crate::page::{self, Laid, Resources};
+use crate::web::Net;
 
 /// Pixels per wheel detent, and per arrow-key press.
 const KEY_STEP: i32 = 40;
@@ -28,7 +29,7 @@ struct Entry {
 
 struct Doc {
     source: String,
-    file: Option<std::path::PathBuf>,
+    res: Resources,
     laid: Option<Laid>,
     title: String,
 }
@@ -55,7 +56,7 @@ impl TabState {
 fn blank_doc() -> Doc {
     Doc {
         source: String::new(),
-        file: None,
+        res: Resources::default(),
         laid: None,
         title: String::new(),
     }
@@ -72,6 +73,8 @@ pub struct Shell {
     hover: Option<String>,
     /// The href a primary press started on; a release on the same one follows it.
     pressed: Option<String>,
+    /// The network handle (parsed lists, built on the first web load).
+    net: Net,
 }
 
 impl Shell {
@@ -85,6 +88,7 @@ impl Shell {
             next_id: 1,
             hover: None,
             pressed: None,
+            net: Net::default(),
         };
         for loc in start {
             s.open_tab(loc.clone());
@@ -166,7 +170,7 @@ impl Shell {
             pos: 0,
             doc: blank_doc(),
         };
-        load_into(&mut t.doc, &loc);
+        load_into(&mut t, &loc, &mut self.net);
         self.tabs.push(t);
         self.active = self.tabs.len() - 1;
     }
@@ -181,7 +185,7 @@ impl Shell {
             scroll: 0,
         });
         t.pos = t.history.len() - 1;
-        load_into(&mut t.doc, &loc);
+        load_into(t, &loc, &mut self.net);
         self.hover = None;
         self.pressed = None;
         self.sync();
@@ -197,7 +201,7 @@ impl Shell {
         }
         t.pos = to as usize;
         if let Some(loc) = t.loc().cloned() {
-            load_into(&mut t.doc, &loc);
+            load_into(t, &loc, &mut self.net);
         }
         self.hover = None;
         self.sync();
@@ -238,7 +242,7 @@ impl Shell {
                     // Show the reason as a page in this tab's history.
                     if let Some(t) = self.tabs.get_mut(self.active) {
                         t.doc.source = nav::error_page(&msg);
-                        t.doc.file = None;
+                        t.doc.res = Resources::default();
                         t.doc.laid = None;
                         t.doc.title = String::new();
                     }
@@ -250,7 +254,7 @@ impl Shell {
                 if let Some(t) = self.tabs.get_mut(self.active)
                     && let Some(loc) = t.loc().cloned()
                 {
-                    load_into(&mut t.doc, &loc);
+                    load_into(t, &loc, &mut self.net);
                 }
             }
             AppRequest::Stop | AppRequest::OpenMenu(_) => {}
@@ -390,12 +394,12 @@ impl Shell {
         if t.doc.laid.as_ref().is_some_and(|l| l.width == w) {
             return;
         }
-        let laid = match page::layout(&t.doc.source, t.doc.file.as_deref(), w, h) {
+        let laid = match page::layout(&t.doc.source, &t.doc.res, w, h) {
             Ok(l) => l,
             Err(e) => {
                 t.doc.source = nav::error_page(&e);
-                t.doc.file = None;
-                match page::layout(&t.doc.source, None, w, h) {
+                t.doc.res = Resources::default();
+                match page::layout(&t.doc.source, &Resources::default(), w, h) {
                     Ok(l) => l,
                     Err(_) => return,
                 }
@@ -434,12 +438,19 @@ impl Shell {
     }
 }
 
-fn load_into(doc: &mut Doc, loc: &Location) {
-    let l = loc.load();
-    doc.source = l.source;
-    doc.file = l.file;
-    doc.laid = None;
-    doc.title = String::new();
+/// Load `loc` into the tab. A web page that ended elsewhere (a redirect) makes
+/// the tab's history entry say where it ended, so links resolve against that.
+fn load_into(t: &mut TabState, loc: &Location, net: &mut Net) {
+    let l = loc.load(net);
+    if let Some(u) = l.final_url
+        && let Some(e) = t.entry()
+    {
+        e.loc = Location::Web(u);
+    }
+    t.doc.source = l.source;
+    t.doc.res = l.res;
+    t.doc.laid = None;
+    t.doc.title = String::new();
 }
 
 /// Copy `src` into `dst` at (`x`, `y`), clipped to `dst`, leaving the chrome's own
@@ -633,9 +644,9 @@ mod tests {
     }
 
     #[test]
-    fn network_addresses_are_refused_with_a_page() {
+    fn unsupported_schemes_are_refused_with_a_page() {
         let mut s = shell(&[Location::welcome()]);
-        s.apply(AppRequest::Navigate("https://example.com/".into()));
+        s.apply(AppRequest::Navigate("ftp://example.com/".into()));
         s.frame();
         assert_eq!(s.active_location(), Some(&Location::welcome()));
         assert!(
@@ -644,8 +655,20 @@ mod tests {
                 .unwrap()
                 .doc
                 .source
-                .contains("local files only")
+                .contains("web (http, https)")
         );
+    }
+
+    #[test]
+    fn a_failed_web_load_is_the_error_page() {
+        // A closed loopback port: refused at once, no external network.
+        let mut s = shell(&[Location::welcome()]);
+        s.apply(AppRequest::Navigate("http://127.0.0.1:9/".into()));
+        s.frame();
+        let src = &s.tabs.first().unwrap().doc.source;
+        assert!(src.contains("could not be opened"), "{src}");
+        assert!(src.contains("http://127.0.0.1:9/"));
+        assert!(!src.contains("<script"));
     }
 
     #[test]

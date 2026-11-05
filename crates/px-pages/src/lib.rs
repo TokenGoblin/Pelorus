@@ -39,3 +39,55 @@ pub fn page(name: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The `error` page with its two run-time fields filled in: the address that
+/// did not load and a short, calm reason. Both are escaped (the address came
+/// from a page or the address bar and the reason may quote a server), and the
+/// address is cut at 300 characters. The fixed sentence about the connection
+/// is dropped, because the reason now says what happened.
+#[must_use]
+pub fn error_page(address: &str, reason: &str) -> String {
+    let address: String = address.chars().take(300).collect();
+    ERROR
+        .replace(
+            "The connection ended before the page arrived. Nothing is wrong",
+            "Nothing is wrong",
+        )
+        .replace(
+            "data-field=\"address\">The address you asked for<",
+            &format!("data-field=\"address\">{}<", escape_html(&address)),
+        )
+        .replace(
+            "data-field=\"reason\">The connection was closed or refused<",
+            &format!("data-field=\"reason\">{}<", escape_html(reason)),
+        )
+}
+
+#[cfg(test)]
+mod error_page_tests {
+    use super::error_page;
+
+    #[test]
+    fn fields_are_filled_and_escaped() {
+        let p = error_page("https://x.test/<b>", "It \"failed\" & stopped");
+        assert!(p.contains("https://x.test/&lt;b&gt;"));
+        assert!(p.contains("It &quot;failed&quot; &amp; stopped"));
+        assert!(!p.contains("The address you asked for<"));
+        assert!(!p.contains("<script"));
+    }
+}
