@@ -188,6 +188,38 @@ impl Mask {
         out
     }
 
+    /// The whole window bitmap for `UpdateLayeredWindow`: a `fw` x `fh` frame of
+    /// top-down B,G,R,A pixels, resampled (nearest) to this mask's size and
+    /// premultiplied under it. Returns `w * h * 4` bytes; a frame whose length
+    /// does not match, or an empty one, gives a fully transparent bitmap.
+    pub fn compose_bgra(&self, frame: &[u8], fw: u32, fh: u32) -> Vec<u8> {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let mut out = vec![0u8; w * h * 4];
+        if fw == 0 || fh == 0 || frame.len() != fw as usize * fh as usize * 4 {
+            return out;
+        }
+        for y in 0..h {
+            let sy = y * fh as usize / h.max(1);
+            for x in 0..w {
+                let sx = x * fw as usize / w.max(1);
+                let s = (sy * fw as usize + sx) * 4;
+                let (Some(&[b, g, r, sa]), Some(dst)) = (
+                    frame
+                        .get(s..s + 4)
+                        .and_then(|p| <&[u8; 4]>::try_from(p).ok()),
+                    out.get_mut((y * w + x) * 4..(y * w + x) * 4 + 4),
+                ) else {
+                    continue;
+                };
+                let m = u32::from(self.alpha_at(x as i32, y as i32));
+                let a = (m * u32::from(sa) + 127) / 255;
+                let p = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;
+                dst.copy_from_slice(&[p(b), p(g), p(r), a as u8]);
+            }
+        }
+        out
+    }
+
     /// Convert one RGBA row of a frame into premultiplied B,G,R,A under this
     /// mask (row `y`, starting at column `x0`), the layout compositors and
     /// `UpdateLayeredWindow` expect. Rounding is `(v * a + 127) / 255`.
@@ -317,6 +349,37 @@ mod tests {
             .mask(100, 100)
             .premultiply_row(0, 0, &[[9, 9, 9, 255]], &mut out);
         assert_eq!(out, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn compose_matches_row_premultiply_and_resamples() {
+        let m = shape().mask(60, 40);
+        // A 60x40 frame composes to the same bytes as the per-row path.
+        let mut bgra = Vec::new();
+        let mut rgba_rows: Vec<Vec<[u8; 4]>> = Vec::new();
+        for y in 0..40u32 {
+            let mut row = Vec::new();
+            for x in 0..60u32 {
+                let (r, g, b) = ((x * 4) as u8, (y * 6) as u8, 200u8);
+                bgra.extend_from_slice(&[b, g, r, 255]);
+                row.push([r, g, b, 255]);
+            }
+            rgba_rows.push(row);
+        }
+        let mut want = Vec::new();
+        for (y, row) in rgba_rows.iter().enumerate() {
+            m.premultiply_row(y as i32, 0, row, &mut want);
+        }
+        assert_eq!(m.compose_bgra(&bgra, 60, 40), want);
+        // A half-size frame is stretched; corners stay transparent.
+        let small = vec![255u8; 30 * 20 * 4];
+        let big = m.compose_bgra(&small, 30, 20);
+        assert_eq!(big.len(), 60 * 40 * 4);
+        assert_eq!(&big[..4], &[0, 0, 0, 0]);
+        let mid = (20 * 60 + 30) * 4;
+        assert_eq!(&big[mid..mid + 4], &[255, 255, 255, 255]);
+        // A mismatched frame is blank, not a panic.
+        assert!(m.compose_bgra(&[1, 2, 3], 60, 40).iter().all(|&b| b == 0));
     }
 
     #[test]

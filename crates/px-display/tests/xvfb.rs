@@ -66,7 +66,12 @@ mod h {
 
     pub fn open(s: &Server, w: u32, h: u32) -> X11Window {
         let stream = UnixStream::connect(format!("/tmp/.X11-unix/X{}", s.number)).unwrap();
-        X11Window::connect(stream, &Auth::default(), &WindowOptions::new("test", w, h).square()).unwrap()
+        X11Window::connect(
+            stream,
+            &Auth::default(),
+            &WindowOptions::new("test", w, h).square(),
+        )
+        .unwrap()
     }
 
     /// Poll `win` until `pred` accepts an event, up to two seconds.

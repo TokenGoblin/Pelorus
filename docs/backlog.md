@@ -1414,3 +1414,30 @@ follows.
 - **Why deferred:** each needs a consumer (a document, a worker, a navigation)
   that does not exist yet, or is a refactor wider than this integration.
   `docs/phase-12-integration.md` lists what is and is not wired.
+
+## Phase 18: squircle windows (px-display)
+
+- **Aliased window edge without a compositor (X11).** With no compositing
+  manager (`_NET_WM_CM_S0` unowned) the squircle is cut with the SHAPE
+  extension, a 1-bit region: the corners are squircle-shaped but have jagged,
+  not anti-aliased, edges. Closing it needs a compositor on the user's side or
+  a fake-translucency scheme (root-pixmap capture) that is its own ADR.
+  `X11Window::shape_mode()` reports `ShapeExt`; `ShapeMode::is_antialiased()` is
+  false.
+- **Rectangular window with no SHAPE extension and no compositor (X11).**
+  `ShapeMode::Software`: the window stays a rectangle; corner input is still
+  discarded in software and a warning is printed to stderr (never silent). In
+  practice every X server has SHAPE; Xvfb, Xorg and XWayland do.
+- **Win32 anti-aliasing is by `UpdateLayeredWindow`, unverified.** Pixels with
+  alpha 1..127 are not click-through natively (only alpha 0 is); our
+  `WM_NCHITTEST` answers `HTTRANSPARENT`, which the system honours for windows
+  of the same thread only.
+- **Resize grips and drag regions are invisible.** No hard-edged affordance is
+  drawn. A frameless squircle main window still cannot be moved: the seam has no
+  begin-move request (needs `_NET_WM_MOVERESIZE` on X11 and
+  `WM_NCLBUTTONDOWN(HTCAPTION)` on Win32, plus a `WindowAction` in px-ui).
+- **Maximised and fullscreen windows stay squircles.** The chrome sets
+  `window_radius` to 0 then; the OS window outline does not follow yet (add a
+  `set_shape` seam).
+- **Window shadows** are not drawn on either OS (a compositor may add its own;
+  an ARGB shadow margin is a layout change).

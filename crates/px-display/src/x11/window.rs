@@ -12,9 +12,7 @@ use super::conn::{Conn, RawEvent, Wait};
 use super::discover::Auth;
 use super::keys::{self, KeyMap};
 use super::proto::{self, Reader};
-use crate::{
-    Display, DisplayError, DisplayEvent, Mask, WindowKind, WindowOptions, WindowShape,
-};
+use crate::{Display, DisplayError, DisplayEvent, Mask, WindowKind, WindowOptions, WindowShape};
 
 /// Largest clipboard payload accepted from another client, in bytes. A larger
 /// one (or an INCR transfer) is dropped rather than truncated.
@@ -60,6 +58,14 @@ pub enum ShapeMode {
     /// No compositor and no SHAPE: the window stays a rectangle; input in the
     /// transparent corners is still discarded in software.
     Software,
+}
+
+impl ShapeMode {
+    /// Only `Argb` has anti-aliased edges; `ShapeExt` is aliased and `Software`
+    /// and `Rect` are rectangles (docs/backlog.md tracks closing those gaps).
+    pub fn is_antialiased(self) -> bool {
+        self == ShapeMode::Argb
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -165,6 +171,13 @@ impl X11Window {
             (Some(_), None, Some(_)) => ShapeMode::ShapeExt,
             (Some(_), None, None) => ShapeMode::Software,
         };
+        // A rectangular window is never chosen silently: say so once.
+        if mode == ShapeMode::Software {
+            eprintln!(
+                "px-display: no compositor and no SHAPE extension: this window stays a \
+                 rectangle (corner input is still discarded)"
+            );
+        }
         let (depth, visual, colormap) = match argb {
             Some(v) if mode == ShapeMode::Argb => {
                 let cmap = conn.alloc_id()?;
@@ -174,10 +187,7 @@ impl X11Window {
             _ => (24u8, s.root_visual, None),
         };
         let (px, py) = opts.position.map_or((0, 0), |(x, y)| {
-            (
-                i16::try_from(x).unwrap_or(0),
-                i16::try_from(y).unwrap_or(0),
-            )
+            (i16::try_from(x).unwrap_or(0), i16::try_from(y).unwrap_or(0))
         });
         conn.send(proto::create_window(&proto::NewWindow {
             wid,
@@ -481,7 +491,8 @@ impl X11Window {
         )
     }
 
-    /// How the outline is realised (tests, diagnostics).
+    /// How the outline is realised (tests, diagnostics). Callers that care about
+    /// anti-aliasing check [`ShapeMode::is_antialiased`].
     pub fn shape_mode(&self) -> ShapeMode {
         self.mode
     }
@@ -497,16 +508,15 @@ impl X11Window {
         // (no SHAPE extension). A press there is dropped, a move there becomes
         // one Leave, a release always passes (a drag may end anywhere).
         if self.shape.is_some() && kind != PointerKind::Leave {
-            let in_rect = x >= 0
-                && y >= 0
-                && i32::from(x) < self.size.w
-                && i32::from(y) < self.size.h;
+            let in_rect =
+                x >= 0 && y >= 0 && i32::from(x) < self.size.w && i32::from(y) < self.size.h;
             let hit = self.mask.hit(i32::from(x), i32::from(y));
             if in_rect && !hit {
                 match kind {
                     PointerKind::Move if self.pointer_inside => {
                         self.pointer_inside = false;
-                        let mut e = PointerEvent::new(i32::from(x), i32::from(y), PointerKind::Leave);
+                        let mut e =
+                            PointerEvent::new(i32::from(x), i32::from(y), PointerKind::Leave);
                         e.mods = keys::modifiers(state);
                         self.out.push_back(DisplayEvent::Ui(Event::Pointer(e)));
                         return;
@@ -660,8 +670,12 @@ impl X11Window {
                 let src = frame.pixels.get(start..start + row_bytes).unwrap_or(&[]);
                 if self.mode == ShapeMode::Argb {
                     // RGBA -> premultiplied B,G,R,A under the outline.
-                    self.mask
-                        .premultiply_row((y + row) as i32, x0, src.as_chunks::<4>().0, &mut buf);
+                    self.mask.premultiply_row(
+                        (y + row) as i32,
+                        x0,
+                        src.as_chunks::<4>().0,
+                        &mut buf,
+                    );
                 } else {
                     for &[r, g, b, _] in src.as_chunks::<4>().0 {
                         // RGBA -> B,G,R,X
