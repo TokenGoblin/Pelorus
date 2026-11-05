@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<title>Site nav bar (flex)</title>
+<style>
+body { margin: 0; background: #fff }
+header { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 24px; background: #243 }
+.logo { width: 120px; height: 32px; background: #8c4 }
+nav { display: flex; gap: 16px }
+nav a { display: block; width: 80px; height: 32px; background: #bda }
+.search { display: flex; margin: 16px 24px; border: 1px solid #999; height: 40px }
+.search .field { flex: 1 1 auto; min-width: 0; background: #f4f4f4 }
+.search .key { flex: none; width: 48px; margin: 6px; background: #cdd }
+.search .go { flex: 0 0 100px; background: #07a }
+</style>
+<header><div class="logo"></div><nav><a></a><a></a><a></a><a></a></nav></header>
+<div class="search"><div class="field"></div><div class="key"></div><div class="go"></div></div>

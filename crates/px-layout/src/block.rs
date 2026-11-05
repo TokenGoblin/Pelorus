@@ -150,6 +150,15 @@ struct Tables {
     inline_sizes: Vec<Au>,
     /// `None` means `height: auto`, which is resolved from content on the way up.
     specified_block_sizes: Vec<Option<Au>>,
+    /// The definite content-box block size percentage heights of children resolve
+    /// against (§10.5): the box's own specified height once clamped, or `None` when
+    /// it is `auto` (a percentage then computes to `auto` too). The initial
+    /// containing block's is the viewport's.
+    percent_basis: Vec<Option<Au>>,
+    /// The percentage basis this box's own height resolved against: its parent's
+    /// [`Tables::percent_basis`]. A flex container reads it to resolve its own
+    /// percentage `height` and `min-height`.
+    outer_basis: Vec<Option<Au>>,
     /// Whether this fragment establishes a block formatting context (§9.4.1).
     ///
     /// Read on the way up, where it decides whether the box's `height: auto`
@@ -224,11 +233,13 @@ struct Tables {
 
 impl Tables {
     /// One row, for the initial containing block.
-    fn new(viewport_inline_size: Au) -> Self {
+    fn new(viewport_inline_size: Au, viewport_block_size: Option<Au>) -> Self {
         Self {
             pending: vec![Vec::new()],
             inline_sizes: vec![viewport_inline_size],
             specified_block_sizes: vec![None],
+            percent_basis: vec![viewport_block_size],
+            outer_basis: vec![None],
             // The initial containing block is a formatting context root: there
             // is no outer context for a float in it to escape into.
             formatting_context_roots: vec![true],
@@ -252,6 +263,8 @@ impl Tables {
             self.pending.push(Vec::new());
             self.inline_sizes.push(Au(0));
             self.specified_block_sizes.push(None);
+            self.percent_basis.push(None);
+            self.outer_basis.push(None);
             self.formatting_context_roots.push(false);
             self.padding_box_inline.push(Au(0));
             self.absolute.push(None);
@@ -348,6 +361,12 @@ struct AbsolutePlacement {
     block_start: Option<Au>,
     /// `bottom`, resolved; `None` for `auto`.
     block_end: Option<Au>,
+    /// `height: auto` -- with both block insets set, §10.6.4 *solves* the height
+    /// from them, which only the post-pass can do (it needs the containing block's
+    /// final size).
+    height_auto: bool,
+    /// `min-height` / `max-height`, which bound the solved height.
+    block_bounds: Bounds,
 }
 
 /// A relatively positioned box's offsets (§9.4.3).
@@ -404,15 +423,28 @@ impl Edges {
 /// Returns the fragment tree, or `None` if the document has no root element —
 /// which an empty parse produces and which is not a layout failure.
 ///
-/// The viewport's block size is deliberately not an input. `height: auto` on the
-/// root resolves from content, and a viewport height would only matter for
-/// percentage heights and viewport units, neither of which this phase resolves.
-/// Taking a parameter it did not use would suggest otherwise.
+/// No viewport block size is known here, so a percentage height on the root
+/// element computes to `auto`. [`layout_document_in`] takes the height.
 #[must_use]
 pub fn layout_document(
     arena: &Arena,
     root: &px_css::view::StyleRoot,
     viewport_inline_size: Au,
+) -> Option<FragmentTree> {
+    layout_document_in(arena, root, viewport_inline_size, None)
+}
+
+/// [`layout_document`] with the viewport's block size, which is the basis for
+/// `height: 100%` on the root and so, down a chain of percentage heights, for the
+/// `html, body { height: 100% }` and `min-height: 100%` patterns that keep a page
+/// footer at the bottom of the window (§10.5: the initial containing block has the
+/// viewport's dimensions).
+#[must_use]
+pub fn layout_document_in(
+    arena: &Arena,
+    root: &px_css::view::StyleRoot,
+    viewport_inline_size: Au,
+    viewport_block_size: Option<Au>,
 ) -> Option<FragmentTree> {
     let mut tree = FragmentTree::new();
 
@@ -429,7 +461,7 @@ pub fn layout_document(
     // "has a root element" is the distinction the return type promises.
     first_element(arena)?;
 
-    let mut tables = Tables::new(viewport_inline_size);
+    let mut tables = Tables::new(viewport_inline_size, viewport_block_size);
     let mut flex = crate::flex::FlexState::new();
     // Grid containers between their `Children` and `Exit` visits, keyed by
     // fragment index. A `BTreeMap`, so nothing here depends on hash order.
@@ -568,7 +600,7 @@ pub fn layout_document(
                                 absolute_inline_size(&style, containing, &resolved, intrinsic)
                             }
                             _ if (side.is_some() || is_inline_grid(&style) || inline_block)
-                                && definite_inline_size(&style).is_none() =>
+                                && definite_inline_size(&style, Au(0)).is_none() =>
                             {
                                 let available = containing - resolved.inline_surround();
                                 let available = available.max(Au(0));
@@ -598,7 +630,12 @@ pub fn layout_document(
                     let content_inline = if sized_elsewhere {
                         content_inline
                     } else {
-                        let c = inline_bounds(&style, containing).clamp(content_inline);
+                        let c = inline_bounds(
+                            &style,
+                            containing,
+                            resolved.border.inline_sum() + resolved.padding.inline_sum(),
+                        )
+                        .clamp(content_inline);
                         flex.inline_size(dom, arena, node, &style, containing, &resolved, c)
                     };
 
@@ -665,6 +702,11 @@ pub fn layout_document(
                         inline_end: inline_inset(&style.clone_right(), containing),
                         block_start: block_inset(&style.clone_top()),
                         block_end: block_inset(&style.clone_bottom()),
+                        height_auto: matches!(
+                            style.clone_height(),
+                            style::values::computed::Size::Auto
+                        ),
+                        block_bounds: block_bounds(&style, None, Au(0)),
                     });
                     let inherited = if absolute || side.is_some() || inline_block {
                         (Au(0), Au(0))
@@ -701,11 +743,17 @@ pub fn layout_document(
                         || flex.is_item(node)
                         || grid_item.is_some();
                     // A flex item's block size is the flex algorithm's to decide.
+                    let basis = tables.percent_basis.get(parent.index()).copied().flatten();
+                    tables.outer_basis[fragment.index()] = basis;
                     if !flex.is_item(node)
                         && (!sized_elsewhere || forced.is_some_and(|f| f.honour_height))
                     {
-                        tables.specified_block_sizes[fragment.index()] = resolve_block_size(&style);
-                        tables.block_bounds[fragment.index()] = block_bounds(&style);
+                        let inner = resolved.border.block_sum() + resolved.padding.block_sum();
+                        let specified = resolve_block_size(&style, basis, inner);
+                        let bounds = block_bounds(&style, basis, inner);
+                        tables.specified_block_sizes[fragment.index()] = specified;
+                        tables.block_bounds[fragment.index()] = bounds;
+                        tables.percent_basis[fragment.index()] = specified.map(|h| bounds.clamp(h));
                     }
                     if let Some(reserved) = tables
                         .pending
@@ -804,6 +852,7 @@ pub fn layout_document(
                                 .get(fragment.index())
                                 .copied()
                                 .unwrap_or(Au(0)),
+                            tables.outer_basis.get(fragment.index()).copied().flatten(),
                         )
                     };
                     let is_flex = flex_items.is_some();
@@ -852,7 +901,7 @@ pub fn layout_document(
                         let shrink = (is_inline_grid(s)
                             || float_side(s).is_some()
                             || is_absolutely_positioned(s))
-                            && definite_inline_size(s).is_none();
+                            && definite_inline_size(s, Au(0)).is_none();
                         let inputs = grid::Inputs {
                             dom,
                             style: s,
@@ -1629,8 +1678,27 @@ fn place_absolute(tree: &mut FragmentTree, tables: &Tables) {
         let Some(fragment) = tree.get(id) else {
             continue;
         };
-        let size = fragment.size;
+        let mut size = fragment.size;
         let (current_inline, current_block) = (fragment.inline_offset, fragment.block_offset);
+
+        // §10.6.4: `top`, `bottom` and `height: auto` together solve for the height,
+        // which is how `inset: 0` overlays and stretched panels get their size.
+        if let (true, Some(top), Some(bottom)) = (
+            placement.height_auto,
+            placement.block_start,
+            placement.block_end,
+        ) {
+            let surround = tables
+                .edges
+                .get(id.index())
+                .map_or(Au(0), |e| e.border.block_sum() + e.padding.block_sum());
+            let content = padding_block - top - bottom - margin.block_sum() - surround;
+            let content = placement.block_bounds.clamp(content.max(Au(0)));
+            size.block = content + surround;
+            if let Some(f) = tree.get_mut(id) {
+                f.size.block = size.block;
+            }
+        }
 
         let target_inline = match (placement.inline_start, placement.inline_end) {
             (Some(left), _) => origin_inline + left + margin.inline_start,
@@ -2073,7 +2141,10 @@ fn absolute_inline_size(
     edges: &Edges,
     intrinsic: Intrinsic,
 ) -> Au {
-    if let Some(width) = definite_inline_size(style) {
+    if let Some(width) = definite_inline_size(
+        style,
+        edges.border.inline_sum() + edges.padding.inline_sum(),
+    ) {
         return width.max(Au(0));
     }
 
@@ -2762,8 +2833,11 @@ fn intrinsic_walk(
 
                 // A definite width makes both figures the same and stops the
                 // walk: nothing inside can widen a box whose width is stated.
-                if let Some(width) = definite_inline_size(&style)
-                    .filter(|_| !(ignore_root_width && node == root) && own_contents.is_none())
+                if let Some(width) = definite_inline_size(
+                    &style,
+                    edges.border.inline_sum() + edges.padding.inline_sum(),
+                )
+                .filter(|_| !(ignore_root_width && node == root) && own_contents.is_none())
                 {
                     let total = width + surround;
                     contribute(
@@ -2899,17 +2973,20 @@ fn intrinsic_walk(
 ///
 /// Percentages resolve against the containing block's inline size, like every
 /// other percentage on this axis.
-pub(crate) fn inline_bounds(style: &ComputedValues, containing: Au) -> Bounds {
+pub(crate) fn inline_bounds(style: &ComputedValues, containing: Au, inner: Au) -> Bounds {
     use style::values::computed::{MaxSize, Size};
+    let inner = if is_border_box(style) { inner } else { Au(0) };
 
     let min = match style.clone_min_width() {
-        Size::LengthPercentage(ref lp) => lp.0.to_used_value(containing).max(Au(0)),
+        Size::LengthPercentage(ref lp) => (lp.0.to_used_value(containing) - inner).max(Au(0)),
         // `auto` on `min-width` is zero for a block box. It means the automatic
         // minimum size only for flex and grid items, which this phase has none of.
         _ => Au(0),
     };
     let max = match style.clone_max_width() {
-        MaxSize::LengthPercentage(ref lp) => Some(lp.0.to_used_value(containing).max(Au(0))),
+        MaxSize::LengthPercentage(ref lp) => {
+            Some((lp.0.to_used_value(containing) - inner).max(Au(0)))
+        }
         _ => None,
     };
     Bounds { min, max }
@@ -2922,31 +2999,43 @@ pub(crate) fn inline_bounds(style: &ComputedValues, containing: Au) -> Bounds {
 /// `None` and §10.7 says to treat the declaration as if it were not there. That is
 /// exactly what `Bounds::NONE`'s two halves mean, which is why this reads as
 /// falling through rather than as a special case.
-pub(crate) fn block_bounds(style: &ComputedValues) -> Bounds {
+pub(crate) fn block_bounds(style: &ComputedValues, basis: Option<Au>, inner: Au) -> Bounds {
     use style::values::computed::{MaxSize, Size};
 
+    let inner = if is_border_box(style) { inner } else { Au(0) };
     let min = match style.clone_min_height() {
-        Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None).unwrap_or(Au(0)),
+        Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(basis).unwrap_or(Au(0)),
         _ => Au(0),
     };
     let max = match style.clone_max_height() {
-        MaxSize::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
+        MaxSize::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(basis),
         _ => None,
     };
     Bounds {
-        min: min.max(Au(0)),
-        max,
+        min: (min - inner).max(Au(0)),
+        max: max.map(|m| (m - inner).max(Au(0))),
     }
+}
+
+/// `box-sizing: border-box`: `width`, `height` and their bounds name the border
+/// box, so the padding and border come out of the content size (css-sizing-3 §3).
+pub(crate) fn is_border_box(style: &ComputedValues) -> bool {
+    use style::computed_values::box_sizing::T as BoxSizing;
+    matches!(style.clone_box_sizing(), BoxSizing::BorderBox)
 }
 
 /// The used `width`, if it is a length this phase can resolve without a context.
 ///
 /// `auto` and percentages both return `None`, which the intrinsic walk reads as
 /// "look inside". They mean different things in general and the same thing here.
-pub(crate) fn definite_inline_size(style: &ComputedValues) -> Option<Au> {
+pub(crate) fn definite_inline_size(style: &ComputedValues, inner: Au) -> Option<Au> {
     use style::values::computed::Size;
+    let inner = if is_border_box(style) { inner } else { Au(0) };
     match style.clone_width() {
-        Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
+        Size::LengthPercentage(ref lp) => {
+            lp.0.maybe_to_used_value(None)
+                .map(|w| (w - inner).max(Au(0)))
+        }
         _ => None,
     }
 }
@@ -3134,8 +3223,13 @@ fn used_border(
 /// case and wrong when an ancestor has a definite height. Named rather than
 /// silently approximated; it wants the containing block's resolved height threaded
 /// down, which is a change to the Enter pass rather than a patch here.
-pub(crate) fn resolve_block_size(style: &ComputedValues) -> Option<Au> {
+pub(crate) fn resolve_block_size(
+    style: &ComputedValues,
+    basis: Option<Au>,
+    inner: Au,
+) -> Option<Au> {
     use style::values::computed::Size;
+    let inner = if is_border_box(style) { inner } else { Au(0) };
     match style.clone_height() {
         // `maybe_to_used_value(None)` is exactly this function's semantics: a
         // definite length converts, and a percentage — which has no basis while
@@ -3143,7 +3237,10 @@ pub(crate) fn resolve_block_size(style: &ComputedValues) -> Option<Au> {
         // `auto` this function already means. It also keeps floats out of
         // px-layout, which cargo xtask layout enforces, where `Au::from_f32_px`
         // would not.
-        Size::LengthPercentage(ref lp) => lp.0.maybe_to_used_value(None),
+        Size::LengthPercentage(ref lp) => {
+            lp.0.maybe_to_used_value(basis)
+                .map(|h| (h - inner).max(Au(0)))
+        }
         _ => None,
     }
 }
@@ -3168,23 +3265,22 @@ fn used_margin(margin: &style::values::computed::Margin, containing: Au) -> Au {
 
 /// Split the leftover inline space between `auto` margins — §10.3.3's centring.
 ///
-/// Only applies when the width is *not* `auto`. With `width: auto` the box already
-/// fills the containing block, so §10.3.3 sets any auto margin to zero rather than
-/// leaving space for it to take — which is why `margin: 0 auto` on a full-width
-/// block does nothing, a rule that reliably surprises people.
+/// With `width: auto` the box already fills the containing block, so the leftover
+/// is zero and `margin: 0 auto` on a full-width block does nothing -- until
+/// `max-width` clamps the width, when the leftover is real and the box centres.
 fn centre_if_auto_margins(
     style: &ComputedValues,
     containing: Au,
     content_inline: Au,
     edges: &mut Edges,
 ) {
-    use style::values::computed::Size;
     use style::values::generics::length::GenericMargin;
 
-    if matches!(style.clone_width(), Size::Auto) {
-        return;
-    }
-
+    // No early return for `width: auto`: an auto width fills the containing block,
+    // so the leftover is zero and nothing moves -- unless `max-width` (or
+    // `min-width`) clamped it, in which case §10.4 reruns §10.3.3 with the bound as
+    // the width and the auto margins centre the box. `margin: 0 auto` plus
+    // `max-width` is the centred-container pattern of nearly every real page.
     let margin = style.get_margin();
     let start_auto = matches!(margin.margin_left, GenericMargin::Auto);
     let end_auto = matches!(margin.margin_right, GenericMargin::Auto);
@@ -3229,7 +3325,10 @@ fn resolve_inline_size(style: &ComputedValues, containing: Au, edges: &Edges) ->
     match style.clone_width() {
         Size::Auto => available,
         Size::LengthPercentage(ref lp) => {
-            let used = lp.0.to_used_value(containing);
+            let mut used = lp.0.to_used_value(containing);
+            if is_border_box(style) {
+                used -= edges.border.inline_sum() + edges.padding.inline_sum();
+            }
             if used < Au(0) { Au(0) } else { used }
         }
         // Intrinsic keywords (`min-content`, `max-content`, `fit-content`) need

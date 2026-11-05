@@ -363,7 +363,7 @@ fn clamp_au(value: Au, min: Au, max: Option<Au>) -> Au {
 }
 
 impl Cont {
-    fn read(style: &ComputedValues, inner_inline: Au) -> Self {
+    fn read(style: &ComputedValues, inner_inline: Au, basis: Option<Au>) -> Self {
         let dir = style.clone_flex_direction();
         let row = matches!(dir, Direction::Row | Direction::RowReverse);
         let main_rev = matches!(dir, Direction::RowReverse | Direction::ColumnReverse);
@@ -374,10 +374,10 @@ impl Cont {
         let edges = resolve_edges(style, inner_inline);
         let bp_b = edges.border.block_sum() + edges.padding.block_sum();
         let border_box = style.clone_box_sizing() == BoxSizing::BorderBox;
-        let def_h = size_of(&style.clone_height(), None).map(|h| inner(border_box, h, bp_b));
+        let def_h = size_of(&style.clone_height(), basis).map(|h| inner(border_box, h, bp_b));
         let min_h =
-            size_of(&style.clone_min_height(), None).map_or(Au(0), |h| inner(border_box, h, bp_b));
-        let max_h = max_of(&style.clone_max_height(), None).map(|h| inner(border_box, h, bp_b));
+            size_of(&style.clone_min_height(), basis).map_or(Au(0), |h| inner(border_box, h, bp_b));
+        let max_h = max_of(&style.clone_max_height(), basis).map(|h| inner(border_box, h, bp_b));
 
         let col_gap = gap_of(&style.clone_column_gap(), Some(inner_inline));
         let row_gap = gap_of(&style.clone_row_gap(), def_h);
@@ -569,12 +569,13 @@ impl FlexState {
         fragment: FragmentId,
         node: NodeId,
         content_inline: Au,
+        basis: Option<Au>,
     ) -> Option<Vec<Content>> {
         let style = computed_style(dom, node)?;
         if !is_flex_container(&style) {
             return None;
         }
-        let mut cont = Cont::read(&style, content_inline);
+        let mut cont = Cont::read(&style, content_inline, basis);
         let mut contents: Vec<Content> = Vec::new();
 
         fn flush(run: &mut String, contents: &mut Vec<Content>, cont: &mut Cont) {

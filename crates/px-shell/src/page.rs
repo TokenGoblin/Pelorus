@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use px_layout::block::layout_document;
+use px_layout::block::layout_document_in;
 use px_layout::geom::{Au, px};
 use px_paint::raster::Canvas;
 use px_paint::{DisplayList, Item};
@@ -233,7 +233,13 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
     engine
         .resolve(&arena, &style_root)
         .ok_or("style resolve failed")?;
-    let tree = layout_document(&arena, &style_root, px(width as i32)).ok_or("layout failed")?;
+    let tree = layout_document_in(
+        &arena,
+        &style_root,
+        px(width as i32),
+        Some(px(height as i32)),
+    )
+    .ok_or("layout failed")?;
 
     let mut bottom: i64 = 0;
     let mut links = Vec::new();

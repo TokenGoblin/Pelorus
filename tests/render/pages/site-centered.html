@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<title>Centered container, min/max and percentages</title>
+<style>
+body { margin: 0; background: #eee }
+.page { width: 80%; max-width: 600px; min-width: 300px; margin: 0 auto; background: #fff; padding: 20px }
+.half { width: 50%; height: 40px; background: #69c }
+.box { width: 100%; max-width: 250px; height: 40px; margin: 10px 0; background: #c96 }
+.h { height: 200px; background: #ddd; overflow: hidden }
+.h .in { height: 50%; width: 120%; background: #9c6 }
+.col { margin-top: 20px; margin-bottom: 30px; background: #fcc }
+.col > .a { margin-bottom: 20px; height: 20px; background: #c99 }
+.col > .b { margin-top: 40px; height: 20px; background: #99c }
+</style>
+<div class="page"><div class="half"></div><div class="box"></div><div class="h"><div class="in"></div></div><div class="col"><div class="a"></div><div class="b"></div></div></div>

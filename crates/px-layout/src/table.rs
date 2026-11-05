@@ -622,7 +622,7 @@ fn build(
             let spec_h = rs
                 .node
                 .and_then(|n| computed_style(dom, n))
-                .and_then(|s| resolve_block_size(&s));
+                .and_then(|s| resolve_block_size(&s, None, Au(0)));
             rows.push(Row {
                 node: rs.node,
                 group: group_index,
@@ -716,7 +716,11 @@ fn build(
         Some(s) => {
             let mut e = resolve_edges(s, containing);
             e.margin = LogicalEdges::ZERO;
-            (e, resolve_block_size(s), block_bounds(s))
+            (
+                e,
+                resolve_block_size(s, None, Au(0)),
+                block_bounds(s, None, Au(0)),
+            )
         }
         None => (Edges::ZERO, None, Bounds::NONE),
     };

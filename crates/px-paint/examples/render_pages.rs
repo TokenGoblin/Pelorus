@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use px_layout::block::layout_document;
+use px_layout::block::layout_document_in;
 use px_layout::geom::px;
 use px_paint::FontId;
 use px_paint::glyph::{PathCmd, Pt};
@@ -118,7 +118,13 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     engine
         .resolve(&arena, &style_root)
         .ok_or("style resolve failed")?;
-    let tree = layout_document(&arena, &style_root, px(WIDTH as i32)).ok_or("layout failed")?;
+    let tree = layout_document_in(
+        &arena,
+        &style_root,
+        px(WIDTH as i32),
+        Some(px(MIN_HEIGHT as i32)),
+    )
+    .ok_or("layout failed")?;
 
     // Document height: the lowest fragment edge.
     let mut bottom: i64 = 0;

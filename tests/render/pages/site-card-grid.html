@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<title>Card grid</title>
+<style>
+body { margin: 0; background: #fff }
+.wrap { max-width: 720px; margin: 0 auto; padding: 24px }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px }
+.card { height: 100px; background: #9bd }
+.card.wide { grid-column: span 2; background: #db9 }
+.auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 24px }
+.auto div { height: 40px; background: #bd9 }
+</style>
+<div class="wrap"><div class="cards"><div class="card"></div><div class="card wide"></div><div class="card"></div><div class="card"></div><div class="card"></div></div>
+<div class="auto"><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
