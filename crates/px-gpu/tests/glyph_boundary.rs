@@ -17,6 +17,16 @@ use px_paint::{Canvas, Color, DisplayList, FontId, Item, PositionedGlyph, Rect};
 use px_text::Font;
 use px_text::registry::AHEM_BYTES;
 
+/// The GPU process profile is two-stage and kernel-verified on Linux only
+/// (ADR 033, 035, 043). On Windows `enter_gpu_profile` and `verify_gpu_profile`
+/// refuse, so no GPU process is ever used there: a session renders in software
+/// and its event log records the lost process. The tests that prove the process
+/// boundary therefore assert the full GPU-process behaviour on Linux and, where
+/// this is true, the honest software behaviour on Windows. The gap itself is
+/// recorded in docs/phase-08-gate-report.md ("Windows GPU profile"); it closes
+/// when the Windows profile exists, and then this constant goes away.
+const GPU_PROCESS_UNAVAILABLE_ON_WINDOWS: bool = cfg!(windows);
+
 const PATIENT: Duration = Duration::from_secs(20);
 const AHEM: u32 = 1;
 const GARBAGE: u32 = 9;
@@ -131,6 +141,27 @@ fn failures(session: &GpuSession) -> Vec<Cause> {
         .collect()
 }
 
+/// What a Windows session must show: no process held, the loss recorded, and
+/// nothing blamed on a font (the process never got as far as reading one).
+fn assert_refused_and_in_software(session: &GpuSession) {
+    assert!(
+        !session.has_process(),
+        "{:?}",
+        session.events().collect::<Vec<_>>()
+    );
+    let causes = failures(session);
+    assert!(
+        !causes.is_empty(),
+        "the refusal must be in the event log: {:?}",
+        session.events().collect::<Vec<_>>()
+    );
+    assert!(
+        causes.iter().all(|c| !matches!(c, Cause::Reported(_))),
+        "the process refused to serve; it reported no failure of a frame: {causes:?}"
+    );
+    assert!(session.rejected_fonts().is_empty());
+}
+
 #[test]
 fn padded_ahem_still_parses() {
     let mut fonts = FontSet::new();
@@ -145,6 +176,19 @@ fn glyph_runs_draw_in_the_gpu_process_and_match_the_baseline() {
     let mut session = session();
     session.register_font(AHEM, big_ahem()).expect("register");
     let list = glyph_page(50, AHEM);
+    if GPU_PROCESS_UNAVAILABLE_ON_WINDOWS {
+        // No GPU process here, so the frames are software's, equal to the
+        // baseline, and fonts still draw through the software path.
+        assert_eq!(render_matching(&mut session, &list), Backend::Software);
+        let frame = session.render(&list, 200, 80).expect("frame");
+        assert_eq!(frame.pixel(18, 35), Some([10, 10, 50, 255]));
+        assert_eq!(
+            render_matching(&mut session, &glyph_page(60, AHEM)),
+            Backend::Software
+        );
+        assert_refused_and_in_software(&session);
+        return;
+    }
     assert_eq!(render_matching(&mut session, &list), Backend::Gpu);
     // Ink actually reached the frame: the middle of the first X is the run's
     // colour, not the page's background.
@@ -168,6 +212,20 @@ fn a_malformed_font_kills_only_its_process_and_the_session_falls_back() {
     session
         .register_font(GARBAGE, garbage())
         .expect("register: bytes are not validated here");
+
+    if GPU_PROCESS_UNAVAILABLE_ON_WINDOWS {
+        // No process reads the font, so none can be killed by it: the frame
+        // naming it is software's and draws nothing for it (the baseline), and
+        // the session goes on drawing the good font.
+        let bad = glyph_page(70, GARBAGE);
+        assert_eq!(render_matching(&mut session, &bad), Backend::Software);
+        assert_eq!(
+            render_matching(&mut session, &glyph_page(80, AHEM)),
+            Backend::Software
+        );
+        assert_refused_and_in_software(&session);
+        return;
+    }
 
     // The frame that names the garbage font: the process refuses it and exits,
     // the same call renders in software, and the frame is the baseline (which
@@ -203,6 +261,29 @@ fn killing_the_process_with_fonts_in_flight_falls_back_and_resends_them() {
     let mut session = session();
     session.register_font(AHEM, big_ahem()).expect("register");
     let a = glyph_page(10, AHEM);
+    if GPU_PROCESS_UNAVAILABLE_ON_WINDOWS {
+        // There is no process to kill. What is left to prove is that losing
+        // (or never holding) one leaves the frames whole and the fonts still
+        // drawn, including a large frame in strips and a "kill" with nothing
+        // to kill.
+        assert_eq!(render_matching(&mut session, &a), Backend::Software);
+        session.kill_process_for_test();
+        let list = glyph_page(20, AHEM);
+        let frame = session.render(&list, 1000, 600).expect("frame");
+        let mut fonts = FontSet::new();
+        fonts.insert(AHEM, big_ahem()).expect("ahem");
+        assert_eq!(
+            frame,
+            rasterize_with(&list, 1000, 600, &fonts).expect("baseline")
+        );
+        assert_eq!(session.last_backend(), Backend::Software);
+        assert_eq!(
+            render_matching(&mut session, &glyph_page(30, AHEM)),
+            Backend::Software
+        );
+        assert_refused_and_in_software(&session);
+        return;
+    }
     assert_eq!(render_matching(&mut session, &a), Backend::Gpu);
 
     // The process stops mid-frame (fonts long since received), then dies.

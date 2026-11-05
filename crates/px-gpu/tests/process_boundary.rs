@@ -46,6 +46,23 @@ fn can_sandbox() -> bool {
     false
 }
 
+/// The GPU process profile is two-stage and kernel-verified on Linux only
+/// (ADR 033, 035, 043). On Windows `enter_gpu_profile` and `verify_gpu_profile`
+/// refuse, so a GPU process is never used there and a Windows session renders
+/// in software. Every test below that needs a live, confirmed process (the
+/// profile, the probe, kill, hang, flood, `/proc`, `kill(1)`) is Linux-only for
+/// that reason, and says so by skipping through this function; the Windows
+/// behaviour is tested by `windows_refuses_the_gpu_process_and_software_serves`
+/// instead. The gap is recorded in docs/phase-08-gate-report.md ("Windows GPU
+/// profile") and closes when the Windows profile exists.
+const GPU_PROCESS_UNAVAILABLE_ON_WINDOWS: bool = cfg!(windows);
+
+/// Whether a confirmed GPU process is expected to run here: the machine clears
+/// the sandbox floor and the platform has a verifiable GPU profile.
+fn gpu_process_expected() -> bool {
+    can_sandbox() && !GPU_PROCESS_UNAVAILABLE_ON_WINDOWS
+}
+
 fn config(max_restarts: u32, frame: Duration) -> GpuConfig {
     let mut config = GpuConfig::process(binary());
     config.max_restarts = max_restarts;
@@ -140,7 +157,7 @@ fn kill_externally(pid: u32) {
 
 #[test]
 fn gpu_process_denied_capabilities() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(0, PATIENT));
@@ -204,7 +221,7 @@ fn gpu_process_denied_capabilities() {
 /// kernel's own text for this very process (which has no second filter).
 #[test]
 fn gpu_process_unconfined_is_not_used() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     // This test process is not a GPU process: it has neither of the two
@@ -227,7 +244,7 @@ fn gpu_process_unconfined_is_not_used() {
 
 #[test]
 fn gpu_frames_are_the_software_baseline() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(0, PATIENT));
@@ -250,7 +267,7 @@ fn gpu_frames_are_the_software_baseline() {
 
 #[test]
 fn gpu_a_long_display_list_crosses_in_chunks() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut list = DisplayList::new();
@@ -273,7 +290,7 @@ fn gpu_a_long_display_list_crosses_in_chunks() {
 
 #[test]
 fn gpu_kill_falls_back() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     // The state a dead GPU process must not disturb: the broker's channels,
@@ -325,7 +342,7 @@ fn gpu_kill_falls_back() {
 
 #[test]
 fn gpu_kill_mid_frame_falls_back() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(8, PATIENT));
@@ -363,7 +380,7 @@ fn gpu_kill_mid_frame_falls_back() {
 
 #[test]
 fn gpu_malformed_frame_falls_back() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(8, PATIENT));
@@ -381,7 +398,7 @@ fn gpu_malformed_frame_falls_back() {
 
 #[test]
 fn gpu_oversized_frame_falls_back() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(8, PATIENT));
@@ -399,7 +416,7 @@ fn gpu_oversized_frame_falls_back() {
 
 #[test]
 fn gpu_hung_process_times_out_and_falls_back() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(8, IMPATIENT));
@@ -424,7 +441,7 @@ fn gpu_hung_process_times_out_and_falls_back() {
 
 #[test]
 fn gpu_a_process_that_exits_without_answering_falls_back() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(8, PATIENT));
@@ -438,7 +455,7 @@ fn gpu_a_process_that_exits_without_answering_falls_back() {
 
 #[test]
 fn gpu_lies_about_the_frame_are_rejected() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     for (fault, expected) in [
@@ -464,7 +481,7 @@ fn gpu_lies_about_the_frame_are_rejected() {
 
 #[test]
 fn gpu_restarts_are_bounded_then_the_session_stays_on_software() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(2, PATIENT));
@@ -534,7 +551,7 @@ fn gpu_disable_gpu_spawns_nothing() {
 
 #[test]
 fn gpu_unrenderable_input_is_not_a_gpu_failure() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(0, PATIENT));
@@ -568,7 +585,7 @@ fn resident_kib() -> u64 {
 
 #[test]
 fn gpu_a_flood_of_frames_does_not_grow_memory_without_bound() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     let mut session = GpuSession::new(config(1000, PATIENT));
@@ -611,7 +628,7 @@ fn gpu_a_flood_of_frames_does_not_grow_memory_without_bound() {
 
 #[test]
 fn gpu_the_reader_never_holds_more_than_its_queue() {
-    if !can_sandbox() {
+    if !gpu_process_expected() {
         return;
     }
     // After a flood the session must not be wedged or carrying the backlog:
@@ -626,4 +643,40 @@ fn gpu_the_reader_never_holds_more_than_its_queue() {
     assert!(started.elapsed() < PATIENT);
     assert_eq!(render_matching(&mut session, &list, 300, 200), Backend::Gpu);
     let _ = GpuFailure::Backend; // the vocabulary is in scope for readers of this file
+}
+
+// ------------------------------------------------------------------- Windows
+
+/// What stands in for the profile tests on Windows: the process is refused
+/// (it exits instead of serving, and no profile is verifiable), the refusal is
+/// in the event log, every frame is the software baseline, and the restart
+/// bound still ends the attempts.
+#[test]
+fn windows_refuses_the_gpu_process_and_software_serves() {
+    if !GPU_PROCESS_UNAVAILABLE_ON_WINDOWS || !can_sandbox() {
+        return;
+    }
+    let mut session = GpuSession::new(config(2, PATIENT));
+    session.warm_up();
+    assert!(!session.has_process(), "a Windows GPU process was accepted");
+    assert!(session.applied().is_none());
+    assert!(
+        !failures(&session).is_empty(),
+        "the refusal must be in the event log: {:?}",
+        session.events().collect::<Vec<_>>()
+    );
+    for round in 0..4 {
+        assert_eq!(
+            render_matching(&mut session, &page(round), 300, 200),
+            Backend::Software
+        );
+        assert!(!session.has_process());
+    }
+    assert!(session.is_software_only());
+    assert_eq!(session.restarts(), 2, "two replacements, no third");
+    assert!(
+        session
+            .events()
+            .any(|e| matches!(e, GpuEvent::GaveUp { restarts: 2 }))
+    );
 }

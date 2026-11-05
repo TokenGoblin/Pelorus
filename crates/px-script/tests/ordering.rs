@@ -317,6 +317,11 @@ fn import_script() -> String {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/side_effect_module"
     );
+    // The path sits inside a JS string literal, so its backslashes (every
+    // separator of a Windows manifest dir, e.g. `D:\a\...`) are escapes
+    // unless doubled. Left alone they name a different file, the control
+    // below cannot read it, and the test above would pass for no reason.
+    let path = path.replace('\\', "\\\\").replace('\'', "\\'");
     format!("var leaked = false; import('{path}').catch(() => {{}});")
 }
 

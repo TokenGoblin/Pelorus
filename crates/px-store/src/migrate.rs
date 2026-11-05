@@ -399,13 +399,16 @@ impl Migrator<'_> {
     fn make_dir(&mut self, from: Option<&Path>, to: &Path) -> Result<(), MigrateError> {
         self.tick()?;
         fs::create_dir(to).map_err(io_err("create directory", to))?;
-        let mut perms = match from {
+        let perms = match from {
             Some(f) => fs::metadata(f).map_err(io_err("stat", f))?.permissions(),
             None => fs::metadata(to).map_err(io_err("stat", to))?.permissions(),
         };
+        // Only Unix has a mode to adjust; elsewhere the permissions are copied
+        // as they are (and a `mut` binding would be an unused one).
         #[cfg(unix)]
-        {
+        let perms = {
             use std::os::unix::fs::PermissionsExt;
+            let mut perms = perms;
             // The owner must keep rwx or the migration cannot finish; and a
             // profile directory is never more open than its source.
             let mode = if from.is_some() {
@@ -414,7 +417,8 @@ impl Migrator<'_> {
                 0o700
             };
             perms.set_mode(mode);
-        }
+            perms
+        };
         fs::set_permissions(to, perms).map_err(io_err("set permissions", to))
     }
 
