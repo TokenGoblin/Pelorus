@@ -3218,7 +3218,7 @@ fn aspect_ratio_block_size(
         (content_inline, Au(0))
     };
     let height = i64::from(width.0) * den / num;
-    let height = Au(i32::try_from(height).unwrap_or(i32::MAX));
+    let height = crate::geom::au(i32::try_from(height).unwrap_or(i32::MAX));
     Some((height - height_bp).max(Au(0)))
 }
 
@@ -3939,11 +3939,11 @@ mod tests {
     #[test]
     fn block_margin_collapsing_edge_cases() {
         let reset = "html, body, div { display: block; margin: 0; padding: 0 } ";
-        let tops = |html: &str, css: &str| -> Vec<(i32, i32)> {
+        let tops = |html: &str, css: &str| -> Vec<(Au, Au)> {
             let (tree, _) = layout(html, &format!("{reset}{css}"));
             rects_of(&tree, FragmentKind::Block)
                 .into_iter()
-                .map(|r| (r.1.0 / 60, r.3.0 / 60))
+                .map(|r| (r.1, r.3))
                 .collect()
         };
         // A parent's top margin collapses with its first child's: 10 and 20 give 20.
@@ -3951,7 +3951,10 @@ mod tests {
             "<html><body><div id=p><div id=c></div></div></body></html>",
             "#p { margin-top: 10px } #c { margin-top: 20px; height: 5px }",
         );
-        assert!(v.contains(&(20, 5)), "parent/child top collapse: {v:?}");
+        assert!(
+            v.contains(&(px(20), px(5))),
+            "parent/child top collapse: {v:?}"
+        );
         // An empty block's margins collapse through itself and with its siblings:
         // 20, (10 and 30 collapsed through) and 5 give 30.
         let v = tops(
@@ -3960,7 +3963,7 @@ mod tests {
              #b { height: 10px; margin-top: 5px }",
         );
         assert!(
-            v.contains(&(40, 10)),
+            v.contains(&(px(40), px(10))),
             "empty block collapses through: {v:?}"
         );
         // Positive and negative: 30 and -10 give 20.
@@ -3968,14 +3971,14 @@ mod tests {
             "<html><body><div id=a></div><div id=b></div></body></html>",
             "#a { height: 10px; margin-bottom: 30px } #b { height: 10px; margin-top: -10px }",
         );
-        assert!(v.contains(&(30, 10)), "30 and -10 give 20: {v:?}");
+        assert!(v.contains(&(px(30), px(10))), "30 and -10 give 20: {v:?}");
         // `overflow: hidden` makes a formatting context root: no parent/child collapse.
         let v = tops(
             "<html><body><div id=p><div id=c></div></div></body></html>",
             "#p { overflow: hidden } #c { margin-top: 20px; height: 5px }",
         );
         assert!(
-            v.contains(&(20, 5)) && v.contains(&(0, 25)),
+            v.contains(&(px(20), px(5))) && v.contains(&(px(0), px(25))),
             "overflow:hidden contains: {v:?}"
         );
         // Padding between parent and child stops the collapse.
@@ -3983,7 +3986,10 @@ mod tests {
             "<html><body><div id=p><div id=c></div></div></body></html>",
             "#p { padding-top: 1px; margin-top: 10px } #c { margin-top: 20px; height: 5px }",
         );
-        assert!(v.contains(&(31, 5)), "padding stops the collapse: {v:?}");
+        assert!(
+            v.contains(&(px(31), px(5))),
+            "padding stops the collapse: {v:?}"
+        );
         // A parent with a definite height does not collapse its last child's bottom
         // margin into its own.
         let v = tops(
@@ -3991,7 +3997,7 @@ mod tests {
             "#p { height: 50px } #c { height: 5px; margin-bottom: 40px } #n { height: 1px }",
         );
         assert!(
-            v.contains(&(50, 1)),
+            v.contains(&(px(50), px(1))),
             "definite height keeps the margin inside: {v:?}"
         );
     }
