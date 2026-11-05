@@ -277,3 +277,39 @@ source = "tests/render/pages/bg-image.html"
 [[page]]
 id = "img-formats"
 source = "tests/render/pages/img-formats.html"
+
+[[page]]
+id = "site-nav-flex"
+source = "tests/render/pages/site-nav-flex.html"
+
+[[page]]
+id = "site-card-grid"
+source = "tests/render/pages/site-card-grid.html"
+
+[[page]]
+id = "site-sticky-header"
+source = "tests/render/pages/site-sticky-header.html"
+
+[[page]]
+id = "site-centered"
+source = "tests/render/pages/site-centered.html"
+
+[[page]]
+id = "site-flex-patterns"
+source = "tests/render/pages/site-flex-patterns.html"
+
+[[page]]
+id = "site-positioning"
+source = "tests/render/pages/site-positioning.html"
+
+[[page]]
+id = "site-sizing"
+source = "tests/render/pages/site-sizing.html"
+
+[[page]]
+id = "site-centering"
+source = "tests/render/pages/site-centering.html"
+
+[[page]]
+id = "site-stacking"
+source = "tests/render/pages/site-stacking.html"

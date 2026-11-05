@@ -371,5 +371,26 @@ pub fn paint_style(dom: Dom<'_>, node: NodeId) -> Option<PaintStyle> {
     let view = dom.node(node)?;
     let element = crate::dom::StyleElement::new(view)?;
     let data = style::dom::TElement::borrow_data(&element)?;
-    Some(paint_style_of(data.styles.primary()))
+    let mut paint = paint_style_of(data.styles.primary());
+    // css-flexbox-1 section 4.3 and css-grid-1 section 6: a flex or grid item
+    // honours `z-index` although it is not positioned, and with one other than
+    // `auto` it is a stacking context. Treating it as positioned is how paint
+    // orders it -- the one thing `positioned` decides that differs is which
+    // clip an absolutely positioned descendant escapes, which is the same box.
+    if !paint.positioned
+        && paint.z_index.is_some()
+        && let Some(parent) = dom.arena().get(node).and_then(|n| n.parent())
+        && let Some(parent_view) = dom.node(parent)
+        && let Some(parent_element) = crate::dom::StyleElement::new(parent_view)
+        && let Some(parent_data) = style::dom::TElement::borrow_data(&parent_element)
+    {
+        use style::values::specified::box_::{DisplayInside, DisplayOutside};
+        let d = parent_data.styles.primary().clone_display();
+        if d.outside() != DisplayOutside::None
+            && matches!(d.inside(), DisplayInside::Flex | DisplayInside::Grid)
+        {
+            paint.positioned = true;
+        }
+    }
+    Some(paint)
 }

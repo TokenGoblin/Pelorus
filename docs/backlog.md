@@ -1603,3 +1603,34 @@ sites showed, none of it fixed here:
   an absolutely positioned grid child is not implemented. Revisit when that lands,
   then let WPT pages load pictures (`px-paint/examples/render_pages.rs`, `own`).
 - **`px-paint` still has its own PNG decoder** next to `px-image` (ADR 042).
+
+## Layout of real pages (phase7/layout-real-sites)
+
+Fixed on this branch: `box-sizing: border-box` on blocks (flex/grid already had it),
+`margin: 0 auto` + `max-width` centring, percentage `height`/`min-height`/`max-height`
+against a definite parent (root basis = viewport height via `layout_document_in`),
+`position: absolute` with `top`+`bottom` (stretch), percentage insets and `auto` margins,
+`width: min-content | max-content | fit-content | stretch`, `aspect-ratio` on blocks,
+translate-only `transform`, `z-index` on flex/grid items. Still open:
+
+- **`::before` / `::after` generated content.** Nothing is styled or laid out for a
+  pseudo-element (`px-css` `match_pseudo_element` matches none). The clearfix
+  (`::after { content: ""; display: table; clear: both }`), icon glyphs, quotes and
+  decorative bars all vanish, and a floated column then collapses its container.
+  Highest-yield remaining item for real pages. Needs stylo pseudo cascade in px-css,
+  a box per pseudo in `px-layout` and text content in the run builder.
+- **`position: sticky` and `position: fixed` are positioned once, at scroll 0.** A
+  sticky header is laid out like a static box and a fixed bar scrolls with the page.
+  Needs scroll-offset-aware paint (the shell clips and offsets the display list).
+- **Non-translate transforms** (`scale`, `rotate`, `skew`, `matrix`) are ignored, and a
+  transform does not create a containing block for fixed/absolute descendants.
+- **Percentage heights through flex items and absolute boxes** still compute to `auto`
+  (an absolute box with a definite height is a basis; a stretched flex item is not).
+  `top`/`bottom` percentages on `position: relative` resolve against nothing.
+- **WPT reftest oracle.** Most remaining css2/flexbox/grid failures are the geometry
+  oracle's blind spot (float/flex/abspos reference spelled with different box
+  counts), not layout defects; reading them rectangle by rectangle found none of the
+  real-site bugs fixed here. The fixtures `tests/render/pages/site-*.html` are the
+  better instrument for real-page layout.
+- Flex/grid items' `order` does not affect paint order; grid `z-index` ordering of
+  overlapped items is by DOM order only.

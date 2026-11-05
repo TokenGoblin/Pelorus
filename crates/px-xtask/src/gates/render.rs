@@ -38,7 +38,7 @@ use std::path::Path;
 pub mod px_png;
 
 /// The corpus may not shrink below this many pages (ADR 033 (a)).
-pub const PAGE_FLOOR: usize = 66;
+pub const PAGE_FLOOR: usize = 75;
 
 /// A rendered page with fewer ink pixels than this (pixels differing from its most
 /// common colour) is not a test. Used by the WPT selection rule: 20 x 20 pixels.
@@ -521,7 +521,7 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         ));
         return;
     }
-    g.info("Text paints as Ahem glyph runs; the corpus floor is 66 pages (bundled fonts only).");
+    g.info("Text paints as Ahem glyph runs; the corpus floor is 75 pages (bundled fonts only).");
     if select {
         run_select(g, root);
         return;
@@ -780,17 +780,17 @@ mod tests {
     }
 
     #[test]
-    fn floor_is_pinned_at_66() {
-        let (p, s) = many(66);
+    fn floor_is_pinned_at_75() {
+        let (p, s) = many(75);
         assert!(check_manifest(&p, &s, false).is_empty());
-        let (p, s) = many(65);
+        let (p, s) = many(74);
         let f = check_manifest(&p, &s, false);
-        assert_eq!(f, ["the corpus has 65 pages, the pinned floor is 66"]);
+        assert_eq!(f, ["the corpus has 74 pages, the pinned floor is 75"]);
     }
 
     #[test]
     fn missing_baseline_and_orphan_baseline_fail_but_bless_waives_them() {
-        let (p, mut s) = many(66);
+        let (p, mut s) = many(75);
         s.remove(3);
         s.push("ghost".into());
         let f = check_manifest(&p, &s, false);
@@ -802,7 +802,7 @@ mod tests {
 
     #[test]
     fn duplicate_and_bad_ids_fail() {
-        let (mut p, s) = many(66);
+        let (mut p, s) = many(75);
         p[1].id = "p0".into();
         p[2].id = "Bad Id".into();
         let f = check_manifest(&p, &s, true);

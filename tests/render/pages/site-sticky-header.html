@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<title>Sticky header and fixed bar</title>
+<style>
+body { margin: 0; height: 1200px; background: #fff }
+.top { position: sticky; top: 0; height: 56px; background: #335; z-index: 10 }
+.hero { height: 200px; background: #cde }
+.fixed { position: fixed; right: 16px; bottom: 16px; width: 120px; height: 48px; background: #e63; z-index: 5 }
+.over { position: relative; z-index: 1; margin-top: -40px; margin-left: 40px; width: 200px; height: 80px; background: #6c6 }
+.under { position: relative; z-index: -1; margin-left: 100px; width: 200px; height: 80px; background: #c66 }
+</style>
+<div class="top"></div><div class="hero"></div><div class="under"></div><div class="over"></div><div class="fixed"></div>

@@ -73,4 +73,4 @@ directory's PROVENANCE.txt). not-an-image.html is a page named as a picture, to
 show it is refused. Only pages under tests/render/ load pictures: the vendored
 WPT pages render without them as they always did (their image tests, such as
 grid-abspos-staticpos-align-self-img-001, are about grid placement, which a
-picture would only make visible; see docs/backlog.md). Corpus floor: 66 pages (60 with the table pages, then these six).
+picture would only make visible; see docs/backlog.md). Corpus floor: 75 pages (69 with the table and site pages, then these six).

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-size:16px;line-height:20px}
+.p{position:relative;height:100px;background:#eee;margin-bottom:8px}
+.c1{position:absolute;left:50%;top:50%;width:80px;height:40px;margin:-20px 0 0 -40px;background:#c66}
+.c2{position:absolute;left:0;right:0;top:0;bottom:0;margin:auto;width:60px;height:30px;background:#6c6}
+.c3{position:absolute;left:50%;top:50%;width:50px;height:50px;background:#66c;transform:translate(-50%,-50%)}
+.ct{display:contents}
+.ct>div{height:20px;background:#fc6;margin-bottom:4px}
+.vh{visibility:hidden;height:20px;background:red}
+.fl{float:left;width:100px;height:30px;background:#9cf;margin-right:10px}
+.cf{overflow:hidden}
+.ml{margin-left:auto;width:100px;height:20px;background:#c9f}
+.col{display:flex;flex-direction:column;align-items:center;background:#ddd;padding:8px}
+.col>div{width:50%;height:20px;background:#9c9;margin-bottom:4px}
+.nested{display:flex}
+.nested>.l{flex:0 0 200px;background:#fcc;height:60px}
+.nested>.r{flex:1;min-width:0;background:#cfc}
+.nested>.r>div{width:1000px;height:20px;background:#9c9}
+.nested>.r{overflow:hidden}
+</style>
+<div class="p"><div class="c1"></div></div>
+<div class="p"><div class="c2"></div></div>
+<div class="p"><div class="c3"></div></div>
+<div><div class="ct"><div></div><div></div></div></div>
+<div class="vh"></div>
+<div class="cf" style="background:#eee"><div class="fl"></div><div class="fl"></div><div class="fl"></div></div>
+<div class="ml"></div>
+<div class="col"><div></div><div></div></div>
+<div class="nested"><div class="l"></div><div class="r"><div></div></div></div>

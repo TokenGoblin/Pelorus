@@ -328,7 +328,7 @@ fn page(
         set.urls.insert((*u).to_string(), img.clone());
     }
     let tree =
-        px_layout::replaced::layout_document_with_images(&arena, &root, px(w as i32), &sizes)
+        px_layout::replaced::layout_document_with_images(&arena, &root, px(w as i32), None, &sizes)
             .expect("laid out");
     let list = px_paint::build_with_images(&arena, &root, &tree, px(w as i32), px(h as i32), &set);
     assert!(list.clips_balanced());

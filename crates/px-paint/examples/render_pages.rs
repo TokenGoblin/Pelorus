@@ -190,6 +190,7 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
         &arena,
         &style_root,
         px(WIDTH as i32),
+        Some(px(MIN_HEIGHT as i32)),
         &sizes,
     )
     .ok_or("layout failed")?;

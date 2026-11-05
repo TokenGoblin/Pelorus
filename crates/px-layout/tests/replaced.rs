@@ -51,7 +51,7 @@ fn lay(body: &str, css: &str, images: &[(&str, u32, u32)]) -> Laid {
         .iter()
         .map(|(id, w, h)| (id_of(&arena, id), (*w, *h)))
         .collect();
-    let tree = layout_document_with_images(&arena, &root, px(800), &table).expect("laid out");
+    let tree = layout_document_with_images(&arena, &root, px(800), None, &table).expect("laid out");
     Laid { tree, arena }
 }
 

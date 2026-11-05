@@ -25,7 +25,8 @@ impl Table {
                     let s0 = resolve_edges(&style, Au(0));
                     let sur = s0.border.inline_sum() + s0.padding.inline_sum();
                     let mm = ((raw.min - sur).max(Au(0)), (raw.max - sur).max(Au(0)));
-                    let h = resolve_block_size(&style).map(|h| (h, border_box_sizing(&style)));
+                    let h = resolve_block_size(&style, None, Au(0))
+                        .map(|h| (h, border_box_sizing(&style)));
                     let hide = style.get_inherited_table().clone_empty_cells()
                         == style::computed_values::empty_cells::T::Hide;
                     (mm, e, h, hide)
@@ -332,7 +333,7 @@ pub(crate) fn plan(
         }
     };
     if real {
-        let b = inline_bounds(style, containing);
+        let b = inline_bounds(style, containing, Au(0));
         let bb_extra = if border_box_sizing(style) {
             Au(0)
         } else {

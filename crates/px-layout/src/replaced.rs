@@ -68,13 +68,14 @@ impl Drop for Installed {
     }
 }
 
-/// [`crate::block::layout_document`] with the intrinsic sizes, in CSS px, of the
+/// [`crate::block::layout_document_in`] with the intrinsic sizes, in CSS px, of the
 /// `<img>` elements that have a picture. An entry with a zero side is ignored.
 #[must_use]
 pub fn layout_document_with_images(
     arena: &Arena,
     root: &px_css::view::StyleRoot,
     viewport_inline_size: Au,
+    viewport_block_size: Option<Au>,
     images: &BTreeMap<NodeId, (u32, u32)>,
 ) -> Option<FragmentTree> {
     let table: BTreeMap<NodeId, (u32, u32)> = images
@@ -84,7 +85,7 @@ pub fn layout_document_with_images(
         .collect();
     TABLE.with(|t| *t.borrow_mut() = Some(table));
     let _guard = Installed;
-    crate::block::layout_document(arena, root, viewport_inline_size)
+    crate::block::layout_document_in(arena, root, viewport_inline_size, viewport_block_size)
 }
 
 /// The intrinsic size of `node`'s picture, if it has one.

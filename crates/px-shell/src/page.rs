@@ -321,6 +321,7 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
         &arena,
         &style_root,
         px(width as i32),
+        Some(px(height as i32)),
         &sizes,
     )
     .ok_or("layout failed")?;
