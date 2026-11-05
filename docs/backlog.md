@@ -1428,3 +1428,26 @@ follows.
 - **Why deferred:** each needs a consumer (a document, a worker, a navigation)
   that does not exist yet, or is a refactor wider than this integration.
   `docs/phase-12-integration.md` lists what is and is not wired.
+
+## Built-in pages: what the engine cannot yet draw
+
+- **Found in:** phase 18, `crates/px-pages` (render fixtures `ui-page-*`)
+- **Belongs to:** phase 8 (paint), phase 9 (text), phase 18 (chrome)
+- **What:** the pages are authored for the final look and degrade in our
+  renderer; nothing was faked to hide it.
+  - `border-radius` is not painted (px-paint), so the squircle cards, chips,
+    progress bars and the mark's ring draw as rectangles. The CSS carries the
+    radii; the baselines will change when paint gains rounded borders.
+  - Inline `<svg>` is not drawn, so the mark is built from CSS boxes (a
+    simplified small-size mark, not `packaging/logo/pelorus.svg`; the guide
+    asks for a small-size mark anyway). Replace with the real logo once images
+    or SVG paint.
+  - Only Noto Sans Regular is bundled: no bold or italic, so hierarchy is size
+    and colour. `monospace` falls back to Ahem; avoided.
+  - List markers, `letter-spacing` and `text-transform` do not paint; the pages
+    avoid them.
+  - `prefers-color-scheme` is pinned to light in `StyleEngine::new` on purpose
+    (fingerprinting). `new_with_color_scheme` exists for the corpus and a future
+    setting; nothing in the product path passes `true` yet.
+  - The pages show placeholders (`data-field`) for version, address, reason and
+    sandbox state until the browser process can fill them.

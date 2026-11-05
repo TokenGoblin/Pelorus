@@ -38,7 +38,7 @@ use std::path::Path;
 pub mod px_png;
 
 /// The corpus may not shrink below this many pages (ADR 033 (a)).
-pub const PAGE_FLOOR: usize = 39;
+pub const PAGE_FLOOR: usize = 47;
 
 /// A rendered page with fewer ink pixels than this (pixels differing from its most
 /// common colour) is not a test. Used by the WPT selection rule: 20 x 20 pixels.
@@ -521,7 +521,7 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         ));
         return;
     }
-    g.info("Text paints as Ahem glyph runs; the corpus floor is 39 pages (bundled fonts only).");
+    g.info("Text paints as Ahem glyph runs; the corpus floor is 47 pages (bundled fonts only).");
     if select {
         run_select(g, root);
         return;
@@ -546,7 +546,10 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         g.fail(f);
     }
     for p in &pages {
-        if !root.join(&p.source).is_file() {
+        if !root
+            .join(p.source.strip_suffix("#dark").unwrap_or(&p.source))
+            .is_file()
+        {
             g.fail(format!("page {}: source {} does not exist", p.id, p.source));
         }
         if let Some(r) = &p.reference
@@ -777,17 +780,17 @@ mod tests {
     }
 
     #[test]
-    fn floor_is_pinned_at_39() {
-        let (p, s) = many(39);
+    fn floor_is_pinned_at_47() {
+        let (p, s) = many(47);
         assert!(check_manifest(&p, &s, false).is_empty());
-        let (p, s) = many(38);
+        let (p, s) = many(46);
         let f = check_manifest(&p, &s, false);
-        assert_eq!(f, ["the corpus has 38 pages, the pinned floor is 39"]);
+        assert_eq!(f, ["the corpus has 46 pages, the pinned floor is 47"]);
     }
 
     #[test]
     fn missing_baseline_and_orphan_baseline_fail_but_bless_waives_them() {
-        let (p, mut s) = many(39);
+        let (p, mut s) = many(47);
         s.remove(3);
         s.push("ghost".into());
         let f = check_manifest(&p, &s, false);
@@ -799,7 +802,7 @@ mod tests {
 
     #[test]
     fn duplicate_and_bad_ids_fail() {
-        let (mut p, s) = many(39);
+        let (mut p, s) = many(47);
         p[1].id = "p0".into();
         p[2].id = "Bad Id".into();
         let f = check_manifest(&p, &s, true);

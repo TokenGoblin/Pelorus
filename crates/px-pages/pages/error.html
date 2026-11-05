@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>This page did not load</title>
+<style>
+/* tokens */
+:root {
+  --bg: #F4F7FB; --panel: #FFFFFF; --line: #D5DEEB; --field: #FFFFFF;
+  --text: #0B1226; --muted: #475569; --teal: #0F766E; --blue: #1D4ED8;
+  --amber: #B45309; --red: #B91C1C; --tint: #E3EEF0; --mark: #0B1630;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0B1226; --panel: #101A33; --line: #243357; --field: #101A33;
+    --text: #E2E8F0; --muted: #9FB0C8; --teal: #5EEAD4; --blue: #60A5FA;
+    --amber: #FBBF24; --red: #F87171; --tint: #14284A; --mark: #0B1630;
+  }
+}
+/* end tokens */
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font-family: "Noto Sans", sans-serif; font-size: 15px; line-height: 1.55; }
+main { display: block; width: 560px; margin: 0 auto; padding: 88px 0 64px; }
+.status { display: inline-block; margin: 0 0 20px; padding: 2px 14px; border: 1px solid var(--amber); border-radius: 12px; color: var(--amber); font-size: 13px; line-height: 22px; }
+h1 { margin: 0; font-size: 30px; line-height: 1.25; font-weight: 400; }
+.lede { margin: 14px 0 28px; color: var(--muted); font-size: 16px; }
+.card { box-sizing: border-box; margin: 0 0 16px; padding: 18px 22px 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.card h2 { margin: 0 0 8px; font-size: 17px; line-height: 1.3; font-weight: 400; }
+.card p { margin: 0; color: var(--muted); font-size: 14px; }
+.card .tip { margin: 0 0 4px; }
+.info { display: flex; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.info.last { border-bottom: 0; padding-bottom: 0; }
+.info .k { width: 120px; color: var(--muted); }
+.info .v { flex: 1; }
+.safe { display: flex; align-items: center; color: var(--teal); font-size: 14px; }
+.safe .dot { width: 10px; height: 10px; margin-right: 10px; border: 2px solid var(--teal); border-radius: 50%; }
+</style>
+</head>
+<body>
+<main>
+  <div class="status">Not loaded</div>
+  <h1>This page could not be opened</h1>
+  <p class="lede">The connection ended before the page arrived. Nothing is wrong with your browser, and nothing from the page was loaded or run.</p>
+  <section class="card">
+    <h2>Details</h2>
+    <div class="info"><div class="k">Address</div><div class="v" data-field="address">The address you asked for</div></div>
+    <div class="info last"><div class="k">Reason</div><div class="v" data-field="reason">The connection was closed or refused</div></div>
+  </section>
+  <section class="card">
+    <h2>What you can try</h2>
+    <p class="tip">Check the address for a typing slip.</p>
+    <p class="tip">Wait a moment, then use Reload in the toolbar.</p>
+    <p class="tip">If a rule you set blocks the site, you can change it in settings.</p>
+  </section>
+  <div class="safe"><div class="dot"></div>Nothing from the site was run.</div>
+</main>
+</body>
+</html>

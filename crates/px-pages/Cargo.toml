@@ -1,0 +1,16 @@
+[package]
+name = "px-pages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# None. The pages are plain HTML and CSS included as strings.
+
+[dev-dependencies]
+# The tests parse, style and lay out every page through the product path.
+# Workspace crates only: no third-party crate is added.
+px-css = { path = "../px-css", version = "0.0.0" }
+px-dom = { path = "../px-dom", version = "0.0.0" }
+px-layout = { path = "../px-layout", version = "0.0.0" }

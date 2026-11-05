@@ -1490,6 +1490,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "px-pages"
+version = "0.0.0"
+dependencies = [
+ "px-css",
+ "px-dom",
+ "px-layout",
+]
+
+[[package]]
 name = "px-paint"
 version = "0.0.0"
 dependencies = [

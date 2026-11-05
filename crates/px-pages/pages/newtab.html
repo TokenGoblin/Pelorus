@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New tab</title>
+<style>
+/* tokens */
+:root {
+  --bg: #F4F7FB; --panel: #FFFFFF; --line: #D5DEEB; --field: #FFFFFF;
+  --text: #0B1226; --muted: #475569; --teal: #0F766E; --blue: #1D4ED8;
+  --amber: #B45309; --red: #B91C1C; --tint: #E3EEF0; --mark: #0B1630;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0B1226; --panel: #101A33; --line: #243357; --field: #101A33;
+    --text: #E2E8F0; --muted: #9FB0C8; --teal: #5EEAD4; --blue: #60A5FA;
+    --amber: #FBBF24; --red: #F87171; --tint: #14284A; --mark: #0B1630;
+  }
+}
+/* end tokens */
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font-family: "Noto Sans", sans-serif; font-size: 16px; line-height: 1.5; }
+main { display: block; width: 560px; margin: 0 auto; padding: 128px 0 48px; text-align: center; }
+.mark { position: relative; width: 78px; height: 78px; margin: 0 auto 44px; border: 3px solid var(--teal); border-radius: 50%; background: var(--mark); }
+.mark .heading { position: absolute; left: 36px; top: 16px; width: 6px; height: 40px; border-radius: 3px; background: #E2E8F0; }
+.mark .sight { position: absolute; left: 45px; top: 26px; width: 20px; height: 3px; border-radius: 2px; background: #FBBF24; }
+.field { height: 52px; box-sizing: border-box; padding: 0 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--field); color: var(--muted); font-size: 16px; line-height: 50px; text-align: left; }
+.hint { margin: 20px 0 0; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark" role="img" aria-label="Browser mark"><div class="heading"></div><div class="sight"></div></div>
+  <div class="field">Search or enter address</div>
+  <p class="hint">Type in the address bar. Nothing else is on this page.</p>
+</main>
+</body>
+</html>

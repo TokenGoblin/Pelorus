@@ -18,6 +18,7 @@ members = [
     "crates/px-layout",
     "crates/px-mcp",
     "crates/px-net",
+    "crates/px-pages",
     "crates/px-paint",
     "crates/px-sandbox",
     "crates/px-script",

@@ -5,7 +5,9 @@ use std::time::Duration;
 use px_paint::raster::Canvas;
 use px_ui::chrome::PlatformConfig;
 use px_ui::geom::{Rect, Size};
-use px_ui::input::{Button, CursorShape, Event, KeyEvent, PointerEvent, PointerKind, WheelEvent, WindowAction};
+use px_ui::input::{
+    Button, CursorShape, Event, KeyEvent, PointerEvent, PointerKind, WheelEvent, WindowAction,
+};
 use px_ui::platform::{PlatformError, PlatformWindow};
 
 use super::conn::{Conn, RawEvent, Wait};
@@ -276,7 +278,11 @@ impl X11Window {
                     4 | 5 => {
                         // Wheel: one press per detent (the release is ignored).
                         if ev.code == proto::EV_BUTTON_PRESS {
-                            let dy = if e.detail == 4 { -WHEEL_NOTCH_PX } else { WHEEL_NOTCH_PX };
+                            let dy = if e.detail == 4 {
+                                -WHEEL_NOTCH_PX
+                            } else {
+                                WHEEL_NOTCH_PX
+                            };
                             let mut w = WheelEvent::new(i32::from(e.x), i32::from(e.y), 0, dy);
                             w.mods = keys::modifiers(e.state);
                             self.out.push_back(DisplayEvent::Ui(Event::Wheel(w)));

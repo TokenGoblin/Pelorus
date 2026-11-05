@@ -7,7 +7,7 @@
 
 use px_paint::raster::Canvas;
 use px_ui::geom::{Point, Rect, Size};
-use px_ui::input::{AppRequest, Button, CursorShape, Event, Key, PointerKind, WheelEvent};
+use px_ui::input::{AppRequest, Button, CursorShape, Event, Key, PointerKind};
 use px_ui::paint;
 use px_ui::platform::{PlatformWindow, pump};
 use px_ui::tabs::{Tab, TabId};
@@ -489,7 +489,7 @@ fn blit(dst: &mut Canvas, src: &Canvas, x: i32, y: i32, radius: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use px_ui::input::{KeyEvent, PointerEvent};
+    use px_ui::input::{KeyEvent, PointerEvent, WheelEvent};
     use px_ui::platform::PlatformError;
 
     #[derive(Default)]
@@ -555,9 +555,9 @@ mod tests {
         let mut s = shell(&[Location::About("long".into())]);
         let mut w = Mock::default();
         assert_eq!(s.scroll(), 0);
-        s.handle(&mut w, Event::Wheel(WheelEvent::new(0, 100, 0, 96)));
+        s.handle(&mut w, Event::Wheel(WheelEvent::new(300, 300, 0, 96)));
         assert_eq!(s.scroll(), 96);
-        s.handle(&mut w, Event::Wheel(WheelEvent::new(0, 100, 0, -480)));
+        s.handle(&mut w, Event::Wheel(WheelEvent::new(300, 300, 0, -480)));
         assert_eq!(s.scroll(), 0);
         s.handle(&mut w, Event::Key(KeyEvent::new(Key::End)));
         let max = s.scroll();
