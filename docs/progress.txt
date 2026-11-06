@@ -11,8 +11,8 @@
 5|80|Style
 6|78|Block/inline layout
 7|50|Flex & grid
-8|70|Paint & compositing
-9|50|Text & input
+8|75|Paint & compositing
+9|58|Text & input
 10|60|Script host (Boa)
 11|50|Bindings
 12|80|Web security

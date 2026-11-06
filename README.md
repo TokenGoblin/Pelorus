@@ -29,8 +29,8 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 5  Style                   ████████████████░░░░  80%
 6  Block/inline layout     ████████████████░░░░  78%
 7  Flex & grid             ██████████░░░░░░░░░░  50%
-8  Paint & compositing     ██████████████░░░░░░  70%
-9  Text & input            ██████████░░░░░░░░░░  50%
+8  Paint & compositing     ███████████████░░░░░  75%
+9  Text & input            ████████████░░░░░░░░  58%
 10 Script host (Boa)       ████████████░░░░░░░░  60%
 11 Bindings                ██████████░░░░░░░░░░  50%
 12 Web security            ████████████████░░░░  80%
@@ -44,7 +44,7 @@ Rust is what reduces how often it has to save you. See `docs/build-spec.md` §4.
 20 Release engineering     ███░░░░░░░░░░░░░░░░░  15%
 21 MCP                     ██████░░░░░░░░░░░░░░  30%
 22 Extensions              █░░░░░░░░░░░░░░░░░░░   5%
-OVERALL                    56%
+OVERALL                    57%
 ```
 Estimates by the maintainers, not measurements; a phase is only closed when its gate passes in CI on Windows and Linux.
 <!-- progress:end -->
