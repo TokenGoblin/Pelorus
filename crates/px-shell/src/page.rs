@@ -99,6 +99,10 @@ pub struct Resources {
     /// Decoded pictures by key (see [`Resources::key`]): what the image loader
     /// fetched and `px-image` decoded. A picture that failed is simply absent.
     pub images: HashMap<String, Arc<px_paint::ImageData>>,
+    /// The page's `@font-face` fonts that loaded (see [`crate::fonts`]); empty
+    /// when it declares none or none arrived. Layout reads them through
+    /// `px_layout::fontset::with_page_fonts`.
+    pub fonts: Arc<px_layout::fontset::PageFonts>,
 }
 
 /// Percent-decode `s` (bytes that are not valid UTF-8 after decoding make it
@@ -317,8 +321,9 @@ fn ceil_px(a: Au) -> i32 {
 /// stylesheets); `None` for a built-in page. Never panics: an engine panic is
 /// reported as an error.
 pub fn layout(source: &str, page: &Resources, width: u32, height: u32) -> Result<Laid, String> {
+    let fonts = page.fonts.clone();
     catch_unwind(AssertUnwindSafe(|| {
-        layout_inner(source, page, width, height)
+        px_layout::fontset::with_page_fonts(fonts, || layout_inner(source, page, width, height))
     }))
     .map_err(|_| "the engine panicked on this page".to_string())?
 }
@@ -502,6 +507,25 @@ pub fn image_plan(source: &str, res: &Resources) -> Vec<String> {
         }
     }
     wanted.keys
+}
+
+/// The `@font-face` rules the page's stylesheets declare that have a usable
+/// `url()` source, in document order. Needs the stylesheets in `res` already.
+#[must_use]
+pub fn font_plan(source: &str, res: &Resources) -> Vec<px_css::font_face::FontFaceDecl> {
+    let dom = px_dom::parse(source);
+    if dom.abandoned {
+        return Vec::new();
+    }
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let arena = dom.arena;
+    let mut engine =
+        px_css::engine::StyleEngine::new(crate::images::PLAN_WIDTH as f32, 768.0, quirks);
+    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
+    for (css, base) in stylesheets(res, &arena) {
+        engine.add_author_stylesheet(&css, &base);
+    }
+    engine.font_faces()
 }
 
 impl Laid {

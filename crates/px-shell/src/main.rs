@@ -94,6 +94,9 @@ fn real_main(args: Args) -> Result<(), String> {
     // Real pages name families the bundled set does not have; draw them in the
     // bundled Noto Sans rather than the conformance fallback (Ahem squares).
     px_layout::text::set_web_fallback(true);
+    // serif, sans-serif, monospace, system-ui, cursive, fantasy: the installed
+    // faces if there are any, the bundled Noto Sans otherwise.
+    px_shell::fonts::install_system_generics();
     let theme = if args.light {
         Theme::Light
     } else {

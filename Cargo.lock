@@ -1529,6 +1529,7 @@ name = "px-shell"
 version = "0.0.0"
 dependencies = [
  "px-brand",
+ "px-broker",
  "px-css",
  "px-display",
  "px-dom",

@@ -107,6 +107,7 @@ impl Net {
             blocked_inline: HashSet::new(),
             file: None,
             images: HashMap::new(),
+            fonts: Default::default(),
         };
         for text in styles {
             if !loader.allows_inline_style(&text) {
@@ -149,6 +150,8 @@ impl Net {
                 res.images.insert(key, img);
             }
         }
+        // Web fonts: `@font-face` sources, CORS-mode fetches, bounded in time.
+        crate::fonts::load_web(&mut loader, &source, &mut res);
         Loaded {
             source,
             res,

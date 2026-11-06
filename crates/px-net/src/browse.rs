@@ -16,11 +16,13 @@
 //!
 //! # What is not here
 //!
-//! Scripts, fonts, frames and forms are not fetched (the engine cannot use
-//! them), so the embedder never asks for them. Images are: [`Loader::image`]. HTTP/2 is not implemented
+//! Scripts, frames and forms are not fetched (the engine cannot use them), so
+//! the embedder never asks for them. Images are ([`Loader::image`]) and web
+//! fonts are ([`Loader::font`]). HTTP/2 is not implemented
 //! (ADR 015). The loader is synchronous and in-process; the content/network
 //! process split is Phase 19.
 
+use px_websec::cors::{CredentialsMode, RequestMode};
 use px_websec::origin::{Origin as WOrigin, Url as WUrl};
 use px_websec::referrer::ReferrerPolicy;
 
@@ -40,6 +42,11 @@ pub const MAX_STYLESHEET_BYTES: usize = 2 << 20;
 /// The largest image body the loader hands back (compressed bytes; the decoder
 /// has its own pixel and memory caps).
 pub const MAX_IMAGE_BYTES: usize = 8 << 20;
+
+/// The largest web font body the loader hands back (the container as sent,
+/// compressed for WOFF/WOFF2; the font reader has its own caps on what it
+/// unwraps).
+pub const MAX_FONT_BYTES: usize = 8 << 20;
 
 /// What kind of picture a body is, by its first bytes (never by its name or by
 /// the server's say-so alone).
@@ -161,6 +168,16 @@ pub struct FetchedImage {
     /// What its first bytes say it is.
     pub kind: ImageKind,
     /// The undecoded bytes, at most [`MAX_IMAGE_BYTES`].
+    pub body: Vec<u8>,
+}
+
+/// A font body that passed the loader's checks.
+#[derive(Debug)]
+pub struct FetchedFont {
+    /// The URL after redirects.
+    pub url: String,
+    /// The undecoded container (sfnt, WOFF or WOFF2), at most
+    /// [`MAX_FONT_BYTES`]. Whether it is a font is the font reader's decision.
     pub body: Vec<u8>,
 }
 
@@ -296,6 +313,45 @@ impl Loader<'_> {
             return Err(LoadError::NoResponse);
         }
         Ok(body.to_vec())
+    }
+
+    /// Fetch a web font for the current document (`@font-face` `src: url()`).
+    /// `src` is resolved against the document's URL.
+    ///
+    /// A font load is a **CORS-mode** request (CSS Fonts 4 section 4.3, Fetch's
+    /// `font` destination): a cross-origin font is used only if the server
+    /// answers with an `Access-Control-Allow-Origin` that admits this document,
+    /// and the credentials mode is `same-origin`. It otherwise runs the same
+    /// secure path as every subresource: the partitioned client state, HSTS,
+    /// the document's CSP (`font-src`), mixed-content blocking, referrer policy
+    /// and the redirect rules. Only a 2xx body of at most [`MAX_FONT_BYTES`] is
+    /// returned.
+    pub fn font(&mut self, src: &str) -> Result<FetchedFont, LoadError> {
+        let doc = self.document.as_ref().ok_or(LoadError::BadAddress)?;
+        let target = resolve(&doc.url, src).ok_or(LoadError::BadAddress)?;
+        let mut ctx = FetchContext::top_level_document(&doc.url, Destination::Font)
+            .ok_or(LoadError::BadAddress)?;
+        ctx.mode = RequestMode::Cors;
+        ctx.credentials = CredentialsMode::SameOrigin;
+        if let Some(f) = &doc.facts {
+            ctx.csp = f.csp.clone();
+            ctx.document_referrer_policy = f.referrer_policy;
+        }
+        let mut out = self.fetcher.fetch(&ctx, &target);
+        let Some(resp) = out.response.take() else {
+            return Err(failure(out));
+        };
+        if !(200..300).contains(&resp.status) {
+            return Err(LoadError::NoResponse);
+        }
+        let body = resp.embedder_body();
+        if body.is_empty() || body.len() > MAX_FONT_BYTES {
+            return Err(LoadError::NoResponse);
+        }
+        Ok(FetchedFont {
+            url: resp.url.serialize(true),
+            body: body.to_vec(),
+        })
     }
 
     /// Fetch an image for the current document (`<img>`, `<source>`,
