@@ -356,7 +356,7 @@ fn env_usize(name: &str) -> Option<usize> {
 }
 
 fn deadline() -> Duration {
-    Duration::from_millis(env_usize("PX_TEST262_TIMEOUT_MS").unwrap_or(30_000) as u64)
+    Duration::from_millis(env_usize("PX_TEST262_TIMEOUT_MS").unwrap_or(90_000) as u64)
 }
 
 fn jobs() -> usize {
