@@ -360,7 +360,8 @@ fn script_order_the_default_engine_would_have_read_the_file() {
         .expect("string")
         .to_std_string_escaped();
     assert_eq!(
-        leaked, "true",
+        leaked,
+        "true",
         "the control cannot fail, so the test above proves nothing (import error: {error:?}, script: {:?})",
         import_script()
     );

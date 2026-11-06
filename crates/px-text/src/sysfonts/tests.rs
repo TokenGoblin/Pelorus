@@ -187,11 +187,7 @@ fn fake() -> FakeFs {
 fn scan_is_sorted_and_skips_non_fonts_and_symlinks() {
     let fs = fake();
     let s = SystemFonts::scan(&fs, &[PathBuf::from("/fonts")], &ScanLimits::default());
-    let got: Vec<_> = s
-        .faces()
-        .iter()
-        .map(|f| slashes(&f.path))
-        .collect();
+    let got: Vec<_> = s.faces().iter().map(|f| slashes(&f.path)).collect();
     // Sorted by name within a directory, files and directories interleaved by
     // name: "DejaVu.ttf", then directory a, then directory b.
     assert_eq!(
