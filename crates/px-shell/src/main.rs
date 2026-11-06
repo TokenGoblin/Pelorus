@@ -4,8 +4,8 @@
 //!
 //! Opens a window with the browser chrome and a real page below it. `PAGE` is a
 //! path to a local HTML file, `about:welcome`, `about:flex`, `about:long`, or an
-//! `https://` / `http://` address (fetched through `px-net`; stylesheets only,
-//! no script, images, fonts or forms); one tab each.
+//! `https://` / `http://` address (fetched through `px-net`: stylesheets, pictures and
+//! web fonts; no script or forms); one tab each.
 //!
 //! ```text
 //! --light            light theme
@@ -94,6 +94,9 @@ fn real_main(args: Args) -> Result<(), String> {
     // Real pages name families the bundled set does not have; draw them in the
     // bundled Noto Sans rather than the conformance fallback (Ahem squares).
     px_layout::text::set_web_fallback(true);
+    // serif, sans-serif, monospace, system-ui, cursive, fantasy: the installed
+    // faces if there are any, the bundled Noto Sans otherwise.
+    px_shell::fonts::install_system_generics();
     let theme = if args.light {
         Theme::Light
     } else {

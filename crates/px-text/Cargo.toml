@@ -25,3 +25,7 @@ icu_properties = "2.3.0"
 # 1,000 lines). Default features: `hardcoded-data` is its own bidi-class table
 # (~50 KB), which `BidiInfo::new` reads; `std`. Zero dependencies.
 unicode-bidi = "0.3.18"
+# Workspace crate, not a third-party one: zlib inflate for WOFF 1.0 tables. px-image
+# has no dependencies of its own and already carries the bounded, panic-free decoder
+# the PNG path uses; a second copy here would be a second thing to keep hostile-safe.
+px-image = { path = "../px-image", version = "0.0.0" }

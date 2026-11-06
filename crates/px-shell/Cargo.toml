@@ -11,6 +11,10 @@ publish.workspace = true
 # CLAUDE.md in this directory).
 [dependencies]
 px-brand = { path = "../px-brand", version = "0.0.0" }
+# System font discovery for the generic families (ADR 049): the scan is px-text's,
+# the one std::fs reader for it lives in the broker (it never follows a symlink
+# and caps every read).
+px-broker = { path = "../px-broker", version = "0.0.0" }
 px-css = { path = "../px-css", version = "0.0.0" }
 px-image = { path = "../px-image", version = "0.0.0" }
 px-display = { path = "../px-display", version = "0.0.0" }

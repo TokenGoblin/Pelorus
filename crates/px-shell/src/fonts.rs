@@ -2,10 +2,38 @@
 //! chrome's `TextShaper` and the rasterizer's `GlyphSource`. The page and the
 //! chrome use one registry, so one `GlyphSource` serves both. Advances only (no
 //! shaping) for the chrome, like the px-ui render baselines.
+//!
+//! # Web fonts (ADR 049)
+//!
+//! A page's `@font-face` rules are read from its stylesheets ([`crate::page::font_plan`]),
+//! each `url()` source is fetched ([`load_web`] through `px-net`, [`load_local`]
+//! next to a local page's file), unwrapped and validated by `px-text` (TTF,
+//! WOFF, WOFF2), registered in `px-layout::fontset` and handed to layout as
+//! [`Resources::fonts`]. Limits: at most [`px_layout::fontset::MAX_FACE_RULES`]
+//! rules, [`px_net::browse::MAX_FONT_BYTES`] per file, [`PHASE_BUDGET`] for the
+//! whole phase.
+//!
+//! **First paint is never blocked indefinitely and the outcome is deterministic.**
+//! The page is laid out once, after the font phase, so `font-display` reduces to
+//! "is the font in hand by then": a font that has not arrived within
+//! [`PHASE_BUDGET`] (the 3 s block period of CSS Fonts 4) is dropped and text
+//! uses the next family in its `font-family` list; `font-display: optional` is
+//! stricter, a font that took longer than [`OPTIONAL_BUDGET`] (100 ms, its block
+//! period) is dropped too. Nothing is swapped in later, so no page ever relays
+//! out on a late font. A failed, refused (CSP `font-src`, mixed content, CORS),
+//! oversized or invalid font is the same as an absent one.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use px_css::font_face::{FontDisplay, FontFaceDecl, FontSource};
+use px_layout::fontset::build_page_fonts;
 use px_paint::FontId;
 use px_paint::glyph::{PathCmd, Pt};
 use px_paint::raster::GlyphSource;
+use px_text::sysfonts::{GenericFamily, SystemFace, SystemFonts};
+
+use crate::page::Resources;
 use px_ui::text::{AU_PER_PX, FontMetrics, Shaped, ShapedGlyph, TextShaper};
 
 /// Glyph outlines from the registry layout shaped with. Layout's `FontId`
@@ -93,4 +121,107 @@ impl TextShaper for ChromeFont {
             descent: self.scale(d, size_px),
         }
     }
+}
+
+/// How long the whole font phase of one page load may take.
+pub const PHASE_BUDGET: Duration = Duration::from_secs(3);
+
+/// How long a `font-display: optional` font may take to arrive and still be used.
+pub const OPTIONAL_BUDGET: Duration = Duration::from_millis(100);
+
+/// Fetch the fonts of a web page through `loader` and attach them to `res`.
+pub fn load_web(loader: &mut px_net::browse::Loader<'_>, source: &str, res: &mut Resources) {
+    let decls = crate::page::font_plan(source, res);
+    if decls.is_empty() {
+        return;
+    }
+    let start = Instant::now();
+    let mut fetch = |decl: &FontFaceDecl, src: &FontSource| -> Option<Vec<u8>> {
+        if start.elapsed() > PHASE_BUDGET {
+            return None;
+        }
+        let t = Instant::now();
+        let body = loader.font(&src.url).ok()?.body;
+        let late = start.elapsed() > PHASE_BUDGET
+            || (decl.display == FontDisplay::Optional && t.elapsed() > OPTIONAL_BUDGET);
+        (!late).then_some(body)
+    };
+    res.fonts = Arc::new(build_page_fonts(&decls, &mut fetch));
+}
+
+/// Read the fonts of a local page from next to its file (at or below its
+/// directory, see `Resources::key`) and attach them to `res`.
+pub fn load_local(source: &str, res: &mut Resources) {
+    let decls = crate::page::font_plan(source, res);
+    if decls.is_empty() {
+        return;
+    }
+    let fonts = {
+        let res: &Resources = res;
+        let mut fetch = |_: &FontFaceDecl, src: &FontSource| -> Option<Vec<u8>> {
+            let key = res.key(&src.url)?;
+            let path = std::path::Path::new(&key);
+            let meta = std::fs::metadata(path).ok()?;
+            if !meta.is_file() || meta.len() > px_net::browse::MAX_FONT_BYTES as u64 {
+                return None;
+            }
+            std::fs::read(path).ok()
+        };
+        build_page_fonts(&decls, &mut fetch)
+    };
+    res.fonts = Arc::new(fonts);
+}
+
+/// The largest system font file read for a generic family.
+pub const MAX_SYSTEM_FONT_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The faces for the six generic families found in `sys`.
+///
+/// For each family, its preference list ([`GenericFamily::preferences`], or
+/// whatever `prefs` returns) is walked in order; the first name the machine has
+/// whose file `read` returns and that `px-text` accepts as a TrueType font wins.
+/// A name that is installed but unreadable, a collection or CFF-flavoured (not
+/// supported yet) is skipped in favour of the next. A pure function of its
+/// inputs, so two runs on one machine agree.
+pub fn resolve_generics(
+    sys: &SystemFonts,
+    read: &dyn Fn(&SystemFace) -> Option<Vec<u8>>,
+    prefs: &dyn Fn(GenericFamily) -> Vec<String>,
+) -> Vec<(GenericFamily, px_text::FontId)> {
+    use GenericFamily::{Cursive, Fantasy, Monospace, SansSerif, Serif, SystemUi};
+    let mut out = Vec::new();
+    for g in [Serif, SansSerif, Monospace, Cursive, Fantasy, SystemUi] {
+        for name in prefs(g) {
+            let Some(face) = sys.best_match(&name, 400, false) else {
+                continue;
+            };
+            if face.index != 0 {
+                continue;
+            }
+            let Some(bytes) = read(face) else { continue };
+            if let Ok(id) = px_layout::fontset::register_font(&bytes) {
+                out.push((g, id));
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Scan this machine's fonts and install the generic families (once, at
+/// startup). Returns how many of the six resolved; one that did not keeps its
+/// deterministic fallback, the bundled Noto Sans.
+pub fn install_system_generics() -> usize {
+    use px_text::sysfonts::DirReader;
+    let sys = px_broker::system_fonts::scan_system_fonts();
+    let reader = px_broker::system_fonts::FsReader;
+    let found = resolve_generics(
+        &sys,
+        &|f| reader.read_bytes(&f.path, MAX_SYSTEM_FONT_BYTES).ok(),
+        &|g| g.preferences().iter().map(|s| (*s).to_string()).collect(),
+    );
+    for (g, id) in &found {
+        px_layout::fontset::set_system_generic(*g, Some(*id));
+    }
+    found.len()
 }

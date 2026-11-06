@@ -26,6 +26,15 @@
 //! under `tests/render/` get pictures; vendored WPT pages render without, as they
 //! always have (see `render`).
 //!
+//! Fonts: each `@font-face` `src: url(@fonts/NAME)` of a page under
+//! `tests/render/` is read from `tests/fonts/NAME` (TTF, WOFF or WOFF2), through
+//! the same loader the browser uses (`px_layout::fontset::build_page_fonts`), so
+//! `font-family`, weight, style and `unicode-range` matching are the product's.
+//! A `<meta name="px-test-generics" content="serif=NAME;monospace=NAME">` in the
+//! page maps generic families to files in `tests/fonts` for that page only (the
+//! browser maps them to the machine's installed fonts, which a deterministic
+//! corpus must not read). Both are harness conventions; a browser ignores them.
+//!
 //! The canvas is 800 px wide and `max(600, document height)` tall, capped at 2400
 //! (ADR 033 (a)).
 
@@ -154,6 +163,46 @@ fn pictures(
     (set, sizes)
 }
 
+/// The fonts of a corpus page: its `@font-face` rules (files under `tests/fonts`
+/// named by `@fonts/NAME`) and its test generics.
+fn page_fonts(
+    root: &Path,
+    arena: &px_dom::Arena,
+    engine: &px_css::engine::StyleEngine,
+) -> px_layout::fontset::PageFonts {
+    let read = |name: &str| -> Option<Vec<u8>> {
+        if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') {
+            return None;
+        }
+        std::fs::read(root.join("tests/fonts").join(name)).ok()
+    };
+    let decls = engine.font_faces();
+    let mut fetch = |_: &px_css::font_face::FontFaceDecl, src: &px_css::font_face::FontSource| {
+        read(src.url.strip_prefix("https://corpus.invalid/@fonts/")?)
+    };
+    let mut fonts = px_layout::fontset::build_page_fonts(&decls, &mut fetch);
+    for id in arena.descendants(arena.document()) {
+        let Some(node) = arena.get(id) else { continue };
+        if node.element_name().is_none_or(|n| &*n.local != "meta")
+            || attr(node, "name") != Some("px-test-generics")
+        {
+            continue;
+        }
+        for pair in attr(node, "content").unwrap_or("").split(';') {
+            let Some((kw, file)) = pair.split_once('=') else {
+                continue;
+            };
+            if let Some(g) = px_text::sysfonts::GenericFamily::from_keyword(kw.trim())
+                && let Some(bytes) = read(file.trim())
+                && let Ok(fid) = px_layout::fontset::register_font(&bytes)
+            {
+                fonts.set_generic(g, fid);
+            }
+        }
+    }
+    fonts
+}
+
 fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, String> {
     let source = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
     let dom = px_dom::parse(&source);
@@ -172,6 +221,14 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     for css in stylesheets(root, path, &arena) {
         engine.add_author_stylesheet(&css, "https://corpus.invalid/page.css");
     }
+    // Fonts are read before the cascade is resolved and stay installed (on this
+    // thread) until the page is rasterized. Vendored WPT pages get none.
+    let own = path.starts_with(root.join("tests/render"));
+    let _fonts = px_layout::fontset::enter_page_fonts(std::sync::Arc::new(if own {
+        page_fonts(root, &arena, &engine)
+    } else {
+        Default::default()
+    }));
     let style_root = engine
         .style_document(&mut arena)
         .ok_or("style resolve failed")?;
@@ -179,7 +236,6 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     // image (`grid-abspos-staticpos-align-self-img-001`) tests the layout mode
     // around it, which does not place those boxes yet; it rendered picture-less
     // (test and reference alike) before pictures existed, and still does.
-    let own = path.starts_with(root.join("tests/render"));
     let (images, sizes) = if own {
         pictures(path, &arena, &style_root)
     } else {

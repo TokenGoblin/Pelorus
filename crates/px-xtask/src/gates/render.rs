@@ -38,7 +38,7 @@ use std::path::Path;
 pub mod px_png;
 
 /// The corpus may not shrink below this many pages (ADR 033 (a)).
-pub const PAGE_FLOOR: usize = 75;
+pub const PAGE_FLOOR: usize = 83;
 
 /// A rendered page with fewer ink pixels than this (pixels differing from its most
 /// common colour) is not a test. Used by the WPT selection rule: 20 x 20 pixels.

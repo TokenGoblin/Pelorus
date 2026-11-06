@@ -172,6 +172,7 @@ impl Location {
                     ..Resources::default()
                 };
                 crate::images::load_local(&source, &mut res);
+                crate::fonts::load_local(&source, &mut res);
                 Loaded {
                     source,
                     res,

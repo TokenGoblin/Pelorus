@@ -8,6 +8,7 @@
 pub mod block;
 pub mod flex;
 pub mod float;
+pub mod fontset;
 pub mod fragment;
 pub mod geom;
 pub mod grid;

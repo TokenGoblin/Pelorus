@@ -12,7 +12,11 @@
 //! # Font resolution policy (the documented fallback)
 //!
 //! The registry is `FontRegistry::with_bundled()`: Ahem (id 0) and the Noto faces
-//! (`tests/fonts`, ADR 036 (g)); **never system fonts**. A named family is looked
+//! (`tests/fonts`, ADR 036 (g)). Faces that arrive later (a page's `@font-face`
+//! fonts, and the installed faces the browser binary maps the generic families
+//! to) are never in the registry: they live in [`crate::fontset`] under ids from
+//! `WEB_BASE` up, and reach a style through its `chain` (ADR 049). Nothing reads
+//! the machine's fonts unless the embedder installs them. A named family is looked
 //! up in the registry (so `font-family: "Noto Sans"` selects it and `Ahem` selects
 //! Ahem), and an unknown family, a generic family (`serif`, `sans-serif`,
 //! `monospace`, ...) and the initial value all fall back to the first registered
@@ -77,9 +81,11 @@ use px_dom::NodeId;
 use px_text::bidi::{self, BaseDirection};
 use px_text::linebreak::{self, Kind, Opportunity, Options};
 use px_text::shaper::{Direction, HarfrustShaper, ShapeInput, Shaper, font_units_to_au};
+use px_text::sysfonts::GenericFamily;
 use px_text::{Font, FontId, FontRegistry};
 use style::properties::ComputedValues;
 
+use crate::fontset::{self, Cand, ChainId, FaceStyle};
 use crate::fragment::GlyphPos;
 use crate::geom::{au, px};
 
@@ -146,6 +152,97 @@ pub fn set_web_fallback(on: bool) {
     WEB_FALLBACK.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The generic family keyword as `px-text`'s enum, for the six this engine maps.
+fn generic_of(g: style::values::computed::font::GenericFontFamily) -> Option<GenericFamily> {
+    use style::values::computed::font::GenericFontFamily as G;
+    match g {
+        G::Serif => Some(GenericFamily::Serif),
+        G::SansSerif => Some(GenericFamily::SansSerif),
+        G::Monospace => Some(GenericFamily::Monospace),
+        G::Cursive => Some(GenericFamily::Cursive),
+        G::Fantasy => Some(GenericFamily::Fantasy),
+        G::SystemUi => Some(GenericFamily::SystemUi),
+        _ => None,
+    }
+}
+
+/// Resolve `style`'s `font-family` list to the primary face and the chain.
+///
+/// In list order, a family name is looked up first among the page's `@font-face`
+/// rules (weight and style matched, see [`crate::fontset`]), then in the bundled
+/// registry; a generic family is looked up in the page's overrides, then in the
+/// faces installed for this machine ([`fontset::set_system_generic`]). A name or
+/// generic nothing provides is skipped. Nothing found at all is the policy of
+/// [`resolve_font`] (Ahem, or Noto Sans with the web fallback on). The chain is
+/// left empty when it would hold exactly one bundled face, so a page that never
+/// uses a web font or an installed generic is laid out exactly as it was before
+/// either existed.
+fn resolve_family(style: &ComputedValues) -> (FontId, ChainId) {
+    use style::values::computed::font::SingleFontFamily as F;
+    let family = style.clone_font_family();
+    let weight = (style.clone_font_weight().value() * 1000.0).round() as i32;
+    let fstyle = {
+        use style::values::computed::font::FontStyle as S;
+        let st = style.clone_font_style();
+        if st == S::NORMAL {
+            FaceStyle::Normal
+        } else if st == S::ITALIC {
+            FaceStyle::Italic
+        } else {
+            FaceStyle::Oblique
+        }
+    };
+    let page = fontset::current_page_fonts();
+    let f = fonts();
+    let mut chain: Vec<Cand> = Vec::new();
+    for item in family.families.iter() {
+        match item {
+            F::FamilyName(n) => {
+                let name = n.name.to_string();
+                let web = page
+                    .as_ref()
+                    .map(|p| p.candidates(&name, weight, fstyle))
+                    .unwrap_or_default();
+                if !web.is_empty() {
+                    chain.extend(web);
+                } else if let Some(id) = f.registry.resolve(&name) {
+                    chain.push(Cand {
+                        font: id,
+                        ranges: None,
+                    });
+                }
+            }
+            F::Generic(g) => {
+                let id = generic_of(*g).and_then(|g| match &page {
+                    Some(p) => p.generic(g),
+                    None => fontset::system_generic(g),
+                });
+                if let Some(id) = id {
+                    chain.push(Cand {
+                        font: id,
+                        ranges: None,
+                    });
+                }
+            }
+        }
+    }
+    let font = chain
+        .first()
+        .map_or_else(|| resolve_font(std::iter::empty()), |c| c.font);
+    let plain = chain
+        .iter()
+        .all(|c| c.ranges.is_none() && c.font.0 < fontset::WEB_BASE)
+        && chain.len() <= 1;
+    (
+        font,
+        if plain {
+            ChainId::NONE
+        } else {
+            fontset::intern_chain(chain)
+        },
+    )
+}
+
 /// The value of `text-align`, with `start` and `end` already resolved against
 /// `direction` by [`TextStyle::of`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,8 +264,14 @@ pub enum Align {
 /// Plain `Copy` data, so it travels in the same places `font_size: Au` used to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextStyle {
-    /// The resolved font.
+    /// The resolved font: the first face of [`TextStyle::chain`], or the registry's
+    /// default when the chain is empty.
     pub font: FontId,
+    /// Every face the `font-family` list named, in order, with web fonts matched
+    /// against `font-weight` and `font-style` (see [`crate::fontset`]); per
+    /// character, layout takes the first that allows and maps it. Empty when the
+    /// list named only bundled faces (or none).
+    pub chain: ChainId,
     /// `font-size`.
     pub size: Au,
     /// The used `line-height`.
@@ -324,6 +427,7 @@ impl TextStyle {
     pub fn initial() -> Self {
         let mut s = TextStyle {
             font: FontId(0),
+            chain: ChainId::NONE,
             size: px(16),
             line_height: Au(0),
             breaking: Options::default(),
@@ -346,24 +450,14 @@ impl TextStyle {
         use style::values::generics::font::LineHeight;
 
         let size = Au::from(style.clone_font_size().computed_size());
-        let family = style.clone_font_family();
-        let names: Vec<String> = family
-            .families
-            .iter()
-            .filter_map(|f| match f {
-                style::values::computed::font::SingleFontFamily::FamilyName(n) => {
-                    Some(n.name.to_string())
-                }
-                style::values::computed::font::SingleFontFamily::Generic(_) => None,
-            })
-            .collect();
-        let font = resolve_font(names.iter().map(String::as_str));
+        let (font, chain) = resolve_family(style);
 
         let rtl = matches!(style.clone_direction(), Direction::Rtl);
         let plaintext = matches!(style.clone_unicode_bidi(), UnicodeBidi::Plaintext);
 
         let mut out = TextStyle {
             font,
+            chain,
             size,
             line_height: Au(0),
             breaking: breaking_options(style),
@@ -388,7 +482,7 @@ impl TextStyle {
     /// it has none. `vertical-align: middle` uses it.
     #[must_use]
     pub fn x_height(&self) -> Au {
-        let Some(font) = fonts().registry.get(self.font) else {
+        let Some(font) = font_of(self.font) else {
             return self.size / 2;
         };
         let top = font
@@ -411,7 +505,7 @@ impl TextStyle {
     /// The font's vertical metrics at this size.
     #[must_use]
     pub fn metrics(&self) -> Metrics {
-        let Some(font) = fonts().registry.get(self.font) else {
+        let Some(font) = font_of(self.font) else {
             return Metrics::default();
         };
         let upem = font.units_per_em();
@@ -662,18 +756,36 @@ fn script_of(text: &str) -> px_text::shaper::Script {
     Script::COMMON
 }
 
+/// Whether the face `id` maps `c` (bundled or web).
+fn covers(id: FontId, c: char) -> bool {
+    font_of(id).is_some_and(|f| f.glyph_index(c).is_some())
+}
+
+/// Characters that stay in the current face when it maps them: they carry no
+/// script of their own, and splitting a run at every space would only cost
+/// shaping context.
+fn is_weak(c: char) -> bool {
+    c.is_whitespace() || c.is_ascii_punctuation() || c.is_ascii_digit()
+}
+
 /// Split `text` into maximal ranges drawn by one face (per-character fallback).
 ///
-/// The rule, pure and deterministic: start in `primary`; a character the
-/// current face maps stays in it (so spaces, digits and marks do not fragment a
-/// run); otherwise `primary` if it maps the character; otherwise the registry's
-/// `fallback_for(c, &[])` (Noto Sans first, then Hebrew, Arabic, Devanagari);
-/// otherwise `primary` again, which draws `.notdef`. **Ahem is exempt**: it is
-/// the test font, WPT names it explicitly and expects its own box for every
-/// character, so a primary of Ahem is never split.
+/// The rule, pure and deterministic. With no chain (bundled faces only): start in
+/// `primary`; a character the current face maps stays in it (so spaces, digits
+/// and marks do not fragment a run); otherwise `primary` if it maps the
+/// character; otherwise the registry's `fallback_for(c, &[])` (Noto Sans first,
+/// then Hebrew, Arabic, Devanagari); otherwise `primary` again, which draws
+/// `.notdef`. With a chain (web fonts, installed generics): a weak character
+/// (space, ASCII punctuation, digit) stays in the current face when that face
+/// maps it and a candidate for it allows it by `unicode-range`; any other
+/// character goes to the first candidate that allows and maps it, and failing
+/// that to the same fallback as above. **Ahem is exempt**: it is the test font,
+/// WPT names it explicitly and expects its own box for every character, so a
+/// primary of Ahem is never split.
 fn split_by_font(
     registry: &FontRegistry,
     primary: FontId,
+    chain: &[Cand],
     text: &str,
 ) -> Vec<(std::ops::Range<usize>, FontId)> {
     let mut out: Vec<(std::ops::Range<usize>, FontId)> = Vec::new();
@@ -681,10 +793,25 @@ fn split_by_font(
         out.push((0..text.len(), primary));
         return out;
     }
+    let allows =
+        |id: FontId, c: char| covers(id, c) && chain.iter().any(|k| k.font == id && k.allows(c));
     let mut cur = primary;
     for (i, c) in text.char_indices() {
-        if !registry.covers(cur, c) {
-            cur = if registry.covers(primary, c) {
+        let stay = if chain.is_empty() {
+            covers(cur, c)
+        } else {
+            is_weak(c) && (allows(cur, c) || (cur == primary && covers(cur, c)))
+        };
+        if !stay {
+            cur = if chain.is_empty() {
+                if covers(primary, c) {
+                    primary
+                } else {
+                    registry.fallback_for(c, &[]).unwrap_or(primary)
+                }
+            } else if let Some(k) = chain.iter().find(|k| k.allows(c) && covers(k.font, c)) {
+                k.font
+            } else if covers(primary, c) {
                 primary
             } else {
                 registry.fallback_for(c, &[]).unwrap_or(primary)
@@ -710,7 +837,8 @@ fn shape_piece(
 ) -> Option<(std::ops::Range<usize>, Vec<Glyph>)> {
     let f = fonts();
     // The primary face must exist; fallback faces are looked up per segment.
-    f.registry.get(style.font)?;
+    font_of(style.font)?;
+    let chain = fontset::chain(style.chain);
     let size = style.size.0;
     let slice = text.get(piece.clone())?;
     let shaped_text: std::borrow::Cow<'_, str> = if rtl {
@@ -734,16 +862,11 @@ fn shape_piece(
     let mut segments: Vec<Vec<Glyph>> = Vec::new();
     // One shaping call per (directional run, element, face): per-character
     // fallback splits the piece where the face changes.
-    for (seg, seg_font) in split_by_font(&f.registry, style.font, &shaped_text) {
+    for (seg, seg_font) in split_by_font(&f.registry, style.font, &chain, &shaped_text) {
         let Some(seg_text) = shaped_text.get(seg.clone()) else {
             continue;
         };
-        let (Some(sfont), Some(sshaper)) = (
-            f.registry.get(seg_font),
-            f.shapers
-                .get(usize::try_from(seg_font.0).unwrap_or(usize::MAX))
-                .and_then(Option::as_ref),
-        ) else {
+        let (Some(sfont), Some(sshaper)) = (font_of(seg_font), shaper_of(seg_font)) else {
             continue;
         };
         let upem = sfont.units_per_em();
@@ -845,8 +968,7 @@ impl<'a> Prepared<'a> {
         edges: &[Edge],
         atomics: &[Atomic],
     ) -> Self {
-        let f = fonts();
-        let font = f.registry.get(style.font);
+        let font = font_of(style.font);
 
         let needs_bidi = style.rtl || style.plaintext || !text.is_ascii();
         let analysis = needs_bidi.then(|| {
@@ -1441,7 +1563,21 @@ pub fn intrinsic_widths(text: &str, style: TextStyle) -> (Au, Au) {
 /// The font the style resolved to, for fragments that record it.
 #[must_use]
 pub fn font_of(font: FontId) -> Option<&'static Font> {
+    if font.0 >= fontset::WEB_BASE {
+        return fontset::web_face(font).map(|f| f.font);
+    }
     fonts().registry.get(font)
+}
+
+/// The shaper for `font` (bundled or web), if it could be built.
+fn shaper_of(font: FontId) -> Option<&'static HarfrustShaper> {
+    if font.0 >= fontset::WEB_BASE {
+        return fontset::web_face(font).and_then(|f| f.shaper);
+    }
+    fonts()
+        .shapers
+        .get(usize::try_from(font.0).unwrap_or(usize::MAX))
+        .and_then(Option::as_ref)
 }
 
 #[cfg(test)]
@@ -1502,7 +1638,7 @@ mod tests {
         let r = &fonts().registry;
         let sans = resolve_font(["Noto Sans"]);
         let hebrew = resolve_font(["Noto Sans Hebrew"]);
-        let segs = split_by_font(r, sans, "ab שלום cd");
+        let segs = split_by_font(r, sans, &[], "ab שלום cd");
         // Latin in Noto Sans, the Hebrew word (and the space, which the Hebrew face
         // also maps, if it does) in the Hebrew face, Latin again.
         let faces: Vec<FontId> = segs.iter().map(|(_, f)| *f).collect();
@@ -1518,7 +1654,7 @@ mod tests {
         assert_eq!(at, "ab שלום cd".len());
         // Ahem is never split.
         let ahem_id = FontId(0);
-        assert_eq!(split_by_font(r, ahem_id, "ab שלום").len(), 1);
+        assert_eq!(split_by_font(r, ahem_id, &[], "ab שלום").len(), 1);
     }
 
     #[test]

@@ -1529,6 +1529,7 @@ name = "px-shell"
 version = "0.0.0"
 dependencies = [
  "px-brand",
+ "px-broker",
  "px-css",
  "px-display",
  "px-dom",
@@ -1556,6 +1557,7 @@ dependencies = [
  "harfrust",
  "icu_properties",
  "icu_segmenter",
+ "px-image",
  "skrifa",
  "unicode-bidi",
 ]
