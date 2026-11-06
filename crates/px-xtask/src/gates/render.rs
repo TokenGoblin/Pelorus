@@ -780,17 +780,17 @@ mod tests {
     }
 
     #[test]
-    fn floor_is_pinned_at_75() {
-        let (p, s) = many(75);
+    fn floor_is_pinned_at_83() {
+        let (p, s) = many(83);
         assert!(check_manifest(&p, &s, false).is_empty());
-        let (p, s) = many(74);
+        let (p, s) = many(82);
         let f = check_manifest(&p, &s, false);
-        assert_eq!(f, ["the corpus has 74 pages, the pinned floor is 75"]);
+        assert_eq!(f, ["the corpus has 82 pages, the pinned floor is 83"]);
     }
 
     #[test]
     fn missing_baseline_and_orphan_baseline_fail_but_bless_waives_them() {
-        let (p, mut s) = many(75);
+        let (p, mut s) = many(83);
         s.remove(3);
         s.push("ghost".into());
         let f = check_manifest(&p, &s, false);
@@ -802,7 +802,7 @@ mod tests {
 
     #[test]
     fn duplicate_and_bad_ids_fail() {
-        let (mut p, s) = many(75);
+        let (mut p, s) = many(83);
         p[1].id = "p0".into();
         p[2].id = "Bad Id".into();
         let f = check_manifest(&p, &s, true);

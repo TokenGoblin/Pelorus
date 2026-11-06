@@ -363,10 +363,7 @@ pub fn build_page_fonts(
         if let Some(font) = found {
             out.faces.push(PageFace {
                 family: d.family.to_ascii_lowercase(),
-                weight: (
-                    (lo * 1000.0).round() as i32,
-                    (hi * 1000.0).round() as i32,
-                ),
+                weight: ((lo * 1000.0).round() as i32, (hi * 1000.0).round() as i32),
                 style: d.style,
                 ranges: d.ranges.clone(),
                 font,
