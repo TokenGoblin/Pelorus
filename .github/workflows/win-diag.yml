@@ -1,0 +1,19 @@
+# TEMPORARY diagnostic for ci/windows-green; deleted before the branch is done.
+name: win-diag
+on:
+  push:
+    branches: [ci/windows-green]
+jobs:
+  diag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build content binary
+        shell: bash
+        run: cargo build --locked -p px-content
+      - name: Diagnose
+        shell: bash
+        run: |
+          export PX_DIAG_CONTENT="$(pwd)/target/debug/px-content.exe"
+          ls -la "$PX_DIAG_CONTENT"
+          cargo test --locked -p px-sandbox windows_diag_content_start -- --nocapture --test-threads=1

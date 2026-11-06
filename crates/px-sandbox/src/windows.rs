@@ -777,6 +777,19 @@ pub(crate) struct Spawned {
 /// Returns only after the parent has read the job's limits and the child's
 /// integrity level back from the OS.
 pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, PolicyError> {
+    spawn_with_profile(executable, policy, MITIGATIONS, true)
+}
+
+/// [`spawn`] with the mitigation word and the integrity lowering as parameters,
+/// so that a test can ask which part of the profile stops a given binary from
+/// starting. The shipping path passes [`MITIGATIONS`] and `true`; the readback
+/// of the integrity level is skipped only when lowering was not asked for.
+fn spawn_with_profile(
+    executable: &Path,
+    policy: &Policy,
+    mitigations: u64,
+    lower: bool,
+) -> Result<Spawned, PolicyError> {
     let token = open_own_token().ok_or_else(|| {
         failed(
             Rung::RestrictedToken,
@@ -784,7 +797,9 @@ pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, Polic
         )
     })?;
     let restricted = restrict(&token)?;
-    lower_integrity(&restricted)?;
+    if lower {
+        lower_integrity(&restricted)?;
+    }
     let job = create_job().ok_or_else(|| {
         failed(
             Rung::JobObject,
@@ -813,7 +828,6 @@ pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, Polic
 
     // Read by the OS at creation, like the arrays above: they must outlive the
     // call, and they do, being locals of this function.
-    let mitigations: u64 = MITIGATIONS;
     let child_policy: u32 = CHILD_PROCESS_RESTRICTED;
 
     let mut attributes = AttributeList::with_capacity_for(4)?;
@@ -918,7 +932,7 @@ pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, Polic
     // wrong the child is ended before it can be used (invariant 8); dropping it
     // would also end it, via kill-on-close, but a kill that is explicit cannot
     // be lost by a later edit to Drop.
-    if let Err(error) = child.verify(policy) {
+    if let Err(error) = child.verify(policy, lower) {
         let _ = child.kill();
         return Err(error);
     }
@@ -945,7 +959,7 @@ impl Child {
     /// Confirm, from the OS's own account, that this child is in its job, the
     /// job carries the limits asked for, and the child's token is low
     /// integrity.
-    fn verify(&self, policy: &Policy) -> Result<(), PolicyError> {
+    fn verify(&self, policy: &Policy, lowered: bool) -> Result<(), PolicyError> {
         let mut inside: i32 = 0;
         // SAFETY: `self.process` and `self.job` are live handles owned by this
         // struct; `inside` is live and aligned and written on success.
@@ -957,7 +971,7 @@ impl Child {
             ));
         }
         verify_limits(&self.job, policy.memory)?;
-        if integrity_rid(&self.process)? != LOW_INTEGRITY_RID {
+        if lowered && integrity_rid(&self.process)? != LOW_INTEGRITY_RID {
             return Err(failed(
                 Rung::LowIntegrity,
                 "the child's token is not at low integrity",
@@ -1346,5 +1360,42 @@ mod tests {
             assert_ne!(MITIGATIONS & (1u64 << bit), 0, "{name} (bit {bit})");
         }
         assert_eq!(MITIGATIONS.count_ones(), 12);
+    }
+
+    /// Diagnostic, run only when `PX_DIAG_CONTENT` names a content binary:
+    /// reports the exit code the binary dies with under the profile and under
+    /// each reduction of it. Prints; asserts nothing.
+    #[test]
+    fn windows_diag_content_start() {
+        let Some(path) = std::env::var_os("PX_DIAG_CONTENT") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let mut runs: Vec<(String, u64, bool, Policy)> = vec![
+            ("full".into(), MITIGATIONS, true, Policy::content()),
+            ("no-mitigations".into(), 0, true, Policy::content()),
+            ("no-low".into(), MITIGATIONS, false, Policy::content()),
+            ("nothing".into(), 0, false, Policy::content()),
+        ];
+        for bit in [0u32, 1, 2, 12, 16, 20, 24, 28, 32, 48, 52, 56] {
+            runs.push((
+                format!("without-bit-{bit}"),
+                MITIGATIONS & !(1u64 << bit),
+                true,
+                Policy::content(),
+            ));
+        }
+        for (name, mitigations, lower, policy) in runs {
+            match spawn_with_profile(&path, &policy, mitigations, lower) {
+                Err(error) => eprintln!("DIAG {name}: spawn refused: {error}"),
+                Ok(mut spawned) => {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    let state = spawned.child.try_wait();
+                    eprintln!("DIAG {name}: after 1.5s {state:x?}");
+                    let _ = spawned.child.kill();
+                    let _ = spawned.child.wait();
+                }
+            }
+        }
     }
 }

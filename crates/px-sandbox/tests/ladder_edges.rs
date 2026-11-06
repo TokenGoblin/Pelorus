@@ -7,13 +7,18 @@
 
 use px_sandbox::{Capabilities, FLOOR, Refusal, Restriction, Rung, admit, detect};
 
-const ALL_RUNGS: [Rung; 6] = [
+/// Every rung the crate defines. A rung missing from this list is a rung the
+/// floor tests below cannot withhold, so a floor rung added later (as
+/// `LowIntegrity` was, ADR 048) would fail on that platform's CI only.
+const ALL_RUNGS: [Rung; 8] = [
     Rung::NoNewPrivs,
     Rung::Seccomp,
     Rung::Landlock,
     Rung::UserNamespaces,
     Rung::RestrictedToken,
     Rung::JobObject,
+    Rung::LowIntegrity,
+    Rung::MemoryCap,
 ];
 
 const ALL_RESTRICTIONS: [Restriction; 5] = [
@@ -45,13 +50,17 @@ fn sandbox_floor_is_never_empty_and_has_no_duplicates() {
 #[test]
 fn sandbox_floor_names_the_documented_rungs_for_this_platform() {
     // ADR 007 / build-spec: Linux needs no_new_privs + seccomp, Windows needs a
-    // restricted token + a job object. Landlock is above the floor on Linux.
+    // restricted token + a job object + a low integrity level (ADR 048).
+    // Landlock is above the floor on Linux.
     if cfg!(target_os = "linux") {
         assert_eq!(FLOOR, &[Rung::NoNewPrivs, Rung::Seccomp]);
         assert!(!FLOOR.contains(&Rung::Landlock));
         assert!(!FLOOR.contains(&Rung::UserNamespaces));
     } else if cfg!(target_os = "windows") {
-        assert_eq!(FLOOR, &[Rung::RestrictedToken, Rung::JobObject]);
+        assert_eq!(
+            FLOOR,
+            &[Rung::RestrictedToken, Rung::JobObject, Rung::LowIntegrity]
+        );
     }
 }
 
