@@ -93,7 +93,11 @@ pub fn suites_for(windows: bool) -> Vec<Suite> {
         out.push(*suite);
         // Phase 17 follows the memory cap in the table.
         if suite.0 == "memory-cap" {
-            out.push(if windows { ESCAPE_WINDOWS } else { ESCAPE_LINUX });
+            out.push(if windows {
+                ESCAPE_WINDOWS
+            } else {
+                ESCAPE_LINUX
+            });
         }
     }
     out
@@ -370,7 +374,11 @@ mod tests {
         let linux = suites_for(false);
         let windows = suites_for(true);
         let names = |v: &[Suite]| v.iter().map(|s| s.0).collect::<Vec<_>>();
-        assert_eq!(names(&linux), names(&windows), "an item may be replaced, never dropped");
+        assert_eq!(
+            names(&linux),
+            names(&windows),
+            "an item may be replaced, never dropped"
+        );
         assert!(names(&linux).contains(&"escape-attempts"));
         let differing: Vec<_> = linux
             .iter()

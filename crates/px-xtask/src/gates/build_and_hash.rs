@@ -76,6 +76,29 @@ pub fn remap_flags(dest: &Path, cargo_home: &Path, home: &Path, host: &str) -> S
 }
 
 /// `${CARGO_HOME:-$HOME/.cargo}` and `$HOME`, from the given lookups.
+/// The same three prefixes for C and assembly compiled by build scripts.
+///
+/// `RUSTFLAGS` reaches `rustc` only. `ring` (linked by the shell through
+/// rustls) assembles its `.S` files with the system C compiler through the `cc`
+/// crate, which honours `CFLAGS`; without a map those objects carry the absolute
+/// `CARGO_HOME` path of the checkout's registry source in their debug
+/// information, so builds under two different homes differ in `px-shell`
+/// alone, the one artifact that links `ring`. `-ffile-prefix-map` is the GNU and
+/// LLVM spelling (implies the debug map and is passed on to the assembler);
+/// MSVC's `cl` has no such flag, and its Windows builds do not show the
+/// problem, so `None` there rather than a flag the compiler would reject.
+pub fn c_flags(dest: &Path, cargo_home: &Path, home: &Path, host: &str) -> Option<String> {
+    if host.ends_with("windows-msvc") {
+        return None;
+    }
+    Some(format!(
+        "-ffile-prefix-map={}=/src -ffile-prefix-map={}=/cargo -ffile-prefix-map={}=/home",
+        dest.display(),
+        cargo_home.display(),
+        home.display()
+    ))
+}
+
 pub fn homes(
     cargo_home: Option<String>,
     home: Option<String>,
@@ -243,6 +266,13 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
     // check that quietly used a different generator than the one it claims to
     // have pinned would be worse than no check, because it would still print two
     // matching hashes.
+    let c_flags = c_flags(
+        &dest,
+        &cargo_home,
+        &home,
+        host_triple(&host).unwrap_or_default(),
+    );
+
     let python = match pybuild::ensure_pinned_python(&dest) {
         Ok(p) => p,
         Err(e) => {
@@ -275,6 +305,11 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
     // stylo's build.rs reads PYTHON3 and falls back to python3/python.exe. The
     // export is the whole point: without it the fallback silently wins and the
     // pin is decorative.
+    if let Some(c) = c_flags {
+        // Appended to, not replacing, whatever the environment already asks for.
+        let existing = std::env::var("CFLAGS").unwrap_or_default();
+        build.env("CFLAGS", format!("{existing} {c}").trim());
+    }
     pybuild::apply_pin(&mut build, &python);
     match build.status() {
         Ok(s) if s.success() => {}
@@ -330,6 +365,17 @@ mod tests {
         let vv = "rustc 1.98.1 (x 2026-09-01)\nbinary: rustc\nhost: x86_64-pc-windows-msvc\nrelease: 1.98.1\n";
         assert_eq!(host_triple(vv), Some("x86_64-pc-windows-msvc"));
         assert_eq!(host_triple("nothing"), None);
+    }
+
+    #[test]
+    fn c_flags_map_the_same_three_prefixes_except_for_msvc() {
+        let (d, c, h) = (Path::new("/b"), Path::new("/h/.cargo"), Path::new("/h"));
+        let gnu = c_flags(d, c, h, "x86_64-unknown-linux-gnu").unwrap_or_default();
+        assert_eq!(
+            gnu,
+            "-ffile-prefix-map=/b=/src -ffile-prefix-map=/h/.cargo=/cargo -ffile-prefix-map=/h=/home"
+        );
+        assert_eq!(c_flags(d, c, h, "x86_64-pc-windows-msvc"), None);
     }
 
     #[test]
