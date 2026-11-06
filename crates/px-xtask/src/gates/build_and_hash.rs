@@ -49,6 +49,15 @@ pub fn host_triple(rustc_vv: &str) -> Option<&str> {
 
 /// The RUSTFLAGS for a build.
 ///
+/// **Order matters: when several prefixes match a path, the last one wins**
+/// (rustc and GCC agree). The checkout and `CARGO_HOME` can live inside `HOME`
+/// (build B on Linux is `/home/builder2/work/build-b` under `HOME=/home/
+/// builder2`), so `HOME` goes first and the narrower prefixes after it;
+/// otherwise a path inside the checkout was rewritten by the `HOME` rule to
+/// `/home/work/build-b/...` in one build and by the `/src` rule in the other,
+/// which is the `px-shell` hash difference this gate reported (stylo's
+/// generated `properties.rs` path is embedded in that binary).
+///
 /// Invariant 7: the binary must not contain the path it was built at or the name
 /// of the user who built it. Cargo's `trim-paths` profile option is still
 /// unstable, so remap explicitly here, where all three paths are known. Both
@@ -64,10 +73,10 @@ pub fn host_triple(rustc_vv: &str) -> Option<&str> {
 /// and LLVM linkers are already deterministic.
 pub fn remap_flags(dest: &Path, cargo_home: &Path, home: &Path, host: &str) -> String {
     let mut f = format!(
-        "--remap-path-prefix={}=/src --remap-path-prefix={}=/cargo --remap-path-prefix={}=/home",
-        dest.display(),
+        "--remap-path-prefix={}=/home --remap-path-prefix={}=/cargo --remap-path-prefix={}=/src",
+        home.display(),
         cargo_home.display(),
-        home.display()
+        dest.display()
     );
     if host.ends_with("windows-msvc") {
         f.push_str(" -C link-arg=/Brepro");
@@ -92,10 +101,10 @@ pub fn c_flags(dest: &Path, cargo_home: &Path, home: &Path, host: &str) -> Optio
         return None;
     }
     Some(format!(
-        "-ffile-prefix-map={}=/src -ffile-prefix-map={}=/cargo -ffile-prefix-map={}=/home",
-        dest.display(),
+        "-ffile-prefix-map={}=/home -ffile-prefix-map={}=/cargo -ffile-prefix-map={}=/src",
+        home.display(),
         cargo_home.display(),
-        home.display()
+        dest.display()
     ))
 }
 
@@ -373,7 +382,7 @@ mod tests {
         let gnu = c_flags(d, c, h, "x86_64-unknown-linux-gnu").unwrap_or_default();
         assert_eq!(
             gnu,
-            "-ffile-prefix-map=/b=/src -ffile-prefix-map=/h/.cargo=/cargo -ffile-prefix-map=/h=/home"
+            "-ffile-prefix-map=/h=/home -ffile-prefix-map=/h/.cargo=/cargo -ffile-prefix-map=/b=/src"
         );
         assert_eq!(c_flags(d, c, h, "x86_64-pc-windows-msvc"), None);
     }
@@ -388,8 +397,50 @@ mod tests {
         );
         assert_eq!(
             f,
-            "--remap-path-prefix=/tmp/short=/src --remap-path-prefix=/h/.cargo=/cargo --remap-path-prefix=/h=/home"
+            "--remap-path-prefix=/h=/home --remap-path-prefix=/h/.cargo=/cargo --remap-path-prefix=/tmp/short=/src"
         );
+    }
+
+    /// rustc applies the LAST matching `--remap-path-prefix`. Both reproducible
+    /// builds must map a file in their checkout to the same text even when the
+    /// checkout (and `CARGO_HOME`) sit inside `HOME`, as build B does on Linux.
+    #[test]
+    fn a_checkout_inside_home_maps_to_src_not_home() {
+        fn remap(flags: &str, path: &str) -> String {
+            let rules: Vec<(&str, &str)> = flags
+                .split_whitespace()
+                .filter_map(|w| w.strip_prefix("--remap-path-prefix="))
+                .filter_map(|r| r.split_once('='))
+                .collect();
+            for (from, to) in rules.iter().rev() {
+                if let Some(rest) = path.strip_prefix(from) {
+                    return format!("{to}{rest}");
+                }
+            }
+            path.to_string()
+        }
+        let a = remap_flags(
+            Path::new("/runner/tmp/short"),
+            Path::new("/runner/tmp/home-a/.cargo"),
+            Path::new("/runner/tmp/home-a"),
+            "x86_64-unknown-linux-gnu",
+        );
+        let b = remap_flags(
+            Path::new("/home/builder2/work/build-b"),
+            Path::new("/home/builder2/.cargo"),
+            Path::new("/home/builder2"),
+            "x86_64-unknown-linux-gnu",
+        );
+        let in_a = "/runner/tmp/short/target/release/build/stylo/out/properties.rs";
+        let in_b = "/home/builder2/work/build-b/target/release/build/stylo/out/properties.rs";
+        assert_eq!(
+            remap(&a, in_a),
+            "/src/target/release/build/stylo/out/properties.rs"
+        );
+        assert_eq!(remap(&b, in_b), remap(&a, in_a));
+        let reg_a = "/runner/tmp/home-a/.cargo/registry/src/x/ring/a.S";
+        let reg_b = "/home/builder2/.cargo/registry/src/x/ring/a.S";
+        assert_eq!(remap(&a, reg_a), remap(&b, reg_b));
     }
 
     #[test]
