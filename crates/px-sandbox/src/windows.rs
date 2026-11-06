@@ -1480,6 +1480,10 @@ mod tests {
                         std::thread::sleep(std::time::Duration::from_millis(1200));
                         let state = spawned.child.try_wait();
                         eprintln!("DIAG {} {name}: after 1.2s {state:x?}", path.display());
+                        // SAFETY: a live process handle owned by `spawned`.
+                        // Needed because a job nobody is in terminates
+                        // "successfully" without ending the child.
+                        let _ = unsafe { TerminateProcess(spawned.child.process.raw(), 1) };
                         let _ = spawned.child.kill();
                         let _ = spawned.child.wait();
                     }
