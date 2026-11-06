@@ -1,0 +1,7 @@
+brotli-dictionary.bin: the static dictionary of RFC 7932 Appendix A, 122,784
+bytes, SHA-256 20e42eb1b511c21806d4d227d07e5dd06877d8ce7b3a817f378f313653f35c70.
+It is data defined by the RFC (the same bytes every Brotli implementation embeds);
+this copy was extracted from the brotli-decompressor 5.0.3 source (MIT) and its
+digest checked against the published one. brotli.rs pins the size and a prefix in
+a unit test. src/brotli_tables.rs holds the RFC's transform table and the two
+context lookups, extracted the same way.

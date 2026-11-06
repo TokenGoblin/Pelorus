@@ -188,8 +188,16 @@ fn generic_families_resolve_to_distinct_faces_from_the_system_set() {
         of(GenericFamily::SansSerif).unwrap(),
     );
     assert!(serif != mono && mono != sans && serif != sans, "distinct");
-    assert_eq!(of(GenericFamily::SystemUi), Some(sans), "same file, same id");
-    assert_eq!(of(GenericFamily::Cursive), None, "nothing installed: no entry");
+    assert_eq!(
+        of(GenericFamily::SystemUi),
+        Some(sans),
+        "same file, same id"
+    );
+    assert_eq!(
+        of(GenericFamily::Cursive),
+        None,
+        "nothing installed: no entry"
+    );
     // Deterministic.
     assert_eq!(got, px_shell::fonts::resolve_generics(&sys, &read, &prefs));
     // And the faces really are the three fixtures.
@@ -219,7 +227,11 @@ fn a_page_override_beats_the_installed_generic_and_unmapped_ones_fall_back() {
             &res,
         )
     };
-    assert_eq!(w("sans-serif, 'Noto Sans'"), 4 * 10, "mono advance 500 at 20px");
+    assert_eq!(
+        w("sans-serif, 'Noto Sans'"),
+        4 * 10,
+        "mono advance 500 at 20px"
+    );
     let fallback = w("serif, 'Noto Sans'");
     assert_eq!(fallback, w("'Noto Sans'"), "unmapped generic is skipped");
 }
@@ -325,7 +337,8 @@ mod web {
     #[test]
     fn csp_font_src_and_the_byte_cap_stop_a_font() {
         let woff2 = fixture("PxText-Regular.woff2");
-        let page = "<!doctype html><style>@font-face{font-family:f;src:url(/f.woff2)}</style><body>x";
+        let page =
+            "<!doctype html><style>@font-face{font-family:f;src:url(/f.woff2)}</style><body>x";
         let (addr, seen) = serve(vec![
             route(
                 "/p.html",

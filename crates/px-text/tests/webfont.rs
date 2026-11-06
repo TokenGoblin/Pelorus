@@ -188,7 +188,7 @@ fn a_zlib_bomb_in_a_woff_table_stops_at_the_declared_size() {
             cur = 0;
         }
     }
-    if bits.len() % 8 != 0 {
+    if !bits.len().is_multiple_of(8) {
         z.push(cur);
     }
     z.extend_from_slice(&[0, 0, 0, 0]); // Adler-32 (never reached)

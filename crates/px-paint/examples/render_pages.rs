@@ -177,8 +177,7 @@ fn page_fonts(
         std::fs::read(root.join("tests/fonts").join(name)).ok()
     };
     let decls = engine.font_faces();
-    let mut fetch = |_: &px_css::font_face::FontFaceDecl,
-                     src: &px_css::font_face::FontSource| {
+    let mut fetch = |_: &px_css::font_face::FontFaceDecl, src: &px_css::font_face::FontSource| {
         read(src.url.strip_prefix("https://corpus.invalid/@fonts/")?)
     };
     let mut fonts = px_layout::fontset::build_page_fonts(&decls, &mut fetch);

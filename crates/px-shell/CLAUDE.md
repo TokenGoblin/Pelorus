@@ -27,8 +27,13 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   `Loader::image`, a `Destination::Image` fetch on the same secure path, and are
   decoded by `px-image` (PNG/APNG, GIF, JPEG, BMP, ICO; first frame only; WebP
   and SVG are refused). A picture that fails for any reason is skipped and the
-  page shows its `alt` text. Scripts, fonts, frames and forms are never
-  requested and never run. Nothing persists:
+  page shows its `alt` text. Web fonts (`@font-face` `url()` sources) are fetched
+  too, by `Loader::font`: a CORS-mode request, so a cross-origin font needs
+  `Access-Control-Allow-Origin`; at most 32 rules, 8 MiB each, a 3 s phase budget
+  and a 100 ms one for `font-display: optional`; unwrapped (TTF, WOFF, WOFF2) and
+  validated by `px-text`; a font that fails or arrives late is absent and text
+  falls to the next family (ADR 049). `local()` sources are never read. Scripts,
+  frames and forms are never requested and never run. Nothing persists:
   the cookie jar lives for one page load, there is no cache and no history store.
   A local page cannot link out to the web. Any failure shows `px-pages`' error
   page. The loader is synchronous on the UI thread, in-process; the content /
@@ -44,6 +49,10 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   is simply absent from the picture.
 - Page-controlled text (titles) reaches the chrome only through `px_ui::tabs::Tab`,
   which sanitises it. The page never draws a pixel of chrome.
-- Fonts are the bundled set through `px-layout` (never system fonts); the chrome
-  and the page share them.
+- Fonts: the bundled set through `px-layout` for the chrome and as the page's
+  fallback, plus the page's own web fonts, plus the machine's installed faces for
+  the six generic families only (`fonts::install_system_generics`, once at
+  startup, in the browser binary; never in tests, which map generics per page).
+  A page cannot probe for an installed font by name (`local()` is ignored); it
+  can only see what a generic keyword resolves to.
 - 100% Rust, workspace-path dependencies only.
