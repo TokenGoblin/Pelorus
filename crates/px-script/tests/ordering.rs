@@ -322,7 +322,10 @@ fn import_script() -> String {
     // unless doubled. Left alone they name a different file, the control
     // below cannot read it, and the test above would pass for no reason.
     let path = path.replace('\\', "\\\\").replace('\'', "\\'");
-    format!("var leaked = false; import('{path}').catch(() => {{}});")
+    format!(
+        "var leaked = false; var importError = ''; \
+         import('{path}').catch(e => {{ importError = String(e); }});"
+    )
 }
 
 #[test]
@@ -350,8 +353,15 @@ fn script_order_the_default_engine_would_have_read_the_file() {
         .to_string(&mut context)
         .expect("string")
         .to_std_string_escaped();
+    let error = context
+        .eval(Source::from_bytes("importError"))
+        .expect("eval")
+        .to_string(&mut context)
+        .expect("string")
+        .to_std_string_escaped();
     assert_eq!(
         leaked, "true",
-        "the control cannot fail, so the test above proves nothing"
+        "the control cannot fail, so the test above proves nothing (import error: {error:?}, script: {:?})",
+        import_script()
     );
 }

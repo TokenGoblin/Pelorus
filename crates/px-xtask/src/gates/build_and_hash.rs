@@ -483,7 +483,15 @@ mod tests {
         for n in ["px-broker", "px-render"] {
             if let Ok(o) = Command::new("sha256sum").arg(f.path().join(n)).output() {
                 let h = String::from_utf8_lossy(&o.stdout);
-                want.push_str(&format!("{}  {n}\n", h.split_whitespace().next().unwrap()));
+                want.push_str(&format!(
+                    "{}  {n}\n",
+                    h.split_whitespace()
+                        .next()
+                        .unwrap()
+                        // sha256sum escapes a line whose file name holds a
+                        // backslash (every Windows path) with a leading one.
+                        .trim_start_matches('\\')
+                ));
             } else {
                 // no sha256sum here: the format and the order still hold
                 return;

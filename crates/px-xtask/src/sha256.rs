@@ -285,6 +285,9 @@ mod tests {
                 .split_whitespace()
                 .next()
                 .unwrap()
+                // sha256sum escapes a line whose file name holds a backslash
+                // (every Windows path) with a leading one.
+                .trim_start_matches('\\')
                 .to_string();
             assert_eq!(sha256_file(&path).unwrap(), theirs, "len {len}");
             assert_eq!(h(&data), theirs, "len {len} one-shot");

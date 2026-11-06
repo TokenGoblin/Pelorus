@@ -66,7 +66,11 @@ impl Fixture {
     }
 
     pub fn git_init(&self) -> &Self {
+        // `core.autocrlf` is often `true` on Windows, which would turn the
+        // fixture's LF files into CRLF in `archive` output and make every
+        // byte-exact comparison against them a test of the machine's config.
         self.git(&["init", "-q"])
+            .git(&["config", "core.autocrlf", "false"])
     }
 
     pub fn stage_all(&self) -> &Self {

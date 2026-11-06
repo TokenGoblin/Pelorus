@@ -164,6 +164,13 @@ fn hostile_bytes_never_panic() {
     assert!(parse_faces(&sfnt_at(0, &tables(name, 400, 0))).is_empty());
 }
 
+/// A path as text with `/` separators. These fixtures describe a Linux layout;
+/// `PathBuf::join` on Windows joins with `\\`, so comparing raw text would test
+/// the host's separator instead of the layout.
+fn slashes(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 fn fake() -> FakeFs {
     let mut fs = FakeFs::new();
     fs.file("/fonts/b/Bold.ttf", font("Zeta", "Bold", 700, false));
@@ -183,7 +190,7 @@ fn scan_is_sorted_and_skips_non_fonts_and_symlinks() {
     let got: Vec<_> = s
         .faces()
         .iter()
-        .map(|f| f.path.to_string_lossy().into_owned())
+        .map(|f| slashes(&f.path))
         .collect();
     // Sorted by name within a directory, files and directories interleaved by
     // name: "DejaVu.ttf", then directory a, then directory b.
@@ -309,7 +316,7 @@ fn roots_linux() {
         _ => None,
     };
     let r = default_roots(Platform::Linux, &env);
-    let r: Vec<_> = r.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let r: Vec<_> = r.iter().map(|p| slashes(p)).collect();
     assert_eq!(
         r,
         [

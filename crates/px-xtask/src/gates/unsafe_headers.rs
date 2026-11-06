@@ -487,7 +487,10 @@ fn check_display_safety_comments(g: &mut Gate, root: &Path) {
             bad += 1;
             g.fail(format!(
                 "{}:{n} unsafe block without a SAFETY comment (ADR 044)",
-                f.strip_prefix(root).unwrap_or(f).display()
+                f.strip_prefix(root)
+                    .unwrap_or(f)
+                    .to_string_lossy()
+                    .replace('\\', "/")
             ));
         }
     }

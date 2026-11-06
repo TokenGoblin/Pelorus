@@ -63,7 +63,9 @@ fn a_local_page_shows_the_pictures_next_to_it() {
     assert_eq!(
         loaded.res.images.len(),
         2,
-        "a.png and sub/b.png; missing is skipped"
+        "a.png and sub/b.png; missing is skipped (got {:?}, planned {:?})",
+        loaded.res.images.keys().collect::<Vec<_>>(),
+        px_shell::page::image_plan(&loaded.source, &loaded.res)
     );
     let cv = draw(&loaded.source, &loaded.res, 40, 40);
     // The img: 4x4 scaled to 8x8, red then blue columns of 4.
