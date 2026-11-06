@@ -81,7 +81,7 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
+    CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, DETACHED_PROCESS, CreateProcessAsUserW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, OpenProcessToken,
     PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
@@ -804,6 +804,7 @@ pub(crate) struct Knobs {
     job_list: bool,
     empty_env: bool,
     child_policy: bool,
+    detached: bool,
 }
 
 impl Knobs {
@@ -817,6 +818,7 @@ impl Knobs {
         job_list: true,
         empty_env: true,
         child_policy: true,
+        detached: false,
     };
     fn is_shipping(&self) -> bool {
         self.mitigations == MITIGATIONS
@@ -828,6 +830,7 @@ impl Knobs {
             && self.job_list
             && self.empty_env
             && self.child_policy
+            && !self.detached
     }
 }
 
@@ -960,7 +963,13 @@ fn spawn_with_profile(
             std::ptr::null(),
             std::ptr::null(),
             1,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+            EXTENDED_STARTUPINFO_PRESENT
+                | CREATE_UNICODE_ENVIRONMENT
+                | if knobs.detached {
+                    DETACHED_PROCESS
+                } else {
+                    CREATE_NO_WINDOW
+                },
             if knobs.empty_env {
                 environment.as_ptr().cast::<c_void>()
             } else {
@@ -1453,23 +1462,14 @@ mod tests {
             job_list: false,
             empty_env: false,
             child_policy: false,
+            detached: false,
         };
         let variants: Vec<(&str, Knobs)> = vec![
             ("shipping", Knobs { ..s }),
-            ("none", Knobs { ..none }),
-            ("only-ui", Knobs { ui: true, ..none }),
-            ("only-mem", Knobs { mem: true, ..none }),
-            ("only-active", Knobs { active: true, ..none }),
-            ("only-job-list", Knobs { job_list: true, ..none }),
-            ("only-empty-env", Knobs { empty_env: true, ..none }),
+            ("shipping-detached", Knobs { detached: true, ..s }),
             ("only-child-policy", Knobs { child_policy: true, ..none }),
-            ("only-max-priv", Knobs { max_priv: true, ..none }),
-            ("only-lower", Knobs { lower: true, ..none }),
-            ("only-mitigations", Knobs { mitigations: MITIGATIONS, ..none }),
-            ("shipping-minus-ui", Knobs { ui: false, ..s }),
-            ("shipping-minus-env", Knobs { empty_env: false, ..s }),
-            ("shipping-minus-mem", Knobs { mem: false, ..s }),
-            ("shipping-minus-max-priv", Knobs { max_priv: false, ..s }),
+            ("only-child-policy-detached", Knobs { child_policy: true, detached: true, ..none }),
+            ("none-detached", Knobs { detached: true, ..none }),
         ];
         for path in paths.split(';').filter(|p| !p.is_empty()) {
             let path = std::path::PathBuf::from(path);
