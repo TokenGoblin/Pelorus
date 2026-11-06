@@ -10,10 +10,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build content binary
         shell: bash
-        run: cargo build --locked -p px-content
+        run: cargo build --locked -p px-content -p px-xtask
       - name: Diagnose
         shell: bash
         run: |
-          export PX_DIAG_CONTENT="$(pwd)/target/debug/px-content.exe"
-          ls -la "$PX_DIAG_CONTENT"
+          export PX_DIAG_CONTENT="$(pwd)/target/debug/px-content.exe;$(pwd)/target/debug/px-xtask.exe"
+          ls -la target/debug/*.exe
           cargo test --locked -p px-sandbox windows_diag_content_start -- --nocapture --test-threads=1

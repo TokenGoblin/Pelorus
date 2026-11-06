@@ -254,6 +254,15 @@ fn create_job() -> Option<OwnedHandle> {
 /// Linux cap's address space (reserved-but-uncommitted pages are free here), so
 /// the two figures measure different things; ADR 048 says so.
 fn apply_limits(job: &OwnedHandle, memory: MemoryLimit) -> Result<(), PolicyError> {
+    apply_limits_with(job, memory, JOB_LIMITS, UI_RESTRICTIONS)
+}
+
+fn apply_limits_with(
+    job: &OwnedHandle,
+    memory: MemoryLimit,
+    limit_flags: u32,
+    ui_flags: u32,
+) -> Result<(), PolicyError> {
     let bytes = usize::try_from(memory.bytes()).map_err(|_| {
         failed(
             Rung::MemoryCap,
@@ -262,7 +271,7 @@ fn apply_limits(job: &OwnedHandle, memory: MemoryLimit) -> Result<(), PolicyErro
     })?;
 
     let mut extended = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-    extended.BasicLimitInformation.LimitFlags = JOB_LIMITS;
+    extended.BasicLimitInformation.LimitFlags = limit_flags;
     extended.BasicLimitInformation.ActiveProcessLimit = ACTIVE_PROCESS_LIMIT;
     extended.ProcessMemoryLimit = bytes;
     // SAFETY: `job` is a live job handle owned by the caller. `extended` is a
@@ -285,7 +294,7 @@ fn apply_limits(job: &OwnedHandle, memory: MemoryLimit) -> Result<(), PolicyErro
     }
 
     let ui = JOBOBJECT_BASIC_UI_RESTRICTIONS {
-        UIRestrictionsClass: UI_RESTRICTIONS,
+        UIRestrictionsClass: ui_flags,
     };
     // SAFETY: as above, with the UI-restrictions class and its structure.
     let ok = unsafe {
@@ -523,6 +532,10 @@ fn open_own_token() -> Option<OwnedHandle> {
 /// SIDs are disabled or restricted here; that is Phase 17's tightening, and
 /// claiming it now would name the mechanism for more than it does.
 fn restrict(token: &OwnedHandle) -> Result<OwnedHandle, PolicyError> {
+    restrict_with(token, DISABLE_MAX_PRIVILEGE)
+}
+
+fn restrict_with(token: &OwnedHandle, flags: u32) -> Result<OwnedHandle, PolicyError> {
     let mut restricted: HANDLE = std::ptr::null_mut();
     // SAFETY: `token` is a live token opened with TOKEN_DUPLICATE. The three
     // count arguments are zero with null array pointers, the documented way to
@@ -531,7 +544,7 @@ fn restrict(token: &OwnedHandle) -> Result<OwnedHandle, PolicyError> {
     let ok = unsafe {
         CreateRestrictedToken(
             token.raw(),
-            DISABLE_MAX_PRIVILEGE,
+            flags,
             0,
             std::ptr::null(),
             0,
@@ -777,7 +790,45 @@ pub(crate) struct Spawned {
 /// Returns only after the parent has read the job's limits and the child's
 /// integrity level back from the OS.
 pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, PolicyError> {
-    spawn_with_profile(executable, policy, MITIGATIONS, true)
+    spawn_with_profile(executable, policy, &Knobs::SHIPPING)
+}
+
+/// What a diagnostic run may switch off. TEMPORARY.
+pub(crate) struct Knobs {
+    mitigations: u64,
+    lower: bool,
+    max_priv: bool,
+    ui: bool,
+    mem: bool,
+    active: bool,
+    job_list: bool,
+    empty_env: bool,
+    child_policy: bool,
+}
+
+impl Knobs {
+    const SHIPPING: Self = Self {
+        mitigations: MITIGATIONS,
+        lower: true,
+        max_priv: true,
+        ui: true,
+        mem: true,
+        active: true,
+        job_list: true,
+        empty_env: true,
+        child_policy: true,
+    };
+    fn is_shipping(&self) -> bool {
+        self.mitigations == MITIGATIONS
+            && self.lower
+            && self.max_priv
+            && self.ui
+            && self.mem
+            && self.active
+            && self.job_list
+            && self.empty_env
+            && self.child_policy
+    }
 }
 
 /// [`spawn`] with the mitigation word and the integrity lowering as parameters,
@@ -787,16 +838,17 @@ pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, Polic
 fn spawn_with_profile(
     executable: &Path,
     policy: &Policy,
-    mitigations: u64,
-    lower: bool,
+    knobs: &Knobs,
 ) -> Result<Spawned, PolicyError> {
+    let mitigations: u64 = knobs.mitigations;
+    let lower = knobs.lower;
     let token = open_own_token().ok_or_else(|| {
         failed(
             Rung::RestrictedToken,
             "this process's token could not be opened",
         )
     })?;
-    let restricted = restrict(&token)?;
+    let restricted = restrict_with(&token, if knobs.max_priv { DISABLE_MAX_PRIVILEGE } else { 0 })?;
     if lower {
         lower_integrity(&restricted)?;
     }
@@ -806,7 +858,13 @@ fn spawn_with_profile(
             "the job object could not be created for this content process",
         )
     })?;
-    apply_limits(&job, policy.memory)?;
+    apply_limits_with(
+        &job,
+        policy.memory,
+        (JOB_LIMITS & !(if knobs.mem { 0 } else { JOB_OBJECT_LIMIT_PROCESS_MEMORY }) & !(if knobs.active { 0 } else { JOB_OBJECT_LIMIT_ACTIVE_PROCESS }))
+            | (if knobs.mem { 0 } else { 0 }),
+        if knobs.ui { UI_RESTRICTIONS } else { 0 },
+    )?;
 
     // stdin: the parent writes, the child reads. stdout: the child writes, the
     // parent reads. Each parent end is made uninheritable so the child cannot
@@ -831,26 +889,31 @@ fn spawn_with_profile(
     let child_policy: u32 = CHILD_PROCESS_RESTRICTED;
 
     let mut attributes = AttributeList::with_capacity_for(4)?;
+    let no_child_policy = !knobs.child_policy;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
         inherited.as_ptr().cast::<c_void>(),
         std::mem::size_of_val(inherited.as_slice()),
     )?;
-    attributes.set(
-        PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
-        job_handles.as_ptr().cast::<c_void>(),
-        std::mem::size_of_val(&job_handles),
-    )?;
+    if knobs.job_list {
+        attributes.set(
+            PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
+            job_handles.as_ptr().cast::<c_void>(),
+            std::mem::size_of_val(&job_handles),
+        )?;
+    }
     attributes.set(
         PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY as usize,
         std::ptr::addr_of!(mitigations).cast::<c_void>(),
         std::mem::size_of::<u64>(),
     )?;
-    attributes.set(
-        PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY as usize,
-        std::ptr::addr_of!(child_policy).cast::<c_void>(),
-        std::mem::size_of::<u32>(),
-    )?;
+    if !no_child_policy {
+        attributes.set(
+            PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY as usize,
+            std::ptr::addr_of!(child_policy).cast::<c_void>(),
+            std::mem::size_of::<u32>(),
+        )?;
+    }
 
     // SAFETY: STARTUPINFOEXW is a plain C struct of integers, pointers and
     // handles with no niche and no invalid bit pattern, so an all-zero value
@@ -898,7 +961,11 @@ fn spawn_with_profile(
             std::ptr::null(),
             1,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
-            environment.as_ptr().cast::<c_void>(),
+            if knobs.empty_env {
+                environment.as_ptr().cast::<c_void>()
+            } else {
+                std::ptr::null()
+            },
             std::ptr::null(),
             std::ptr::addr_of!(startup).cast::<STARTUPINFOW>(),
             &mut information,
@@ -932,7 +999,11 @@ fn spawn_with_profile(
     // wrong the child is ended before it can be used (invariant 8); dropping it
     // would also end it, via kill-on-close, but a kill that is explicit cannot
     // be lost by a later edit to Drop.
-    if let Err(error) = child.verify(policy, lower) {
+    if let Err(error) = if knobs.is_shipping() {
+        child.verify(policy, true)
+    } else {
+        Ok(())
+    } {
         let _ = child.kill();
         return Err(error);
     }
@@ -1362,38 +1433,56 @@ mod tests {
         assert_eq!(MITIGATIONS.count_ones(), 12);
     }
 
-    /// Diagnostic, run only when `PX_DIAG_CONTENT` names a content binary:
-    /// reports the exit code the binary dies with under the profile and under
-    /// each reduction of it. Prints; asserts nothing.
+    /// Diagnostic, run only when `PX_DIAG_CONTENT` names binaries (`;`
+    /// separated): reports the exit code each dies with under the profile and
+    /// under reductions of it. Prints; asserts nothing.
     #[test]
     fn windows_diag_content_start() {
-        let Some(path) = std::env::var_os("PX_DIAG_CONTENT") else {
+        let Some(paths) = std::env::var_os("PX_DIAG_CONTENT") else {
             return;
         };
-        let path = std::path::PathBuf::from(path);
-        let mut runs: Vec<(String, u64, bool, Policy)> = vec![
-            ("full".into(), MITIGATIONS, true, Policy::content()),
-            ("no-mitigations".into(), 0, true, Policy::content()),
-            ("no-low".into(), MITIGATIONS, false, Policy::content()),
-            ("nothing".into(), 0, false, Policy::content()),
+        let paths = paths.to_string_lossy().into_owned();
+        let s = Knobs::SHIPPING;
+        let none = Knobs {
+            mitigations: 0,
+            lower: false,
+            max_priv: false,
+            ui: false,
+            mem: false,
+            active: false,
+            job_list: false,
+            empty_env: false,
+            child_policy: false,
+        };
+        let variants: Vec<(&str, Knobs)> = vec![
+            ("shipping", Knobs { ..s }),
+            ("none", Knobs { ..none }),
+            ("only-ui", Knobs { ui: true, ..none }),
+            ("only-mem", Knobs { mem: true, ..none }),
+            ("only-active", Knobs { active: true, ..none }),
+            ("only-job-list", Knobs { job_list: true, ..none }),
+            ("only-empty-env", Knobs { empty_env: true, ..none }),
+            ("only-child-policy", Knobs { child_policy: true, ..none }),
+            ("only-max-priv", Knobs { max_priv: true, ..none }),
+            ("only-lower", Knobs { lower: true, ..none }),
+            ("only-mitigations", Knobs { mitigations: MITIGATIONS, ..none }),
+            ("shipping-minus-ui", Knobs { ui: false, ..s }),
+            ("shipping-minus-env", Knobs { empty_env: false, ..s }),
+            ("shipping-minus-mem", Knobs { mem: false, ..s }),
+            ("shipping-minus-max-priv", Knobs { max_priv: false, ..s }),
         ];
-        for bit in [0u32, 1, 2, 12, 16, 20, 24, 28, 32, 48, 52, 56] {
-            runs.push((
-                format!("without-bit-{bit}"),
-                MITIGATIONS & !(1u64 << bit),
-                true,
-                Policy::content(),
-            ));
-        }
-        for (name, mitigations, lower, policy) in runs {
-            match spawn_with_profile(&path, &policy, mitigations, lower) {
-                Err(error) => eprintln!("DIAG {name}: spawn refused: {error}"),
-                Ok(mut spawned) => {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-                    let state = spawned.child.try_wait();
-                    eprintln!("DIAG {name}: after 1.5s {state:x?}");
-                    let _ = spawned.child.kill();
-                    let _ = spawned.child.wait();
+        for path in paths.split(';').filter(|p| !p.is_empty()) {
+            let path = std::path::PathBuf::from(path);
+            for (name, knobs) in &variants {
+                match spawn_with_profile(&path, &Policy::content(), knobs) {
+                    Err(error) => eprintln!("DIAG {} {name}: spawn refused: {error}", path.display()),
+                    Ok(mut spawned) => {
+                        std::thread::sleep(std::time::Duration::from_millis(1200));
+                        let state = spawned.child.try_wait();
+                        eprintln!("DIAG {} {name}: after 1.2s {state:x?}", path.display());
+                        let _ = spawned.child.kill();
+                        let _ = spawned.child.wait();
+                    }
                 }
             }
         }

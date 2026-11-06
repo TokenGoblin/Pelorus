@@ -42,12 +42,6 @@ pub const SUITES: &[Suite] = &[
         "sandbox_memory_cap",
         "crates/px-content/tests/sandbox_memory.rs",
     ),
-    // Phase 17: the escape-attempt suite for the content profile.
-    (
-        "escape-attempts",
-        "sandbox_escape",
-        "crates/px-content/tests/sandbox_escape.rs",
-    ),
     // Phase 8: the GPU process boundary, proven by spawning the real binary
     // under the profile (docs/phase-08-plan.md, gate items 3 and 4).
     (
@@ -61,6 +55,49 @@ pub const SUITES: &[Suite] = &[
         "crates/px-gpu/tests/process_boundary.rs",
     ),
 ];
+
+/// Gate item "escape-attempts" on Linux: the in-process escape suite (open,
+/// connect, spawn, ... each refused by the kernel), which needs stage two of
+/// the content profile (ADR 043) and the probe compiled in. Linux only.
+pub const ESCAPE_LINUX: Suite = (
+    "escape-attempts",
+    "sandbox_escape",
+    "crates/px-content/tests/sandbox_escape.rs",
+);
+
+/// Gate item "escape-attempts" on Windows. This is NOT the same evidence and
+/// the gate says so on every run ([`WINDOWS_ESCAPE_NOTE`]): the Windows content
+/// process has no stage two and no in-process probe, so what is checked is what
+/// the parent can read back from the OS about the real content binary under the
+/// real profile, plus a test that pins the absence of stage two so it cannot be
+/// added without this item being revisited.
+pub const ESCAPE_WINDOWS: Suite = (
+    "escape-attempts",
+    "sandbox_escape_windows",
+    "crates/px-content/tests/sandbox_escape_windows.rs",
+);
+
+/// Printed by the gate on Windows, next to the item, so the weaker evidence is
+/// visible in every CI log rather than only in docs.
+pub const WINDOWS_ESCAPE_NOTE: &str = "escape-attempts on Windows: parent-side readback of the creation-time profile only; \
+the in-process escape attempts (open, connect, spawn, clipboard, devices) are Linux-only \
+until a Windows stage two exists (docs/research/phase-17-windows-unverified.md)";
+
+/// The suites this gate holds `windows` (or Linux and everything else) to. The
+/// two lists have the same item names in the same order: an item cannot be
+/// dropped on one OS by leaving it out, only replaced by a named, tested
+/// equivalent, which is what makes a Linux-only test a visible decision.
+pub fn suites_for(windows: bool) -> Vec<Suite> {
+    let mut out = Vec::new();
+    for suite in SUITES {
+        out.push(*suite);
+        // Phase 17 follows the memory cap in the table.
+        if suite.0 == "memory-cap" {
+            out.push(if windows { ESCAPE_WINDOWS } else { ESCAPE_LINUX });
+        }
+    }
+    out
+}
 
 /// A machine below the floor makes the policy tests skip, and a silent skip is
 /// indistinguishable from a pass -- the failure that has cost this project more
@@ -290,7 +327,10 @@ pub fn run(g: &mut Gate, root: &Path, _args: &[String]) {
         g.fail("cargo is not on PATH");
         return;
     }
-    suites::check_suites(g, root, SUITES);
+    if cfg!(windows) {
+        g.info(WINDOWS_ESCAPE_NOTE);
+    }
+    suites::check_suites(g, root, &suites_for(cfg!(windows)));
 
     g.info(
         "cargo test --workspace --locked --no-fail-fast --features testing (PX_REQUIRE_SANDBOX=1)",
@@ -323,6 +363,30 @@ mod tests {
         let mut g = Gate::new("sandbox");
         f(&mut g, fx.path());
         g
+    }
+
+    #[test]
+    fn every_item_exists_on_both_oses_and_only_escape_attempts_differ() {
+        let linux = suites_for(false);
+        let windows = suites_for(true);
+        let names = |v: &[Suite]| v.iter().map(|s| s.0).collect::<Vec<_>>();
+        assert_eq!(names(&linux), names(&windows), "an item may be replaced, never dropped");
+        assert!(names(&linux).contains(&"escape-attempts"));
+        let differing: Vec<_> = linux
+            .iter()
+            .zip(&windows)
+            .filter(|(a, b)| a != b)
+            .map(|(a, _)| a.0)
+            .collect();
+        assert_eq!(differing, ["escape-attempts"]);
+    }
+
+    #[test]
+    fn the_windows_escape_item_has_its_own_filter_and_says_it_is_weaker() {
+        assert_ne!(ESCAPE_WINDOWS.1, ESCAPE_LINUX.1);
+        assert!(ESCAPE_WINDOWS.1.contains("windows"));
+        assert!(ESCAPE_WINDOWS.2.contains("windows"));
+        assert!(WINDOWS_ESCAPE_NOTE.contains("Linux-only"));
     }
 
     #[test]
