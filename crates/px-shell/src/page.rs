@@ -38,7 +38,21 @@ const UA_STYLESHEET: &str = "html, body, div, p, section, article, header, foote
      dl { margin: 1em 0 } dd { margin-left: 40px } \
      a { color: #0b57d0 } \
      li { display: list-item } \
-     head, style, script, noscript, template, title, meta, link, source, track { display: none }";
+     b, strong, th { font-weight: bolder } \
+     i, em, cite, dfn, var { font-style: italic } \
+     small { font-size: smaller } \
+     code, kbd, samp, tt { font-family: monospace } \
+     hr { margin: 0.5em auto; border: 1px inset; color: gray } \
+     [hidden] { display: none } \
+     head, style, script, template, title, meta, link, source, track { display: none }";
+
+/// Parse a page the way a browser with scripting disabled does (HTML, "scripting
+/// flag"): this shell never runs a script, so a `<noscript>` element's contents
+/// are markup, not a single text node, and they render (the user-agent
+/// stylesheet of HTML section 15 hides `noscript` only when scripting is enabled).
+fn parse_page(source: &str) -> px_dom::Dom {
+    px_dom::parse_with(source, px_dom::ParseOptions { scripting: false })
+}
 
 /// A clickable region of the document, in CSS pixels from its top-left.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -223,7 +237,7 @@ fn stylesheet_href(node: &px_dom::Node) -> Option<&str> {
 /// what the network loader must fetch and what the CSP must vet.
 #[must_use]
 pub fn subresource_plan(source: &str) -> (Vec<String>, Vec<String>) {
-    let dom = px_dom::parse(source);
+    let dom = parse_page(source);
     let arena = dom.arena;
     let (mut links, mut styles) = (Vec::new(), Vec::new());
     for id in arena.descendants(arena.document()) {
@@ -241,7 +255,22 @@ pub fn subresource_plan(source: &str) -> (Vec<String>, Vec<String>) {
     (links, styles)
 }
 
-fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<(String, String)> {
+/// One stylesheet to apply: its text, the URL its relative references resolve
+/// against, and the `media` attribute of its `<style>` or `<link>` (empty when
+/// absent, which matches always).
+struct Sheet {
+    css: String,
+    base: String,
+    media: String,
+}
+
+fn add_sheets(engine: &mut px_css::engine::StyleEngine, res: &Resources, arena: &px_dom::Arena) {
+    for sheet in stylesheets(res, arena) {
+        engine.add_author_stylesheet_for_media(&sheet.css, &sheet.base, &sheet.media);
+    }
+}
+
+fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<Sheet> {
     let mut out = Vec::new();
     for id in arena.descendants(arena.document()) {
         let Some(node) = arena.get(id) else { continue };
@@ -252,7 +281,11 @@ fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<(String, String)> 
             "style" => {
                 let text = px_layout::inline::collect_text(arena, id);
                 if !res.blocked_inline.contains(&text) {
-                    out.push((text, res.sheet_base(None)));
+                    out.push(Sheet {
+                        css: text,
+                        base: res.sheet_base(None),
+                        media: attr(node, "media").unwrap_or("").to_string(),
+                    });
                 }
             }
             "link" => {
@@ -274,7 +307,12 @@ fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<(String, String)> 
                             std::fs::read_to_string(&p).ok().map(|c| (c, base))
                         })
                 };
-                out.extend(css);
+                let media = attr(node, "media").unwrap_or("");
+                out.extend(css.map(|(css, base)| Sheet {
+                    css,
+                    base,
+                    media: media.to_string(),
+                }));
             }
             _ => {}
         }
@@ -332,17 +370,15 @@ pub fn layout(source: &str, page: &Resources, width: u32, height: u32) -> Result
 fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Result<Laid, String> {
     let width = width.max(1);
     let height = height.max(1);
-    let dom = px_dom::parse(source);
+    let dom = parse_page(source);
     if dom.abandoned {
         return Err("parse abandoned".into());
     }
     let quirks = px_css::engine::quirks_mode_of(&dom);
     let mut arena = dom.arena;
     let mut engine = px_css::engine::StyleEngine::new(width as f32, height as f32, quirks);
-    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
-    for (css, base) in stylesheets(page, &arena) {
-        engine.add_author_stylesheet(&css, &base);
-    }
+    engine.add_user_agent_stylesheet(UA_STYLESHEET, "about:ua");
+    add_sheets(&mut engine, page, &arena);
     let style_root = engine
         .style_document(&mut arena)
         .ok_or("style resolve failed")?;
@@ -481,7 +517,7 @@ fn image_tables(
 /// stylesheets in `res` already, because backgrounds come from computed style.
 #[must_use]
 pub fn image_plan(source: &str, res: &Resources) -> Vec<String> {
-    let dom = px_dom::parse(source);
+    let dom = parse_page(source);
     if dom.abandoned {
         return Vec::new();
     }
@@ -489,10 +525,8 @@ pub fn image_plan(source: &str, res: &Resources) -> Vec<String> {
     let arena = dom.arena;
     let mut engine =
         px_css::engine::StyleEngine::new(crate::images::PLAN_WIDTH as f32, 768.0, quirks);
-    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
-    for (css, base) in stylesheets(res, &arena) {
-        engine.add_author_stylesheet(&css, &base);
-    }
+    engine.add_user_agent_stylesheet(UA_STYLESHEET, "about:ua");
+    add_sheets(&mut engine, res, &arena);
     let style_root = engine.style_root_for(&arena);
     if engine.resolve(&arena, &style_root).is_none() {
         return Vec::new();
@@ -523,7 +557,7 @@ pub fn image_plan(source: &str, res: &Resources) -> Vec<String> {
 /// `url()` source, in document order. Needs the stylesheets in `res` already.
 #[must_use]
 pub fn font_plan(source: &str, res: &Resources) -> Vec<px_css::font_face::FontFaceDecl> {
-    let dom = px_dom::parse(source);
+    let dom = parse_page(source);
     if dom.abandoned {
         return Vec::new();
     }
@@ -531,10 +565,8 @@ pub fn font_plan(source: &str, res: &Resources) -> Vec<px_css::font_face::FontFa
     let arena = dom.arena;
     let mut engine =
         px_css::engine::StyleEngine::new(crate::images::PLAN_WIDTH as f32, 768.0, quirks);
-    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
-    for (css, base) in stylesheets(res, &arena) {
-        engine.add_author_stylesheet(&css, &base);
-    }
+    engine.add_user_agent_stylesheet(UA_STYLESHEET, "about:ua");
+    add_sheets(&mut engine, res, &arena);
     engine.font_faces()
 }
 
@@ -655,6 +687,50 @@ mod tests {
         let wide = layout(src, &Resources::default(), 900, 300).unwrap();
         let narrow = layout(src, &Resources::default(), 120, 300).unwrap();
         assert!(narrow.height > wide.height);
+    }
+
+    fn pixel_of(src: &str, x: u32, y: u32) -> Option<[u8; 4]> {
+        let l = layout(src, &Resources::default(), 200, 100).unwrap();
+        l.render(0, 200, 100).unwrap().pixel(x, y)
+    }
+
+    const RED: Option<[u8; 4]> = Some([255, 0, 0, 255]);
+    const WHITE: Option<[u8; 4]> = Some([255, 255, 255, 255]);
+
+    #[test]
+    fn noscript_content_renders_because_no_script_runs() {
+        let src = "<!doctype html><body style='margin:0'><noscript>\
+            <div style='height:50px;background:#f00'></div></noscript>";
+        assert_eq!(pixel_of(src, 10, 10), RED);
+    }
+
+    #[test]
+    fn layered_author_rules_beat_the_user_agent_sheet() {
+        // The user-agent sheet says `div { display: block }` and `body { margin: 8px }`;
+        // author rules win whatever their layer.
+        let src = "<!doctype html><style>@layer a { body { margin: 0 } \
+            .r { display: flex } .r > i { display: block; width: 20px; height: 20px; \
+            background: #f00 } }</style><div class=r><i></i><i></i></div>";
+        assert_eq!(
+            pixel_of(src, 30, 10),
+            RED,
+            "second item is beside the first"
+        );
+    }
+
+    #[test]
+    fn the_media_attribute_of_a_sheet_is_evaluated() {
+        let page = |media: &str| {
+            format!(
+                "<!doctype html><body style='margin:0'><style media='{media}'>\
+                 div {{ height: 50px; background: #f00 }}</style><div></div>"
+            )
+        };
+        assert_eq!(pixel_of(&page("(min-width: 100px)"), 5, 5), RED);
+        assert_eq!(pixel_of(&page("(min-width: 900px)"), 5, 5), WHITE);
+        assert_eq!(pixel_of(&page("print"), 5, 5), WHITE);
+        assert_eq!(pixel_of(&page("screen"), 5, 5), RED);
+        assert_eq!(pixel_of(&page(""), 5, 5), RED);
     }
 
     #[test]

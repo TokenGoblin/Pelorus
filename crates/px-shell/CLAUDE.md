@@ -60,4 +60,8 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   startup, in the browser binary; never in tests, which map generics per page).
   A page cannot probe for an installed font by name (`local()` is ignored); it
   can only see what a generic keyword resolves to.
+- Scripting is off, so pages parse with the scripting flag disabled: `<noscript>`
+  contents are markup and render. The shell's default stylesheet goes in through
+  `add_user_agent_stylesheet`, never as an author sheet (a page's `@layer` rules
+  would lose to it). A sheet's `media` attribute is evaluated against the viewport.
 - 100% Rust, workspace-path dependencies only.

@@ -164,7 +164,59 @@ impl StyleEngine {
     /// stylesheet that stopped at the first unknown property would break every
     /// page using a feature this engine has not implemented.
     pub fn add_author_stylesheet(&mut self, css: &str, url: &str) {
-        use style::stylesheets::{AllowImportRules, Origin, Stylesheet};
+        self.add_stylesheet(css, url, style::stylesheets::Origin::Author, "");
+    }
+
+    /// As [`StyleEngine::add_author_stylesheet`] for a sheet whose owner has a
+    /// `media` attribute (`<link>` and `<style>`, HTML sections 4.2.6 and 4.6.7): the
+    /// sheet applies only while the media query list `media` matches the viewport.
+    /// An empty or blank list always matches; an unparseable query is
+    /// "not all" (Media Queries 4 section 3.1), so the sheet never applies.
+    /// (Stylo's `@media` parsing is reused by wrapping the sheet in one; the
+    /// `cssparser` types needed to build a `MediaList` directly are not
+    /// reachable without a new dependency.)
+    pub fn add_author_stylesheet_for_media(&mut self, css: &str, url: &str, media: &str) {
+        self.add_stylesheet(css, url, style::stylesheets::Origin::Author, media);
+    }
+
+    /// Parse `css` as a user-agent stylesheet and add it to the cascade.
+    ///
+    /// CSS Cascade 4 section 6.1 orders the origins: a declaration from the
+    /// author origin beats one from the user-agent origin whatever the
+    /// selectors, the order, or the cascade layers involved. A host's default
+    /// stylesheet added with [`StyleEngine::add_author_stylesheet`] instead
+    /// competes with the page: a page whose rules sit in a `@layer` loses to the
+    /// host's unlayered `display: block` and `margin`, because unlayered author
+    /// rules beat layered ones (section 6.4.1). Hosts give their defaults to
+    /// this method.
+    pub fn add_user_agent_stylesheet(&mut self, css: &str, url: &str) {
+        self.add_stylesheet(css, url, style::stylesheets::Origin::UserAgent, "");
+    }
+
+    fn add_stylesheet(
+        &mut self,
+        css: &str,
+        url: &str,
+        origin: style::stylesheets::Origin,
+        media: &str,
+    ) {
+        use style::stylesheets::{AllowImportRules, Stylesheet};
+
+        // A `media` attribute is a media query list, the same grammar as the
+        // prelude of `@media`, so the sheet is evaluated as the body of one.
+        // Text that could end the prelude early is not a media query list.
+        let wrapped;
+        let css = if media.trim().is_empty() {
+            css
+        } else {
+            let list = if media.contains(['{', '}', ';']) {
+                "not all"
+            } else {
+                media
+            };
+            wrapped = format!("@media {list} {{\n{css}\n}}");
+            &wrapped
+        };
 
         // `about:invalid` when the caller hands us something unparseable. The
         // URL is only used to resolve relative `url()` values inside the sheet,
@@ -176,7 +228,7 @@ impl StyleEngine {
         let sheet = Stylesheet::from_str(
             css,
             url_data,
-            Origin::Author,
+            origin,
             // servo_arc::Arc, not std::sync::Arc. They are different types with
             // the same name and stylo wants its own; importing either one by
             // bare name is how you spend twenty minutes on "expected
@@ -197,8 +249,7 @@ impl StyleEngine {
             style::stylesheets::DocumentStyleSheet(style::servo_arc::Arc::new(sheet)),
             &guard,
         );
-        self.stylist
-            .force_stylesheet_origins_dirty(Origin::Author.into());
+        self.stylist.force_stylesheet_origins_dirty(origin.into());
         // `flush` takes only the guards in 0.21: the element and snapshot-map
         // arguments Servo's older call sites pass are gone.
         self.stylist

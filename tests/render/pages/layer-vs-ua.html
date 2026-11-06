@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<title>Layered author rules beat the user-agent sheet</title>
+<style>
+/* Cascade 4 section 6.1: the author origin beats the user-agent origin whatever the
+   layers. The reset zeroes margins and padding that the user-agent sheet sets; the
+   utilities change the display the user-agent sheet gives a div. */
+@layer base, utilities;
+@layer base { * { margin: 0; padding: 0 } ul { list-style: none } }
+@layer utilities {
+  .row { display: flex; gap: 10px; height: 40px; background: #ddd }
+  .row > i { display: block; width: 50px; background: #36c }
+  .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 6px; margin-top: 10px }
+  .grid > i { display: block; height: 24px; background: #c63 }
+  .cell { display: table; width: 200px; margin-top: 10px }
+  .cell > b { display: table-cell; height: 20px; background: #3a6 }
+}
+</style>
+<h1 style="height:20px;background:#aaa"></h1>
+<p style="height:20px;background:#bbb"></p>
+<ul style="background:#ccc"><li style="height:20px;background:#9bd"></li></ul>
+<div class="row"><i></i><i></i><i></i></div>
+<div class="grid"><i></i><i></i></div>
+<div class="cell"><b></b><b></b></div>
