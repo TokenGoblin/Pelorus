@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>web fonts: icon fonts in every container</title>
+<style>
+  /* Each of the same five private-use icons, from the same font in three
+     containers: WOFF2 (with a TTF fallback source), WOFF1, plain TrueType. */
+  @font-face { font-family: 'Px Icons'; src: url(@fonts/PxIcons-Regular.woff2) format('woff2'), url(@fonts/PxIcons-Regular.ttf) format('truetype'); }
+  @font-face { font-family: 'Px Icons One'; src: url(@fonts/PxIcons-Regular.woff) format('woff'); }
+  @font-face { font-family: 'Px Icons Raw'; src: url(@fonts/PxIcons-Regular.ttf); }
+  /* The first source is missing, the second is fine. */
+  @font-face { font-family: 'Px Icons Second'; src: url(@fonts/no-such-file.woff2) format('woff2'), url(@fonts/PxIcons-Regular.woff2); }
+  /* Nothing loads: the name is simply unavailable. */
+  @font-face { font-family: 'Px Broken'; src: url(@fonts/no-such-file.woff2) format('woff2'); }
+  body { margin: 16px; font: 24px/1.6 'Noto Sans'; color: #1b1b1f; background: #fff; }
+  p { margin: 0; }
+  .ic { font-size: 40px; color: #0b57d0; }
+  .label { display: inline-block; width: 150px; font-size: 18px; color: #555; }
+</style>
+<p><span class="label">WOFF2</span><span class="ic" style="font-family:'Px Icons'">&#xE000;&#xE001;&#xE002;&#xE003;&#xE004;</span> then text</p>
+<p><span class="label">WOFF</span><span class="ic" style="font-family:'Px Icons One'">&#xE000;&#xE001;&#xE002;&#xE003;&#xE004;</span> then text</p>
+<p><span class="label">TTF</span><span class="ic" style="font-family:'Px Icons Raw'">&#xE000;&#xE001;&#xE002;&#xE003;&#xE004;</span> then text</p>
+<p><span class="label">2nd source</span><span class="ic" style="font-family:'Px Icons Second'">&#xE002;&#xE003;</span> then text</p>
+<p><span class="label">Broken, then</span><span class="ic" style="font-family:'Px Broken','Px Icons'">&#xE001;&#xE004;</span> then text</p>
+<p><span class="label">No font</span><span class="ic" style="font-family:'Px Broken','Noto Sans'">&#xE001;&#xE004;</span> then text</p>
+<p><span class="label">Inline</span>Save <span style="font-family:'Px Icons';color:#b3261e">&#xE003;</span> or open <span style="font-family:'Px Icons';color:#146c2e">&#xE001;</span> now</p>

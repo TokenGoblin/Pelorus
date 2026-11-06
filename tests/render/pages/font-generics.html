@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="px-test-generics" content="serif=PxSerif-Regular.ttf;monospace=PxMono-Regular.ttf;sans-serif=PxText-Regular.ttf;system-ui=PxText-Bold.ttf">
+<title>generic families resolve to distinct faces</title>
+<style>
+  /* The harness maps four generics to four different fixture fonts (the browser
+     maps them to installed fonts). cursive and fantasy are left unmapped to show
+     the deterministic fallback: the next family in the list. */
+  body { margin: 16px; font: 36px/1.6 'Noto Sans'; color: #1b1b1f; background: #fff; }
+  p { margin: 0; }
+  .k { font: 16px 'Noto Sans'; color: #555; }
+</style>
+<p style="font-family:serif,'Noto Sans'">Hamburg 123 <span class="k">serif</span></p>
+<p style="font-family:sans-serif,'Noto Sans'">Hamburg 123 <span class="k">sans-serif</span></p>
+<p style="font-family:monospace,'Noto Sans'">Hamburg 123 <span class="k">monospace</span></p>
+<p style="font-family:system-ui,'Noto Sans'">Hamburg 123 <span class="k">system-ui</span></p>
+<p style="font-family:cursive,'Noto Sans'">Hamburg 123 <span class="k">cursive (unmapped: Noto Sans)</span></p>
+<p style="font-family:'No Such Face',fantasy,'Noto Sans'">Hamburg 123 <span class="k">unknown, fantasy (unmapped): Noto Sans</span></p>
+<p style="font-family:monospace">Hamburg 123 <span class="k">monospace alone, then code points the face lacks fall back</span></p>

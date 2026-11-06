@@ -303,6 +303,13 @@ impl PageFonts {
             .collect()
     }
 
+    /// Override a generic family for this page only.
+    pub fn set_generic(&mut self, g: GenericFamily, font: FontId) {
+        if let Some(slot) = self.generics.get_mut(generic_index(g)) {
+            *slot = Some(font);
+        }
+    }
+
     /// The face a generic family resolves to on this page: the page's override,
     /// else the installed system face.
     #[must_use]
@@ -372,17 +379,27 @@ thread_local! {
     static PAGE: RefCell<Option<Arc<PageFonts>>> = const { RefCell::new(None) };
 }
 
+/// While alive, `fonts` are the page's declared faces on this thread; dropping it
+/// restores the previous ones.
+#[must_use = "the fonts apply only while the guard lives"]
+pub struct PageFontsGuard(Option<Arc<PageFonts>>);
+
+impl Drop for PageFontsGuard {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        PAGE.with(|p| *p.borrow_mut() = prev);
+    }
+}
+
+/// Install `fonts` as the page's declared faces on this thread until the guard
+/// drops.
+pub fn enter_page_fonts(fonts: Arc<PageFonts>) -> PageFontsGuard {
+    PageFontsGuard(PAGE.with(|p| p.borrow_mut().replace(fonts)))
+}
+
 /// Run `f` with `fonts` as the page's declared faces on this thread.
 pub fn with_page_fonts<R>(fonts: Arc<PageFonts>, f: impl FnOnce() -> R) -> R {
-    struct Restore(Option<Arc<PageFonts>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let prev = self.0.take();
-            PAGE.with(|p| *p.borrow_mut() = prev);
-        }
-    }
-    let prev = PAGE.with(|p| p.borrow_mut().replace(fonts));
-    let _restore = Restore(prev);
+    let _guard = enter_page_fonts(fonts);
     f()
 }
 

@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>web fonts: unicode-range composes faces</title>
+<style>
+  /* One family from two files: capitals from the hollow-bar font, lowercase
+     letters and digits from the thin mono font, nothing else. */
+  @font-face { font-family: 'Px Mix'; src: url(@fonts/PxText-Regular.ttf); unicode-range: U+41-5A; }
+  @font-face { font-family: 'Px Mix'; src: url(@fonts/PxMono-Regular.ttf); unicode-range: U+61-7A, U+30-39; }
+  body { margin: 16px; font: 36px/1.6 'Px Mix', 'Noto Sans'; color: #1b1b1f; background: #fff; }
+  p { margin: 0; }
+  .k { font: 16px 'Noto Sans'; color: #555; }
+</style>
+<p>ABC abc 123 <span class="k">capitals / lowercase and digits</span></p>
+<p>Hamburgefons <span class="k">mixed case in one word</span></p>
+<p>Xyz &#x3A9;&#x42F; - ok <span class="k">other scripts fall back to Noto Sans</span></p>
