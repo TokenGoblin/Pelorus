@@ -93,10 +93,18 @@ fn fnv(data: &[u8]) -> u64 {
     h
 }
 
-/// Unwrap (WOFF, WOFF2), validate and register a font file. The same bytes
-/// registered twice give the same id.
+/// Unwrap (WOFF, WOFF2), validate and register a font file (TrueType or CFF
+/// outlines; the first face of a collection). The same bytes registered twice
+/// give the same id.
 pub fn register_font(file: &[u8]) -> Result<FontId, RegisterError> {
-    let sfnt = px_text::woff::to_sfnt(file).map_err(RegisterError::Invalid)?;
+    register_font_face(file, 0)
+}
+
+/// [`register_font`] for face `index` of a `ttcf` collection. The face is copied
+/// out as a standalone font, so the same face of the same file always gets the
+/// same id and a collection's other faces cost nothing.
+pub fn register_font_face(file: &[u8], index: u32) -> Result<FontId, RegisterError> {
+    let sfnt = px_text::woff::to_sfnt_face(file, index).map_err(RegisterError::Invalid)?;
     let hash = fnv(&sfnt) ^ (sfnt.len() as u64).rotate_left(32);
     if let Ok(s) = store().read()
         && let Some(ids) = s.by_hash.get(&hash)

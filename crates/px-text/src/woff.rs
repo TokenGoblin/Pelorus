@@ -9,13 +9,14 @@
 //! executes anything: hinting programs are carried as opaque bytes and the
 //! rasterizer never runs them.
 //!
-//! Supported: sfnt with TrueType outlines (`glyf`), WOFF 1.0, WOFF 2.0 including
-//! the `glyf`/`loca` and `hmtx` transforms. Not supported: CFF outlines
-//! (`OTTO`; [`crate::font::Font`] reads `glyf` only), font collections.
+//! Supported: sfnt with TrueType (`glyf`) or CFF (`OTTO`) outlines, WOFF 1.0 and
+//! WOFF 2.0 around either (including the `glyf`/`loca` and `hmtx` transforms), and
+//! `ttcf` collections (one face, chosen by index, copied out as a standalone sfnt).
+//! Not supported: CFF2, WOFF 2.0 collections.
 
 use crate::brotli;
 use crate::font::Font;
-use crate::sfnt::{FontError, u16_at, u32_at};
+use crate::sfnt::{Directory, FontError, u16_at, u32_at};
 use crate::woff2;
 
 /// Most bytes of font file accepted (compressed or not).
@@ -29,6 +30,8 @@ const SIG_WOFF: u32 = 0x774F_4646;
 const SIG_WOFF2: u32 = 0x774F_4632;
 const SIG_TRUETYPE: u32 = 0x0001_0000;
 const SIG_TRUE: u32 = 0x7472_7565;
+const SIG_OTTO: u32 = 0x4F54_544F;
+const SIG_TTCF: u32 = 0x7474_6366;
 
 /// Which container the bytes start with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,7 +47,7 @@ pub fn sniff(data: &[u8]) -> Option<Container> {
     match u32_at(data, 0)? {
         SIG_WOFF => Some(Container::Woff),
         SIG_WOFF2 => Some(Container::Woff2),
-        SIG_TRUETYPE | SIG_TRUE | 0x4F54_544F | 0x7474_6366 => Some(Container::Sfnt),
+        SIG_TRUETYPE | SIG_TRUE | SIG_OTTO | SIG_TTCF => Some(Container::Sfnt),
         _ => None,
     }
 }
@@ -52,15 +55,54 @@ pub fn sniff(data: &[u8]) -> Option<Container> {
 /// Unwrap any supported container to a plain sfnt. Raw sfnt data is returned
 /// unchanged (and still has to pass `Font::from_bytes`).
 pub fn to_sfnt(data: &[u8]) -> Result<Vec<u8>, FontError> {
+    to_sfnt_face(data, 0)
+}
+
+/// Like [`to_sfnt`], choosing face `index` of a `ttcf` collection. The result is
+/// always a standalone single-face sfnt (the chosen face's tables copied out), so
+/// everything downstream reads it as face 0. `index` must be 0 for a file that is
+/// not a collection.
+pub fn to_sfnt_face(data: &[u8], index: u32) -> Result<Vec<u8>, FontError> {
     if data.len() > MAX_FILE_BYTES {
         return Err(FontError::Malformed("font file too large"));
     }
     match sniff(data) {
-        Some(Container::Sfnt) => Ok(data.to_vec()),
+        Some(Container::Sfnt) if u32_at(data, 0) == Some(SIG_TTCF) => extract_face(data, index),
+        Some(Container::Sfnt) if index == 0 => Ok(data.to_vec()),
+        Some(Container::Sfnt) => Err(FontError::Malformed("collection face index")),
+        Some(_) if index != 0 => Err(FontError::Malformed("collection face index")),
         Some(Container::Woff) => woff1(data),
         Some(Container::Woff2) => woff2::decode(data),
         None => Err(FontError::BadMagic),
     }
+}
+
+/// Copy the tables of face `index` of a `ttcf` collection into a standalone sfnt.
+/// Table offsets in a collection are file-absolute and tables may be shared between
+/// faces; copying only this face's tables drops the rest and makes the result a
+/// plain font.
+fn extract_face(data: &[u8], index: u32) -> Result<Vec<u8>, FontError> {
+    let dir = Directory::parse_face(data, index)?;
+    let flavor = {
+        let base = u32_at(data, 12 + (index as usize) * 4).ok_or(FontError::Truncated)? as usize;
+        u32_at(data, base).ok_or(FontError::Truncated)?
+    };
+    if dir.tables().len() > MAX_TABLES {
+        return Err(FontError::Malformed("table count"));
+    }
+    let tables = dir
+        .tables()
+        .iter()
+        .map(|(tag, span)| {
+            let body = span.slice(data).to_vec();
+            OutTable {
+                tag: *tag,
+                checksum: checksum(&body),
+                data: body,
+            }
+        })
+        .collect();
+    build_sfnt(flavor, tables)
 }
 
 /// One table to write into a rebuilt sfnt.
@@ -150,12 +192,8 @@ fn woff1(data: &[u8]) -> Result<Vec<u8>, FontError> {
     if total_sfnt > MAX_SFNT_BYTES {
         return Err(bad("WOFF sfnt size too large"));
     }
-    if !matches!(flavor, SIG_TRUETYPE | SIG_TRUE) {
-        return Err(if flavor == 0x4F54_544F {
-            FontError::Unsupported("CFF outlines")
-        } else {
-            FontError::BadMagic
-        });
+    if !matches!(flavor, SIG_TRUETYPE | SIG_TRUE | SIG_OTTO) {
+        return Err(FontError::BadMagic);
     }
     let mut tables = Vec::with_capacity(num_tables);
     let mut budget = total_sfnt;
@@ -214,5 +252,10 @@ pub(crate) fn brotli_bounded(input: &[u8], limit: usize) -> Result<Vec<u8>, Font
 ///
 /// The one entry point for a web font: nothing else needs to know the container.
 pub fn load_font(data: &[u8]) -> Result<Font, FontError> {
-    Font::from_bytes(to_sfnt(data)?)
+    load_font_face(data, 0)
+}
+
+/// [`load_font`] for face `index` of a `ttcf` collection.
+pub fn load_font_face(data: &[u8], index: u32) -> Result<Font, FontError> {
+    Font::from_bytes(to_sfnt_face(data, index)?)
 }

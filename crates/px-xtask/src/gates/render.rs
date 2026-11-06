@@ -38,7 +38,7 @@ use std::path::Path;
 pub mod px_png;
 
 /// The corpus may not shrink below this many pages (ADR 033 (a)).
-pub const PAGE_FLOOR: usize = 93;
+pub const PAGE_FLOOR: usize = 95;
 
 /// A rendered page with fewer ink pixels than this (pixels differing from its most
 /// common colour) is not a test. Used by the WPT selection rule: 20 x 20 pixels.
@@ -521,7 +521,7 @@ pub fn run(g: &mut Gate, root: &Path, args: &[String]) {
         ));
         return;
     }
-    g.info("Text paints as Ahem glyph runs; the corpus floor is 93 pages (bundled fonts only).");
+    g.info("Text paints as Ahem glyph runs; the corpus floor is 95 pages (bundled fonts only).");
     if select {
         run_select(g, root);
         return;
@@ -780,13 +780,13 @@ mod tests {
     }
 
     #[test]
-    fn floor_is_pinned_at_93() {
-        assert_eq!(PAGE_FLOOR, 93);
-        let (p, s) = many(93);
+    fn floor_is_pinned_at_95() {
+        assert_eq!(PAGE_FLOOR, 95);
+        let (p, s) = many(95);
         assert!(check_manifest(&p, &s, false).is_empty());
-        let (p, s) = many(92);
+        let (p, s) = many(94);
         let f = check_manifest(&p, &s, false);
-        assert_eq!(f, ["the corpus has 92 pages, the pinned floor is 93"]);
+        assert_eq!(f, ["the corpus has 94 pages, the pinned floor is 95"]);
     }
 
     #[test]

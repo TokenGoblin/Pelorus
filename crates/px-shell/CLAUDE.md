@@ -30,7 +30,7 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   page shows its `alt` text. Web fonts (`@font-face` `url()` sources) are fetched
   too, by `Loader::font`: a CORS-mode request, so a cross-origin font needs
   `Access-Control-Allow-Origin`; at most 32 rules, 8 MiB each, a 3 s phase budget
-  and a 100 ms one for `font-display: optional`; unwrapped (TTF, WOFF, WOFF2) and
+  and a 100 ms one for `font-display: optional`; unwrapped (TrueType or CFF outlines in TTF/OTF, WOFF, WOFF2, or a collection's first face; ADR 052) and
   validated by `px-text`; a font that fails or arrives late is absent and text
   falls to the next family (ADR 050). `local()` sources are never read. Scripts,
   frames and forms are never requested and never run. Nothing persists:

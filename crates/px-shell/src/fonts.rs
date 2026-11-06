@@ -179,9 +179,10 @@ pub const MAX_SYSTEM_FONT_BYTES: u64 = 16 * 1024 * 1024;
 ///
 /// For each family, its preference list ([`GenericFamily::preferences`], or
 /// whatever `prefs` returns) is walked in order; the first name the machine has
-/// whose file `read` returns and that `px-text` accepts as a TrueType font wins.
-/// A name that is installed but unreadable, a collection or CFF-flavoured (not
-/// supported yet) is skipped in favour of the next. A pure function of its
+/// whose file `read` returns and that `px-text` accepts as a font (TrueType or
+/// CFF outlines, in a plain file or as the matched face of a collection) wins.
+/// A name that is installed but unreadable or that `px-text` refuses (CFF2, a
+/// corrupt file) is skipped in favour of the next. A pure function of its
 /// inputs, so two runs on one machine agree.
 pub fn resolve_generics(
     sys: &SystemFonts,
@@ -195,11 +196,8 @@ pub fn resolve_generics(
             let Some(face) = sys.best_match(&name, 400, false) else {
                 continue;
             };
-            if face.index != 0 {
-                continue;
-            }
             let Some(bytes) = read(face) else { continue };
-            if let Ok(id) = px_layout::fontset::register_font(&bytes) {
+            if let Ok(id) = px_layout::fontset::register_font_face(&bytes, face.index) {
                 out.push((g, id));
                 break;
             }

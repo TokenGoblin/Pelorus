@@ -131,9 +131,8 @@ pub(crate) fn decode(data: &[u8]) -> Result<Vec<u8>, FontError> {
         return Err(bad("WOFF2 sfnt size too large"));
     }
     match flavor {
-        0x0001_0000 | 0x7472_7565 => {}
-        0x4F54_544F => return Err(FontError::Unsupported("CFF outlines")),
-        0x7474_6366 => return Err(FontError::Unsupported("font collection")),
+        0x0001_0000 | 0x7472_7565 | 0x4F54_544F => {}
+        0x7474_6366 => return Err(FontError::Unsupported("WOFF2 font collection")),
         _ => return Err(FontError::BadMagic),
     }
 

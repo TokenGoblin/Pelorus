@@ -1,5 +1,9 @@
 # 050 — Web fonts (`@font-face`: TTF, WOFF, WOFF2) and generic font families, with no new dependency
 
+> **Note, 2026-11-06:** decision 1 (CFF/OpenType and collections refused) and the
+> `.otf` clause of decision 8 are superseded by ADR 052, which reads CFF outlines
+> and `ttcf` collections. The rest of this ADR stands as written.
+
 - **Status:** accepted for the interim single-process shell (Phase 18); the
   process placement in decision 9 is a Phase 19 obligation the user should
   confirm.

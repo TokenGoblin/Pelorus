@@ -385,3 +385,11 @@ source = "tests/render/pages/noscript-markup.html"
 [[page]]
 id = "media-attr"
 source = "tests/render/pages/media-attr.html"
+
+[[page]]
+id = "webfont-cff"
+source = "tests/render/pages/webfont-cff.html"
+
+[[page]]
+id = "webfont-cff-containers"
+source = "tests/render/pages/webfont-cff-containers.html"
