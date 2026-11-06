@@ -317,6 +317,15 @@ fn import_script() -> String {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/side_effect_module"
     );
+    // The engine's default loader accepts only a path under its root, which is
+    // the *canonicalised* working directory. On Windows that is the verbatim
+    // form (`\\?\D:\...`) and the plain `D:\...` that `env!` gives is a
+    // different prefix, so the import was refused as "outside the module root"
+    // and the control below could not read the file. Canonicalising the
+    // fixture's path puts it in the same form as the root.
+    let path = std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string());
     // The path sits inside a JS string literal, so its backslashes (every
     // separator of a Windows manifest dir, e.g. `D:\a\...`) are escapes
     // unless doubled. Left alone they name a different file, the control

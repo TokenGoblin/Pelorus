@@ -122,6 +122,30 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// `file://` + an absolute path, as a URL a CSS engine can resolve against.
+/// On Windows the path is `C:\dir\p.html`, and `file://C:\dir\p.html` is a
+/// host `C` plus garbage on any parser that does not carry the drive-letter
+/// quirk; the URL is `file:///C:/dir/p.html`.
+fn file_url(path: &str) -> String {
+    let slashed = path.replace('\\', "/");
+    if slashed.starts_with('/') {
+        format!("file://{slashed}")
+    } else {
+        format!("file:///{slashed}")
+    }
+}
+
+/// The path in a `file:` URL, with the leading `/` of `/C:/dir` dropped: that
+/// slash belongs to the URL, and `/C:/dir` is not a path on Windows.
+fn drive_path(path: &str) -> String {
+    let b = path.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
+        path[1..].to_string()
+    } else {
+        path.to_string()
+    }
+}
+
 impl Resources {
     /// The key a reference to an image goes by: the absolute URL (fragment
     /// dropped) for a web page; for a local page the path of a file at or below
@@ -138,7 +162,7 @@ impl Resources {
         let dir = std::path::absolute(page).ok()?.parent()?.to_path_buf();
         let raw = raw.trim();
         let path = if let Some(rest) = raw.strip_prefix("file://") {
-            PathBuf::from(percent_decode(rest.split(['#', '?']).next()?)?)
+            PathBuf::from(drive_path(&percent_decode(rest.split(['#', '?']).next()?)?))
         } else {
             let r = raw.split(['#', '?']).next()?;
             if r.is_empty() || r.contains(':') || r.starts_with('/') || r.contains("..") {
@@ -168,7 +192,7 @@ impl Resources {
             .as_deref()
             .and_then(|p| std::path::absolute(p).ok())
         {
-            Some(p) => format!("file://{}", p.display()),
+            Some(p) => file_url(&p.to_string_lossy()),
             None => "about:page".to_string(),
         }
     }
@@ -241,7 +265,7 @@ fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<(String, String)> 
                         .and_then(|p| {
                             let base = std::path::absolute(&p).map_or_else(
                                 |_| res.sheet_base(None),
-                                |a| format!("file://{}", a.display()),
+                                |a| file_url(&a.to_string_lossy()),
                             );
                             std::fs::read_to_string(&p).ok().map(|c| (c, base))
                         })
@@ -549,6 +573,17 @@ fn scrollbar(cv: &mut Canvas, scroll: i32, doc_h: i32) {
 
 #[cfg(test)]
 mod tests {
+    use super::{drive_path, file_url};
+
+    #[test]
+    fn file_urls_and_paths_round_trip_for_both_path_styles() {
+        assert_eq!(file_url("/tmp/a/p.html"), "file:///tmp/a/p.html");
+        assert_eq!(file_url(r"C:\Users\u\p.html"), "file:///C:/Users/u/p.html");
+        assert_eq!(drive_path("/C:/Users/u/b.png"), "C:/Users/u/b.png");
+        assert_eq!(drive_path("/tmp/a/b.png"), "/tmp/a/b.png");
+        assert_eq!(drive_path("/c/d.png"), "/c/d.png");
+    }
+
     use super::*;
 
     const PAGE: &str = "<!doctype html><title> Hi  there </title><body style='margin:0'>\

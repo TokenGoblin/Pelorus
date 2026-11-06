@@ -1,0 +1,46 @@
+# TEMPORARY diagnostic for ci/windows-green; deleted before the branch is done.
+name: repro-diag
+on:
+  push:
+    branches: [ci/windows-green]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo build --locked -p px-xtask
+      - name: Build A
+        shell: bash
+        run: |
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          TMP="$RUNNER_TEMP"
+          export HOME="$TMP/home-a"
+          export CARGO_HOME="$HOME/.cargo"
+          mkdir -p "$CARGO_HOME"
+          target/debug/px-xtask build-and-hash "$TMP/short" > "$TMP/a.txt"
+      - name: Build B
+        shell: bash
+        run: |
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          sudo useradd -m -s /bin/bash builder2
+          chmod 0755 "$HOME"
+          sudo mkdir -p /home/builder2/work
+          sudo cp -r "$GITHUB_WORKSPACE" /home/builder2/work/a-considerably-longer-path
+          sudo chown -R builder2:builder2 /home/builder2
+          sudo -u builder2 env HOME=/home/builder2 CARGO_HOME=/home/builder2/.cargo RUSTUP_HOME="$RUSTUP_HOME" PATH="$PATH" \
+            bash -c 'cd /home/builder2/work/a-considerably-longer-path && target/debug/px-xtask build-and-hash /home/builder2/work/build-b' > "$RUNNER_TEMP/b.txt"
+      - name: Diff
+        shell: bash
+        run: |
+          A="$RUNNER_TEMP/short/target/release/px-shell"
+          B=/home/builder2/work/build-b/target/release/px-shell
+          sudo cp $B $RUNNER_TEMP/px-shell-b; sudo chmod 644 $RUNNER_TEMP/px-shell-b
+          B=$RUNNER_TEMP/px-shell-b
+          ls -l $A $B
+          cmp -l $A $B | wc -l
+          diff <(strings -a $A) <(strings -a $B) | head -60 || true
+          for s in $(readelf -SW $A | sed -n 's/.*\] \(\.[^ ]*\) .*/\1/p'); do
+            a=$(objcopy --dump-section $s=/dev/stdout $A 2>/dev/null | sha256sum | cut -c1-12)
+            b=$(objcopy --dump-section $s=/dev/stdout $B 2>/dev/null | sha256sum | cut -c1-12)
+            [ "$a" = "$b" ] || echo "SECTION DIFFERS $s"
+          done
