@@ -285,7 +285,8 @@ fn stylesheets(res: &Resources, arena: &px_dom::Arena) -> Vec<(String, String)> 
 fn title_of(arena: &px_dom::Arena) -> String {
     for id in arena.descendants(arena.document()) {
         if let Some(n) = arena.get(id)
-            && n.element_name().is_some_and(|q| &*q.local == "title")
+            && n.element_name()
+                .is_some_and(|q| &*q.local == "title" && &*q.ns == "http://www.w3.org/1999/xhtml")
         {
             let t = px_layout::inline::collect_text(arena, id);
             return t.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -438,6 +439,15 @@ fn image_tables(
 ) -> (px_paint::ImageSet, BTreeMap<px_dom::NodeId, (u32, u32)>) {
     let mut set = px_paint::ImageSet::default();
     let mut sizes = BTreeMap::new();
+    // Inline `<svg>` elements are pictures drawn from their own markup.
+    let inline = px_css::view::with_dom(arena, root, |dom| {
+        px_paint::svg::inline_images(arena, &|n| px_css::image_style::text_color(dom, n))
+    })
+    .unwrap_or_default();
+    for (id, img) in inline {
+        sizes.insert(id, (img.width, img.height));
+        set.elements.insert(id, img);
+    }
     if res.images.is_empty() {
         return (set, sizes);
     }

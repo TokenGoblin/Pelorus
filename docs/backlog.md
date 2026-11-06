@@ -1658,3 +1658,17 @@ translate-only `transform`, `z-index` on flex/grid items. Still open:
   better instrument for real-page layout.
 - Flex/grid items' `order` does not affect paint order; grid `z-index` ordering of
   overlapped items is by DOM order only.
+
+## SVG (ADR 049)
+
+- **Render SVG at the used size.** The picture is made once at the intrinsic size
+  before layout and then scaled as a bitmap, so an SVG shown larger than its
+  intrinsic size is blurry and an `<img>` of another aspect ratio is stretched
+  instead of re-running `preserveAspectRatio`. Needs the used size known when the
+  picture is made (layout-to-paint feedback, or vector items in the display list).
+- Not drawn: `text`, `image`, `mask`, `pattern`, `marker`, `filter`, bounding-box
+  `clipPath` units, nested-`svg` overflow clipping, radial focal points, animation.
+- Page stylesheets do not reach inside an inline `<svg>` (`.icon path { fill: red }`);
+  only its own `style=""`/`<style>` and the element's computed `color` do.
+- Inline `<svg>` with a `viewBox` and no `width`/`height` is 300x150 contained, not
+  100% wide as in browsers.

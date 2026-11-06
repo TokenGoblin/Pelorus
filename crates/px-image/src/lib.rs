@@ -21,6 +21,7 @@
 //! | JPEG   | baseline and progressive Huffman, 8-bit, grey and YCbCr, any 1/2/4 sampling, restart markers | arithmetic, 12-bit, lossless, CMYK/YCCK, hierarchical |
 //! | BMP    | 1/4/8/16/24/32 bit, RLE4/RLE8, bit fields, top-down and bottom-up, core/V3/V4/V5 headers | JPEG/PNG-in-BMP |
 //! | ICO    | the largest frame, BMP or PNG encoded | cursors |
+//! | SVG    | static subset, rendered at its intrinsic size (ADR 049, [`svg`]) | text, filters, masks, patterns |
 //!
 //! WebP is recognised by [`sniff`] and rejected with `Unsupported`; a later ADR
 //! decides whether to write VP8/VP8L.
@@ -39,6 +40,7 @@ pub mod inflate;
 pub mod jpeg;
 pub mod limits;
 pub mod png;
+pub mod svg;
 
 pub use limits::Limits;
 
@@ -131,6 +133,8 @@ pub enum Format {
     Ico,
     /// Recognised, never decoded.
     Webp,
+    /// Static SVG (see [`svg`]); recognised by its text, not a magic number.
+    Svg,
 }
 
 /// Identify a format from its leading magic bytes only.
@@ -147,6 +151,8 @@ pub fn sniff(data: &[u8]) -> Option<Format> {
         Some(Format::Ico)
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP".as_slice()) {
         Some(Format::Webp)
+    } else if svg::looks_like_svg(data) {
+        Some(Format::Svg)
     } else {
         None
     }
@@ -161,6 +167,7 @@ pub fn decode(data: &[u8], limits: &Limits) -> Result<Decoded, DecodeError> {
         Some(Format::Bmp) => bmp::decode(data, limits).map(Decoded::Still),
         Some(Format::Ico) => ico::decode(data, limits).map(Decoded::Still),
         Some(Format::Webp) => Err(DecodeError::Unsupported("WebP")),
+        Some(Format::Svg) => svg::decode(data, limits).map(Decoded::Still),
         None => Err(DecodeError::UnknownFormat),
     }
 }

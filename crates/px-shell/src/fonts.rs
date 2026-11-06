@@ -3,7 +3,7 @@
 //! chrome use one registry, so one `GlyphSource` serves both. Advances only (no
 //! shaping) for the chrome, like the px-ui render baselines.
 //!
-//! # Web fonts (ADR 049)
+//! # Web fonts (ADR 050)
 //!
 //! A page's `@font-face` rules are read from its stylesheets ([`crate::page::font_plan`]),
 //! each `url()` source is fetched ([`load_web`] through `px-net`, [`load_local`]

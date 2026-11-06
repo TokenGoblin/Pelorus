@@ -15,6 +15,9 @@ px-layout = { path = "../px-layout", version = "0.0.0" }
 # `app_units::Au` still arrives through `px_layout::geom`.
 px-css = { path = "../px-css", version = "0.0.0" }
 px-dom = { path = "../px-dom", version = "0.0.0" }
+# Inline `<svg>` is drawn by the first-party static SVG renderer (ADR 049).
+# A workspace crate, std only: no third-party crate is added.
+px-image = { path = "../px-image", version = "0.0.0" }
 
 [dev-dependencies]
 # Glyph-run tests draw real Ahem glyphs. px-text is a workspace path: no
@@ -22,5 +25,3 @@ px-dom = { path = "../px-dom", version = "0.0.0" }
 # is no cycle. The library itself does not depend on it (it reads outlines
 # through `raster::GlyphSource`).
 px-text = { path = "../px-text", version = "0.0.0" }
-# The render corpus decodes its pictures with the first-party decoders.
-px-image = { path = "../px-image", version = "0.0.0" }

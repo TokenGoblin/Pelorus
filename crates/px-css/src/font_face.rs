@@ -6,7 +6,7 @@
 //! name no stylo type: family, the `url()` sources already resolved against the
 //! stylesheet's base, weight and style ranges, `unicode-range`, `font-display`.
 //!
-//! Decisions (ADR 049):
+//! Decisions (ADR 050):
 //!
 //! * `local()` sources are dropped. Reading a name from the installed set would be
 //!   a fingerprinting oracle (a page could probe which fonts exist by whether the

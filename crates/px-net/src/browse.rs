@@ -58,10 +58,34 @@ pub enum ImageKind {
     Bmp,
     Ico,
     Webp,
+    /// Static SVG, drawn by `px-image` (ADR 049): rendered, never scripted,
+    /// and it loads nothing.
+    Svg,
 }
 
-/// Sniff an image signature. `None` for anything else, SVG and HTML included:
-/// an unknown body is refused, not guessed at.
+/// Whether `body` starts like an SVG document: after a BOM and white space a
+/// `<`, and `<svg` within the first 4 KiB (past an XML declaration, comments
+/// or a doctype). HTML pages do not match: they would need `<svg` before any
+/// other markup, and they are refused by [`FetchedImage`] callers' kind check
+/// anyway.
+fn looks_like_svg(body: &[u8]) -> bool {
+    let b = body.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(body);
+    let Some(start) = b.iter().position(|c| !c.is_ascii_whitespace()) else {
+        return false;
+    };
+    let b = b.get(start..).unwrap_or_default();
+    if !b.starts_with(b"<") {
+        return false;
+    }
+    let head = b.get(..b.len().min(4096)).unwrap_or(b);
+    let lower: Vec<u8> = head.iter().map(u8::to_ascii_lowercase).collect();
+    !lower.starts_with(b"<!doctype html")
+        && !lower.starts_with(b"<html")
+        && lower.windows(4).any(|w| w == b"<svg")
+}
+
+/// Sniff an image signature. `None` for anything else, HTML included: an
+/// unknown body is refused, not guessed at. SVG is recognised by its text.
 #[must_use]
 pub fn sniff_image(body: &[u8]) -> Option<ImageKind> {
     if body.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
@@ -76,6 +100,8 @@ pub fn sniff_image(body: &[u8]) -> Option<ImageKind> {
         Some(ImageKind::Ico)
     } else if body.starts_with(b"RIFF") && body.get(8..12) == Some(b"WEBP".as_slice()) {
         Some(ImageKind::Webp)
+    } else if looks_like_svg(body) {
+        Some(ImageKind::Svg)
     } else {
         None
     }
@@ -365,7 +391,7 @@ impl Loader<'_> {
     /// A body is returned only when it is plausibly a picture: a 2xx response,
     /// at most [`MAX_IMAGE_BYTES`], a `Content-Type` that is absent,
     /// `image/*` or `application/octet-stream`, and bytes that start with a
-    /// signature [`sniff_image`] knows. Anything else (HTML, JSON, SVG, an
+    /// signature [`sniff_image`] knows. Anything else (HTML, JSON, an
     /// unknown signature) is refused with [`LoadError::NoResponse`], whatever
     /// the server called it.
     pub fn image(&mut self, src: &str) -> Result<FetchedImage, LoadError> {
@@ -399,8 +425,9 @@ impl Loader<'_> {
             let ok = essence.is_empty()
                 || essence.starts_with("image/")
                 || essence == "application/octet-stream";
-            // SVG is a document, not a bitmap this loader hands to a decoder.
-            if !ok || essence == "image/svg+xml" {
+            // `image/svg+xml` is an image type (`image/` above); whether the
+            // body really is SVG is the sniffer's call, below.
+            if !ok {
                 return Err(LoadError::NoResponse);
             }
         }
@@ -633,11 +660,20 @@ mod tests {
             sniff_image(b"RIFF\x00\x00\x00\x00WEBPVP8 "),
             Some(ImageKind::Webp)
         );
-        // Documents, scripts, SVG, truncations and the empty body are not pictures.
+        // SVG is recognised by its text, after a declaration or comments too.
+        for svg in [
+            &b"<svg xmlns='http://www.w3.org/2000/svg'/>"[..],
+            b"<?xml version='1.0'?><svg/>",
+            b"\xEF\xBB\xBF  \n<!-- c --><svg/>",
+        ] {
+            assert_eq!(sniff_image(svg), Some(ImageKind::Svg), "{svg:?}");
+        }
+        // Documents, scripts, truncations and the empty body are not pictures.
         for not in [
             &b"<html>"[..],
-            b"<svg xmlns='http://www.w3.org/2000/svg'/>",
-            b"<?xml version='1.0'?><svg/>",
+            b"<!DOCTYPE html><html><body><svg></svg></body></html>",
+            b"<html><svg/></html>",
+            b"<p>no svg element here</p>",
             b"GIF8",
             b"\x89PNG",
             b"RIFF\x00\x00\x00\x00WAVEfmt ",

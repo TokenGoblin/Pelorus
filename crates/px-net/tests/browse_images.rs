@@ -152,25 +152,44 @@ fn what_is_not_a_picture_is_refused_whatever_it_is_called() {
             ),
             // A picture's bytes under a document's label.
             route("/mislabel", "Content-Type: text/plain\r\n", PNG),
-            // SVG is a document.
+            // SVG is drawn by px-image, which never runs or loads anything in it;
+            // an SVG label on a page is still just a page.
             route(
                 "/v.svg",
                 "Content-Type: image/svg+xml\r\n",
+                b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+            ),
+            route(
+                "/fake.svg",
+                "Content-Type: image/svg+xml\r\n",
+                b"<html><body>not a picture</body></html>",
+            ),
+            route(
+                "/svg-as-text",
+                "Content-Type: text/html\r\n",
                 b"<svg xmlns='http://www.w3.org/2000/svg'/>",
             ),
             // No label at all is fine when the bytes are right.
             route("/bare", "", PNG),
             route("/octet", "Content-Type: application/octet-stream\r\n", PNG),
         ],
-        8,
+        10,
     );
     let session = WebSession::new().unwrap();
     let mut loader = session.loader();
     loader.connect_to(addr);
     loader.navigate("http://site.test/").unwrap();
-    for bad in ["/html", "/lie.png", "/mislabel", "/v.svg", "/missing"] {
+    for bad in [
+        "/html",
+        "/lie.png",
+        "/mislabel",
+        "/fake.svg",
+        "/svg-as-text",
+        "/missing",
+    ] {
         assert!(loader.image(bad).is_err(), "{bad}");
     }
+    assert_eq!(loader.image("/v.svg").unwrap().kind, ImageKind::Svg);
     assert!(loader.image("/bare").is_ok());
     assert!(loader.image("/octet").is_ok());
 }

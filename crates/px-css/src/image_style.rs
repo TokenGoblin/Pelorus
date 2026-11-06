@@ -278,3 +278,15 @@ pub fn replaced_style(dom: Dom<'_>, node: NodeId) -> Option<ReplacedStyle> {
     let data = style::dom::TElement::borrow_data(&element)?;
     Some(replaced_style_of(data.styles.primary()))
 }
+
+/// The computed `color` of `node` as 8-bit sRGB RGBA: what `currentColor` means
+/// inside an inline `<svg>` drawn as a picture.
+#[must_use]
+pub fn text_color(dom: Dom<'_>, node: NodeId) -> Option<[u8; 4]> {
+    let view = dom.node(node)?;
+    let element = crate::dom::StyleElement::new(view)?;
+    let data = style::dom::TElement::borrow_data(&element)?;
+    Some(crate::paint::rgba(
+        data.styles.primary().get_inherited_text().clone_color(),
+    ))
+}

@@ -22,12 +22,14 @@ const LIMITS: Limits = Limits {
     max_total_bytes: 64 << 20,
 };
 
-const MAGICS: [&[u8]; 5] = [
+const MAGICS: [&[u8]; 6] = [
     &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
     b"GIF89a",
     &[0xFF, 0xD8, 0xFF],
     b"BM",
     &[0, 0, 1, 0],
+    // Static SVG (ADR 049): the parser, style, path and raster code.
+    b"<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>",
 ];
 
 fn consistent(i: &Image) {

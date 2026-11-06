@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!DOCTYPE svg [
+  <!ENTITY a "aaaaaaaaaa">
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="80" onload="alert(1)">
+  <style>
+    @import url("https://evil.example/steal.css");
+    .bad { fill: url(https://evil.example/x.svg#p) red; }
+    rect.ok { fill: #2e7d32 }
+  </style>
+  <script>alert(document.cookie)</script>
+  <image href="https://evil.example/track.png" x="0" y="0" width="120" height="80"/>
+  <foreignObject x="0" y="0" width="120" height="80"><div xmlns="http://www.w3.org/1999/xhtml" onclick="alert(2)">pwn</div></foreignObject>
+  <use href="https://evil.example/s.svg#x" x="0" y="0"/>
+  <use xlink:href="file:///etc/hostname#x"/>
+  <rect class="bad" x="70" y="10" width="40" height="30" onclick="alert(3)"/>
+  <rect class="ok" x="10" y="10" width="50" height="60"/>
+  <animate attributeName="x" from="0" to="100" dur="1s"/>
+</svg>

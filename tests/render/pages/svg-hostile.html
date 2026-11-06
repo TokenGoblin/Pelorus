@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<title>svg: hostile SVG images draw only their safe shapes and load nothing</title>
+<style>
+body { margin: 8px; font: 16px/1.2 "Noto Sans"; color: #222; background: #fff8e1 }
+img { vertical-align: top; outline: 1px dashed #999; background: #fff }
+p { margin: 10px 0 4px 0 }
+</style>
+<p>script, image, foreignObject, external use, @import and handlers are ignored:</p>
+<img src="img/hostile.svg" alt="hostile">
+<p>a billion-laughs entity document is refused whole:</p>
+<img src="img/bomb.svg" alt="refused: entity expansion">
+<p>so is an exponential use tree:</p>
+<img src="img/use-bomb.svg" alt="refused: use bomb">
+<p>a page's text is not an image:</p>
+<img src="img/not-an-image.html" alt="refused: html">

@@ -345,3 +345,19 @@ source = "tests/render/pages/webfont-unicode-range.html"
 [[page]]
 id = "font-generics"
 source = "tests/render/pages/font-generics.html"
+
+[[page]]
+id = "svg-img"
+source = "tests/render/pages/svg-img.html"
+
+[[page]]
+id = "svg-inline"
+source = "tests/render/pages/svg-inline.html"
+
+[[page]]
+id = "svg-background"
+source = "tests/render/pages/svg-background.html"
+
+[[page]]
+id = "svg-hostile"
+source = "tests/render/pages/svg-hostile.html"

@@ -32,8 +32,13 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   `Access-Control-Allow-Origin`; at most 32 rules, 8 MiB each, a 3 s phase budget
   and a 100 ms one for `font-display: optional`; unwrapped (TTF, WOFF, WOFF2) and
   validated by `px-text`; a font that fails or arrives late is absent and text
-  falls to the next family (ADR 049). `local()` sources are never read. Scripts,
+  falls to the next family (ADR 050). `local()` sources are never read. Scripts,
   frames and forms are never requested and never run. Nothing persists:
+  decoded by `px-image` (PNG/APNG, GIF, JPEG, BMP, ICO; first frame only; static
+  SVG is drawn at its intrinsic size and loads nothing, ADR 049; WebP is refused).
+  Inline `<svg>` elements are drawn too, from their own markup (`px_paint::svg`). A picture that fails for any reason is skipped and the
+  page shows its `alt` text. Scripts, fonts, frames and forms are never
+  requested and never run. Nothing persists:
   the cookie jar lives for one page load, there is no cache and no history store.
   A local page cannot link out to the web. Any failure shows `px-pages`' error
   page. The loader is synchronous on the UI thread, in-process; the content /

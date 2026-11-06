@@ -15,7 +15,7 @@
 //! (`tests/fonts`, ADR 036 (g)). Faces that arrive later (a page's `@font-face`
 //! fonts, and the installed faces the browser binary maps the generic families
 //! to) are never in the registry: they live in [`crate::fontset`] under ids from
-//! `WEB_BASE` up, and reach a style through its `chain` (ADR 049). Nothing reads
+//! `WEB_BASE` up, and reach a style through its `chain` (ADR 050). Nothing reads
 //! the machine's fonts unless the embedder installs them. A named family is looked
 //! up in the registry (so `font-family: "Noto Sans"` selects it and `Ahem` selects
 //! Ahem), and an unknown family, a generic family (`serif`, `sans-serif`,
