@@ -359,12 +359,13 @@ pub fn build_page_fonts(
                 break;
             }
         }
+        let (lo, hi) = d.weight;
         if let Some(font) = found {
             out.faces.push(PageFace {
                 family: d.family.to_ascii_lowercase(),
                 weight: (
-                    (d.weight.0 * 1000.0).round() as i32,
-                    (d.weight.1 * 1000.0).round() as i32,
+                    (lo * 1000.0).round() as i32,
+                    (hi * 1000.0).round() as i32,
                 ),
                 style: d.style,
                 ranges: d.ranges.clone(),
