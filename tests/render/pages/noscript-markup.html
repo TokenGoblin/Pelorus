@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<title>noscript is markup when scripting is off</title>
+<style>
+/* HTML section 13.2.6.4.7 (scripting flag disabled) and section 15.3.1: the contents of
+   a noscript element are parsed as elements and displayed. */
+.js-only { display: none }
+.a { height: 30px; background: #3a6; margin: 4px }
+.b { height: 30px; background: #36c; margin: 4px }
+</style>
+<div class="js-only"><div style="height:80px;background:#c33"></div></div>
+<noscript><div class="a"></div><div class="b"></div></noscript>
+<div><noscript><p style="height:20px;background:#fc0;margin:4px"></p></noscript></div>

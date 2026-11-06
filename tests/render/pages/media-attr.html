@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<title>The media attribute of style gates the sheet</title>
+<style media="(min-width: 600px)">.a { background: #3a6 }</style>
+<style media="(max-width: 500px)">.b { background: #c33 }</style>
+<style media="screen and (min-width: 2000px), print">.c { background: #c33 }</style>
+<style media="screen">.d { background: #36c }</style>
+<style media="">.e { background: #fc0 }</style>
+<style media="not all">.f { background: #c33 }</style>
+<style media="(min-width: 600px) and (max-width: 900px)">.g { background: #639 }</style>
+<style media="bogus ( {">.h { background: #c33 }</style>
+<style>div { height: 20px; margin: 4px; background: #ccc }</style>
+<div class="a"></div><div class="b"></div><div class="c"></div><div class="d"></div>
+<div class="e"></div><div class="f"></div><div class="g"></div><div class="h"></div>

@@ -84,7 +84,8 @@ fn resolve(root: &Path, from: &Path, href: &str) -> Option<PathBuf> {
     Some(from.parent()?.join(href))
 }
 
-fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
+/// The author sheets of a page with their `media` attribute (empty: always).
+fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let document = arena.document();
     for id in arena.descendants(document) {
@@ -93,7 +94,8 @@ fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
             continue;
         };
         if name.local.as_ref() == "style" {
-            out.push(px_layout::inline::collect_text(arena, id));
+            let media = attr(node, "media").unwrap_or("").to_string();
+            out.push((px_layout::inline::collect_text(arena, id), media));
         } else if name.local.as_ref() == "link" {
             let rel = attr(node, "rel").unwrap_or("").to_ascii_lowercase();
             if !rel.split_ascii_whitespace().any(|w| w == "stylesheet") {
@@ -103,7 +105,7 @@ fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
             if let Some(css) =
                 resolve(root, path, href).and_then(|p| std::fs::read_to_string(p).ok())
             {
-                out.push(css);
+                out.push((css, attr(node, "media").unwrap_or("").to_string()));
             }
         }
     }
@@ -255,7 +257,8 @@ fn page_fonts(
 
 fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, String> {
     let source = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
-    let dom = px_dom::parse(&source);
+    // No script runs here, as in the browser shell: `<noscript>` is markup.
+    let dom = px_dom::parse_with(&source, px_dom::ParseOptions { scripting: false });
     if dom.abandoned {
         return Err("parse abandoned".into());
     }
@@ -267,9 +270,9 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
         quirks,
         dark,
     );
-    engine.add_author_stylesheet(UA_STYLESHEET, "about:ua");
-    for css in stylesheets(root, path, &arena) {
-        engine.add_author_stylesheet(&css, "https://corpus.invalid/page.css");
+    engine.add_user_agent_stylesheet(UA_STYLESHEET, "about:ua");
+    for (css, media) in stylesheets(root, path, &arena) {
+        engine.add_author_stylesheet_for_media(&css, "https://corpus.invalid/page.css", &media);
     }
     // Fonts are read before the cascade is resolved and stay installed (on this
     // thread) until the page is rasterized. Vendored WPT pages get none.
@@ -287,7 +290,11 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     // around it, which does not place those boxes yet; it rendered picture-less
     // (test and reference alike) before pictures existed, and still does.
     let (images, sizes, ratio_only) = if own {
-        let page_css = stylesheets(root, path, &arena).join("\n");
+        let page_css = stylesheets(root, path, &arena)
+            .into_iter()
+            .map(|(css, _media)| css)
+            .collect::<Vec<_>>()
+            .join("\n");
         pictures(path, &arena, &style_root, &page_css)
     } else {
         Default::default()

@@ -373,3 +373,15 @@ source = "tests/render/pages/svg-inline-fill.html"
 [[page]]
 id = "svg-inline-css"
 source = "tests/render/pages/svg-inline-css.html"
+
+[[page]]
+id = "layer-vs-ua"
+source = "tests/render/pages/layer-vs-ua.html"
+
+[[page]]
+id = "noscript-markup"
+source = "tests/render/pages/noscript-markup.html"
+
+[[page]]
+id = "media-attr"
+source = "tests/render/pages/media-attr.html"
