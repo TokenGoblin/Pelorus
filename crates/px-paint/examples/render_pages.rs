@@ -113,18 +113,40 @@ fn stylesheets(root: &Path, path: &Path, arena: &px_dom::Arena) -> Vec<String> {
 /// Decode the file at `rel` next to the page; a scheme, a host or an absolute
 /// path is not read.
 fn picture(page: &Path, rel: &str) -> Option<std::sync::Arc<px_paint::ImageData>> {
+    picture_with_vector(page, rel).map(|(img, _)| img)
+}
+
+/// As [`picture`], and for an SVG its document (rendered again at the used size).
+fn picture_with_vector(
+    page: &Path,
+    rel: &str,
+) -> Option<(
+    std::sync::Arc<px_paint::ImageData>,
+    Option<std::sync::Arc<px_image::svg::Document>>,
+)> {
     let rel = rel.split(['#', '?']).next().unwrap_or("");
     if rel.is_empty() || rel.contains(':') || rel.starts_with('/') {
         return None;
     }
     let bytes = std::fs::read(page.parent()?.join(rel)).ok()?;
-    let decoded = px_image::decode(&bytes, &px_image::Limits::DEFAULT).ok()?;
-    let img = decoded.first_image()?;
-    Some(std::sync::Arc::new(px_paint::ImageData {
-        width: img.width,
-        height: img.height,
-        rgba: img.rgba.clone(),
-    }))
+    let limits = px_image::Limits::DEFAULT;
+    let (img, vector) = if px_image::sniff(&bytes) == Some(px_image::Format::Svg) {
+        let doc = px_image::svg::Document::parse(&bytes).ok()?;
+        let (w, h) = doc.intrinsic_size();
+        let img = doc.render(w, h, [0, 0, 0, 255], &limits).ok()?;
+        (img, Some(std::sync::Arc::new(doc)))
+    } else {
+        let decoded = px_image::decode(&bytes, &limits).ok()?;
+        (decoded.first_image()?.clone(), None)
+    };
+    Some((
+        std::sync::Arc::new(px_paint::ImageData {
+            width: img.width,
+            height: img.height,
+            rgba: img.rgba,
+        }),
+        vector,
+    ))
 }
 
 /// The pictures of a page: each `<img src>` and each `background-image` URL (the
@@ -134,27 +156,49 @@ fn pictures(
     page: &Path,
     arena: &px_dom::Arena,
     style_root: &px_css::view::StyleRoot,
+    page_css: &str,
 ) -> (
     px_paint::ImageSet,
     std::collections::BTreeMap<px_dom::NodeId, (u32, u32)>,
+    std::collections::BTreeSet<px_dom::NodeId>,
 ) {
     let mut set = px_paint::ImageSet::default();
     let mut sizes = std::collections::BTreeMap::new();
+    let mut ratio_only = std::collections::BTreeSet::new();
     for id in arena.descendants(arena.document()) {
         let Some(node) = arena.get(id) else { continue };
         if node.element_name().is_some_and(|n| &*n.local == "img")
-            && let Some(img) = attr(node, "src").and_then(|s| picture(page, s))
+            && let Some((img, vector)) =
+                attr(node, "src").and_then(|s| picture_with_vector(page, s))
         {
             sizes.insert(id, (img.width, img.height));
             set.elements.insert(id, img);
+            if let Some(doc) = vector {
+                if doc.is_ratio_only() {
+                    ratio_only.insert(id);
+                }
+                set.vectors.insert(
+                    id,
+                    px_paint::Vector {
+                        doc,
+                        color: [0, 0, 0, 255],
+                    },
+                );
+            }
         }
     }
     px_css::view::with_dom(arena, style_root, |dom| {
-        for (id, img) in
-            px_paint::svg::inline_images(arena, &|n| px_css::image_style::text_color(dom, n))
-        {
-            sizes.insert(id, (img.width, img.height));
-            set.elements.insert(id, img);
+        for item in px_paint::svg::inline_images(
+            arena,
+            &|n| px_css::image_style::text_color(dom, n),
+            page_css,
+        ) {
+            sizes.insert(item.node, (item.image.width, item.image.height));
+            if item.ratio_only {
+                ratio_only.insert(item.node);
+            }
+            set.vectors.insert(item.node, item.vector);
+            set.elements.insert(item.node, item.image);
         }
         for id in arena.descendants(arena.document()) {
             for layer in px_css::image_style::background_layers(dom, id) {
@@ -166,7 +210,7 @@ fn pictures(
             }
         }
     });
-    (set, sizes)
+    (set, sizes, ratio_only)
 }
 
 /// The fonts of a corpus page: its `@font-face` rules (files under `tests/fonts`
@@ -242,17 +286,19 @@ fn render(root: &Path, path: &Path, dark: bool) -> Result<px_paint::Canvas, Stri
     // image (`grid-abspos-staticpos-align-self-img-001`) tests the layout mode
     // around it, which does not place those boxes yet; it rendered picture-less
     // (test and reference alike) before pictures existed, and still does.
-    let (images, sizes) = if own {
-        pictures(path, &arena, &style_root)
+    let (images, sizes, ratio_only) = if own {
+        let page_css = stylesheets(root, path, &arena).join("\n");
+        pictures(path, &arena, &style_root, &page_css)
     } else {
         Default::default()
     };
-    let tree = px_layout::replaced::layout_document_with_images(
+    let tree = px_layout::replaced::layout_document_with_pictures(
         &arena,
         &style_root,
         px(WIDTH as i32),
         Some(px(MIN_HEIGHT as i32)),
         &sizes,
+        &ratio_only,
     )
     .ok_or("layout failed")?;
 

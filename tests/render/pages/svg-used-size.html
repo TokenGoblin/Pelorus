@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<title>svg: an img svg is drawn again at its used size, sharp and with its own aspect ratio</title>
+<style>
+body { margin: 8px; font: 16px/1.2 "Noto Sans"; color: #222; background: #fff }
+.row { margin: 0 0 8px 0 }
+img { vertical-align: top; outline: 1px solid #ccc }
+.x1 { width: 40px; height: 20px }
+.x6 { width: 240px; height: 120px }
+.tall { width: 80px; height: 120px }
+.wide { width: 240px; height: 40px }
+.contain { width: 100px; height: 100px; object-fit: contain; background: #fafafa }
+.cover { width: 100px; height: 100px; object-fit: cover; background: #fafafa }
+</style>
+<div class="row">40x20 svg at 1x and 6x (edges stay sharp):
+  <img class="x1" src="img/ratio.svg" alt="ratio"> <img class="x6" src="img/ratio.svg" alt="ratio"></div>
+<div class="row">forced to other shapes, centred and not stretched (meet):
+  <img class="tall" src="img/ratio.svg" alt="ratio"> <img class="wide" src="img/ratio.svg" alt="ratio"></div>
+<div class="row">preserveAspectRatio none stretches as asked:
+  <img class="tall" src="img/ratio-none.svg" alt="stretch"> <img class="wide" src="img/ratio-none.svg" alt="stretch"></div>
+<div class="row">object-fit contain and cover in a 100x100 box:
+  <img class="contain" src="img/ratio.svg" alt="ratio"> <img class="cover" src="img/ratio.svg" alt="ratio"></div>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<title>svg: page style sheets reach inside inline svg</title>
+<style>
+body { margin: 8px; font: 16px/1.2 "Noto Sans"; color: #222; background: #fff }
+.row { margin: 0 0 10px 0 }
+svg { width: 40px; height: 40px; vertical-align: middle; margin-right: 8px }
+.icon path { fill: #c62828 }
+.btn > svg circle { fill: #1565c0; stroke: #0d47a1; stroke-width: 2 }
+#special rect { fill: #2e7d32 }
+.dark svg .bg { fill: #263238 }
+.dark svg .fg { fill: #ffd54f }
+.hover:hover path { fill: #000 }
+@media print { .icon path { fill: #000 } }
+</style>
+<div class="row">class on an ancestor styles a path (beats the attribute):
+  <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 2 L22 12 L12 22 L2 12 Z" fill="#999"/></svg></span>
+  <svg viewBox="0 0 24 24"><path d="M12 2 L22 12 L12 22 L2 12 Z" fill="#999"/></svg> (no class: the attribute stands)</div>
+<div class="row">child and descendant combinators:
+  <span class="btn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#999"/></svg></span>
+  <span class="btn"><b><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#999"/></svg></b></span> (not a direct child of .btn: the attribute stands)</div>
+<div class="row" id="special">id on an ancestor:
+  <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="#999"/></svg></div>
+<div class="row dark">two classes inside the svg:
+  <svg viewBox="0 0 24 24"><rect class="bg" width="24" height="24" rx="4"/><circle class="fg" cx="12" cy="12" r="7"/></svg></div>
+<div class="row hover">unsupported (pseudo-class) rules are ignored, @media print too:
+  <svg viewBox="0 0 24 24"><path d="M4 20 L12 4 L20 20 Z" fill="#6a1b9a"/></svg></div>

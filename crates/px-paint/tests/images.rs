@@ -567,3 +567,90 @@ fn an_empty_image_set_builds_the_same_list_as_before() {
     assert_eq!(a, b);
     assert!(a.images.is_empty());
 }
+
+/// An SVG picture (ADR 051): the raster at the intrinsic size (2x2) is what
+/// layout sees; paint draws the document again at the used size.
+fn svg_page(svg: &str, css: &str, w: u32, h: u32) -> (DisplayList, Canvas) {
+    let doc = px_image::svg::Document::parse(svg.as_bytes()).expect("svg");
+    let (iw, ih) = doc.intrinsic_size();
+    let raster = doc
+        .render(iw, ih, [0, 0, 0, 255], &px_image::Limits::DEFAULT)
+        .expect("rendered");
+    let dom = px_dom::parse("<html><body><img id=i></body></html>");
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let arena = dom.arena;
+    let mut engine = px_css::engine::StyleEngine::new(w as f32, h as f32, quirks);
+    engine.add_author_stylesheet(&format!("{BASE} {css}"), "https://example.invalid/a.css");
+    let root = engine.style_root_for(&arena);
+    engine.resolve(&arena, &root).expect("a root element");
+    let n = node_by_id(&arena, "i");
+    let mut set = ImageSet::default();
+    set.elements.insert(
+        n,
+        Arc::new(ImageData {
+            width: raster.width,
+            height: raster.height,
+            rgba: raster.rgba,
+        }),
+    );
+    set.vectors.insert(
+        n,
+        px_paint::Vector {
+            doc: Arc::new(doc),
+            color: [0, 0, 0, 255],
+        },
+    );
+    let sizes = BTreeMap::from([(n, (iw, ih))]);
+    let tree =
+        px_layout::replaced::layout_document_with_images(&arena, &root, px(w as i32), None, &sizes)
+            .expect("laid out");
+    let list = px_paint::build_with_images(&arena, &root, &tree, px(w as i32), px(h as i32), &set);
+    let cv = rasterize(&list, w, h).expect("rasterized");
+    (list, cv)
+}
+
+const RED_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'>\
+                       <rect width='1' height='2' fill='#f00'/></svg>";
+
+#[test]
+fn an_svg_img_is_rendered_again_at_the_size_it_is_drawn() {
+    let (list, cv) = svg_page(
+        RED_SVG,
+        "img { display: block; width: 40px; height: 40px }",
+        40,
+        40,
+    );
+    // The drawn picture is 40x40, not the 2x2 raster: the edge is exact.
+    assert!(list.images.iter().any(|i| (i.width, i.height) == (40, 40)));
+    assert_eq!(cv.pixel(19, 20), Some(RED));
+    assert_eq!(cv.pixel(20, 20), Some(WHITE));
+}
+
+#[test]
+fn a_different_aspect_ratio_reruns_preserve_aspect_ratio() {
+    let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'>\
+               <rect width='2' height='2' fill='#f00'/></svg>";
+    let (_, cv) = svg_page(
+        svg,
+        "img { display: block; width: 40px; height: 20px }",
+        40,
+        20,
+    );
+    // Meet: a 20x20 square centred in 40x20, not stretched to the box.
+    assert_eq!(cv.pixel(9, 10), Some(WHITE));
+    assert_eq!(cv.pixel(10, 10), Some(RED));
+    assert_eq!(cv.pixel(29, 10), Some(RED));
+    assert_eq!(cv.pixel(30, 10), Some(WHITE));
+}
+
+#[test]
+fn a_picture_over_the_render_bound_falls_back_to_the_raster() {
+    // 4000 x 4000 is over the per-picture pixel bound: the 2x2 raster is scaled.
+    let (list, _) = svg_page(
+        RED_SVG,
+        "img { display: block; width: 4000px; height: 4000px }",
+        8,
+        8,
+    );
+    assert!(list.images.iter().all(|i| (i.width, i.height) == (2, 2)));
+}

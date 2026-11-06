@@ -118,6 +118,61 @@ impl Document {
         self.doc.get(0)
     }
 
+    /// Whether the document has a `viewBox` but no absolute `width` or
+    /// `height`: it has an aspect ratio and no size, so a replaced element
+    /// showing it fills the width it is given (CSS Sizing 3 section 5.1)
+    /// instead of taking [`Document::intrinsic_size`].
+    pub fn is_ratio_only(&self) -> bool {
+        let Some(root) = self.root() else {
+            return false;
+        };
+        let abs = |n: &str| {
+            root.attr(n)
+                .and_then(parse_length)
+                .is_some_and(|l| !l.pct && l.v.0 > 0)
+        };
+        !abs("width") && !abs("height") && view_box(root).is_some()
+    }
+
+    /// Let page style sheets reach into this document, as they reach into an
+    /// inline `<svg>` in a browser. `css` is the page's author CSS text and
+    /// `chain` the HTML ancestors of the `<svg>` element, innermost first, as
+    /// `(tag, id, class)`. Only the selector subset of [`css`] is understood
+    /// (at-rules, pseudo-classes and attribute selectors drop their rule), and
+    /// only rules that match something in this document are kept. A rule from
+    /// the page ranks below the document's own `<style>` rules at equal
+    /// specificity, and above presentation attributes, as in CSS.
+    pub fn add_page_style(&mut self, css: &str, chain: &[(String, String, String)]) {
+        /// Page CSS scanned, bytes.
+        const MAX_PAGE_CSS: usize = 2 << 20;
+        /// Page rules parsed before filtering.
+        const MAX_PAGE_RULES: usize = 50_000;
+        /// Rule-by-element match tests allowed while filtering.
+        const MAX_MATCH_WORK: usize = 4_000_000;
+        self.doc.set_outer(chain);
+        let mut end = css.len().min(MAX_PAGE_CSS);
+        while !css.is_char_boundary(end) {
+            end -= 1;
+        }
+        let mut page = Vec::new();
+        css::parse_sheet_max(css.get(..end).unwrap_or(""), &mut page, MAX_PAGE_RULES);
+        let n = u32::try_from(self.doc.els.len()).unwrap_or(u32::MAX);
+        if page.len().saturating_mul(n as usize) > MAX_MATCH_WORK {
+            return;
+        }
+        page.retain(|r| (0..n).any(|e| r.matches(&self.doc, e)));
+        page.truncate(css::MAX_RULES);
+        for (i, r) in page.iter_mut().enumerate() {
+            r.order = i;
+        }
+        let k = page.len();
+        for r in &mut self.rules {
+            r.order = r.order.saturating_add(k);
+        }
+        page.append(&mut self.rules);
+        self.rules = page;
+    }
+
     /// The intrinsic size in CSS pixels: the root's `width` and `height` when
     /// absolute lengths, else derived from the `viewBox` ratio, else 300x150.
     pub fn intrinsic_size(&self) -> (u32, u32) {

@@ -167,10 +167,15 @@ fn parse_selector(s: &str) -> Option<(Vec<Compound>, Vec<Comb>, u32)> {
 
 /// Parse a stylesheet, appending its usable rules to `rules`.
 pub fn parse_sheet(text: &str, rules: &mut Vec<Rule>) {
+    parse_sheet_max(text, rules, MAX_RULES);
+}
+
+/// [`parse_sheet`] keeping at most `max` rules in `rules`.
+pub fn parse_sheet_max(text: &str, rules: &mut Vec<Rule>, max: usize) {
     let text = strip_comments(text);
     let b = text.as_bytes();
     let mut i = 0usize;
-    while i < b.len() && rules.len() < MAX_RULES {
+    while i < b.len() && rules.len() < max {
         while b.get(i).is_some_and(u8::is_ascii_whitespace) {
             i += 1;
         }
@@ -195,7 +200,7 @@ pub fn parse_sheet(text: &str, rules: &mut Vec<Rule>) {
         let decls = parse_decls(body);
         for sel in sel_text.split(',') {
             if let Some((parts, combs, specificity)) = parse_selector(sel)
-                && rules.len() < MAX_RULES
+                && rules.len() < max
             {
                 rules.push(Rule {
                     parts,
@@ -256,7 +261,7 @@ impl Rule {
             let (Some(part), Some(comb)) = (self.parts.get(k), self.combs.get(k)) else {
                 return false;
             };
-            let mut up = doc.get(cur).and_then(|e| e.parent);
+            let mut up = doc.parent_of(cur);
             let mut found = None;
             while let Some(a) = up {
                 if compound_matches(part, doc, a) {
@@ -266,7 +271,7 @@ impl Rule {
                 if *comb == Comb::Child {
                     break;
                 }
-                up = doc.get(a).and_then(|e| e.parent);
+                up = doc.parent_of(a);
             }
             match found {
                 Some(a) => cur = a,

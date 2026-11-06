@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<title>svg: inline svg with a viewBox and no width or height fills its container</title>
+<style>
+body { margin: 8px; font: 16px/1.2 "Noto Sans"; color: #222; background: #fff }
+.row { margin: 0 0 8px 0 }
+.card { width: 240px; border: 1px solid #90a4ae; padding: 6px; margin: 0 0 8px 0 }
+.card svg { display: block }
+.half svg { width: 50% }
+.cap svg { max-width: 100px }
+.fixed svg { width: 60px }
+</style>
+<div class="row">container width, height from the ratio:</div>
+<div class="card"><svg viewBox="0 0 40 20"><rect width="40" height="20" fill="#bbdefb"/><circle cx="20" cy="10" r="8" fill="#1565c0"/><path d="M0 0H8V3H3V8H0Z" fill="#e53935"/></svg></div>
+<div class="card half"><svg viewBox="0 0 40 20"><rect width="40" height="20" fill="#c8e6c9"/><circle cx="20" cy="10" r="8" fill="#2e7d32"/></svg></div>
+<div class="card cap"><svg viewBox="0 0 40 20"><rect width="40" height="20" fill="#ffe0b2"/><circle cx="20" cy="10" r="8" fill="#ef6c00"/></svg></div>
+<div class="card fixed"><svg viewBox="0 0 40 20"><rect width="40" height="20" fill="#e1bee7"/><circle cx="20" cy="10" r="8" fill="#6a1b9a"/></svg></div>

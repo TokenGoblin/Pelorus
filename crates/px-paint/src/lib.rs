@@ -22,6 +22,6 @@ pub use display_list::{
     BorderSide, BorderStyle, Color, Corner, CornerShape, DisplayList, FontId, ImageData,
     ImageFilter, Item, ListError, PositionedGlyph, Rect, RoundedRect,
 };
-pub use imgpaint::ImageSet;
+pub use imgpaint::{ImageSet, Vector};
 pub use png::{decode, encode};
 pub use raster::{Canvas, rasterize};

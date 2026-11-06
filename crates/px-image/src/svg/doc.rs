@@ -44,11 +44,51 @@ pub struct Doc {
     pub els: Vec<El>,
     pub ids: HashMap<String, u32>,
     pub style_bytes: usize,
+    /// The HTML ancestors of an inline `<svg>`, innermost first. They exist
+    /// only so page selectors such as `.icon path` can look past the root;
+    /// they are never rendered and have the ids `OUTER_BASE + k`.
+    pub outer: Vec<El>,
 }
+
+/// The first id of a context ancestor (see [`Doc::outer`]).
+pub const OUTER_BASE: u32 = 1 << 30;
+/// Most context ancestors kept.
+pub const MAX_OUTER: usize = 32;
 
 impl Doc {
     pub fn get(&self, i: u32) -> Option<&El> {
-        self.els.get(i as usize)
+        match i.checked_sub(OUTER_BASE) {
+            Some(k) => self.outer.get(k as usize),
+            None => self.els.get(i as usize),
+        }
+    }
+    /// The parent of `i`, the root's being the innermost context ancestor.
+    pub fn parent_of(&self, i: u32) -> Option<u32> {
+        if i == 0 {
+            return (!self.outer.is_empty()).then_some(OUTER_BASE);
+        }
+        self.get(i).and_then(|e| e.parent)
+    }
+    /// Set the context ancestors, innermost first, as `(tag, id, class)`.
+    pub fn set_outer(&mut self, chain: &[(String, String, String)]) {
+        self.outer.clear();
+        for (k, (tag, id, class)) in chain.iter().take(MAX_OUTER).enumerate() {
+            let mut attrs = Vec::new();
+            if !id.is_empty() {
+                attrs.push(("id".to_string(), id.clone()));
+            }
+            if !class.is_empty() {
+                attrs.push(("class".to_string(), class.clone()));
+            }
+            let next = k + 1;
+            self.outer.push(El {
+                name: tag.clone(),
+                attrs,
+                text: String::new(),
+                kids: Vec::new(),
+                parent: (next < chain.len().min(MAX_OUTER)).then(|| OUTER_BASE + next as u32),
+            });
+        }
     }
     pub fn by_id(&self, id: &str) -> Option<u32> {
         self.ids.get(id).copied()
@@ -164,6 +204,7 @@ impl Builder {
             els: self.els,
             ids: self.ids,
             style_bytes: self.style_bytes,
+            outer: Vec::new(),
         })
     }
 }

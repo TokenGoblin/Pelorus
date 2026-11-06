@@ -753,7 +753,10 @@ fn image_items(
     let content = match images.elements.get(&node) {
         Some(img) if fragment.kind == FragmentKind::Block => {
             match px_css::image_style::replaced_style(styles.dom, node) {
-                Some(rs) => imgpaint::content_items(list, rect, shape, borders, &rs, img),
+                Some(rs) => {
+                    let vector = images.vectors.get(&node).map(|v| (v, &styles.vectors));
+                    imgpaint::content_items(list, rect, shape, borders, &rs, img, vector)
+                }
                 None => Vec::new(),
             }
         }
@@ -782,6 +785,8 @@ struct Styles<'a, 'd> {
     canvas_images: Option<NodeId>,
     of: &'a dyn Fn(NodeId) -> Option<PaintStyle>,
     memo: std::cell::RefCell<std::collections::BTreeMap<NodeId, Option<PaintStyle>>>,
+    /// SVG pictures rendered again at their used size (ADR 051).
+    vectors: imgpaint::VectorCache,
 }
 
 impl<'a, 'd> Styles<'a, 'd> {
@@ -797,6 +802,7 @@ impl<'a, 'd> Styles<'a, 'd> {
             canvas_images,
             of,
             memo: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+            vectors: imgpaint::VectorCache::default(),
         }
     }
 

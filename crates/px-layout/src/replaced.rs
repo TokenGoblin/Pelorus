@@ -40,7 +40,7 @@
 //! every signature of a file others are editing.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use app_units::Au;
 use px_dom::{Arena, Node, NodeId};
@@ -58,6 +58,7 @@ const MAX_PX: i64 = 1_000_000;
 
 thread_local! {
     static TABLE: RefCell<Option<BTreeMap<NodeId, (u32, u32)>>> = const { RefCell::new(None) };
+    static RATIO_ONLY: RefCell<BTreeSet<NodeId>> = const { RefCell::new(BTreeSet::new()) };
 }
 
 struct Installed;
@@ -65,6 +66,7 @@ struct Installed;
 impl Drop for Installed {
     fn drop(&mut self) {
         TABLE.with(|t| *t.borrow_mut() = None);
+        RATIO_ONLY.with(|t| t.borrow_mut().clear());
     }
 }
 
@@ -78,12 +80,38 @@ pub fn layout_document_with_images(
     viewport_block_size: Option<Au>,
     images: &BTreeMap<NodeId, (u32, u32)>,
 ) -> Option<FragmentTree> {
+    layout_document_with_pictures(
+        arena,
+        root,
+        viewport_inline_size,
+        viewport_block_size,
+        images,
+        &BTreeSet::new(),
+    )
+}
+
+/// [`layout_document_with_images`], and the elements among `images` whose
+/// picture has an aspect ratio but no size of its own (an SVG with a `viewBox`
+/// and no `width`/`height`). With neither dimension specified such an element
+/// is as wide as its containing block and as tall as the ratio says (CSS
+/// Sizing 3 section 5.1, CSS 2.1 section 10.3.4), where any other picture takes
+/// its intrinsic size. The entry in `images` still gives the ratio.
+#[must_use]
+pub fn layout_document_with_pictures(
+    arena: &Arena,
+    root: &px_css::view::StyleRoot,
+    viewport_inline_size: Au,
+    viewport_block_size: Option<Au>,
+    images: &BTreeMap<NodeId, (u32, u32)>,
+    ratio_only: &BTreeSet<NodeId>,
+) -> Option<FragmentTree> {
     let table: BTreeMap<NodeId, (u32, u32)> = images
         .iter()
         .filter(|(_, (w, h))| *w > 0 && *h > 0)
         .map(|(k, v)| (*k, *v))
         .collect();
     TABLE.with(|t| *t.borrow_mut() = Some(table));
+    RATIO_ONLY.with(|t| *t.borrow_mut() = ratio_only.clone());
     let _guard = Installed;
     crate::block::layout_document_in(arena, root, viewport_inline_size, viewport_block_size)
 }
@@ -238,7 +266,15 @@ pub(crate) fn used_size(i: &Inputs<'_>) -> Option<(Au, Au)> {
             (clamp(by_ratio_w(hu), i.width_bounds), hu)
         }
         (None, None) => {
-            let (w0, h0) = (px_to_au(iw), px_to_au(ih));
+            let (w0, h0) =
+                if RATIO_ONLY.with(|r| r.borrow().contains(&i.node_id)) && i.containing > Au(0) {
+                    // Ratio and no size: fill the containing block (the min-content
+                    // pass has no containing block and takes the intrinsic size).
+                    let w = (i.containing - i.surround.0).max(Au(0));
+                    (w, by_ratio_h(w))
+                } else {
+                    (px_to_au(iw), px_to_au(ih))
+                };
             let wc = clamp(w0, i.width_bounds);
             let h1 = if wc == w0 { h0 } else { by_ratio_h(wc) };
             let hc = clamp(h1, i.height_bounds);

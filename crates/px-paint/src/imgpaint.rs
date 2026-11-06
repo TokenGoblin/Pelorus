@@ -33,9 +33,22 @@
 //! more than [`MAX_TILES`] tiles paints nothing. Gradients and `none` layers are
 //! absent from the layer list (see `px_css::image_style`).
 //!
+//! # Vector pictures (ADR 051)
+//!
+//! An `<img>` or inline `<svg>` whose picture is an SVG document also has a
+//! [`Vector`] in [`ImageSet::vectors`]. Its raster in [`ImageSet::elements`]
+//! (made at the intrinsic size) still gives layout and `object-fit` the
+//! intrinsic size, but what is drawn is the document rendered again at the
+//! snapped destination size in device pixels, so it is sharp however large it
+//! is shown and its `preserveAspectRatio` is applied in the box it is really
+//! in. The result is drawn 1:1. A render that fails or exceeds a bound
+//! ([`VECTOR_MAX_PIXELS`] a picture, [`VECTOR_MAX_BYTES`] and
+//! [`VECTOR_MAX_RENDERS`] a page) falls back to the intrinsic raster scaled.
+//!
 //! The canvas background (the root's, or the `<body>`'s when it propagates) paints
 //! its images against the whole canvas.
 
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -57,6 +70,80 @@ pub struct ImageSet {
     pub elements: BTreeMap<NodeId, Arc<ImageData>>,
     /// The picture at each absolute `background-image` URL.
     pub urls: BTreeMap<String, Arc<ImageData>>,
+    /// For an element in `elements` whose picture is an SVG document: the
+    /// document, to be rendered again at the used size (see the module docs).
+    pub vectors: BTreeMap<NodeId, Vector>,
+}
+
+/// An SVG picture that paint renders at the size it is drawn.
+#[derive(Clone, Debug)]
+pub struct Vector {
+    pub doc: Arc<px_image::svg::Document>,
+    /// What `currentColor` means in it.
+    pub color: [u8; 4],
+}
+
+/// Most pixels of one re-rendered picture; a larger one is drawn from the
+/// intrinsic raster.
+pub const VECTOR_MAX_PIXELS: u64 = 1 << 23;
+/// Most bytes of re-rendered pictures in one display list.
+pub const VECTOR_MAX_BYTES: usize = 96 << 20;
+/// Most distinct re-renders in one display list.
+pub const VECTOR_MAX_RENDERS: usize = 512;
+
+/// A document (by address), a size and a colour.
+type VectorKey = (usize, u32, u32, [u8; 4]);
+
+/// The re-rendered pictures of one display-list build, by document, size and
+/// colour, so an icon used fifty times at one size is drawn once.
+#[derive(Default)]
+pub(crate) struct VectorCache {
+    done: RefCell<BTreeMap<VectorKey, Option<Arc<ImageData>>>>,
+    bytes: Cell<usize>,
+}
+
+impl VectorCache {
+    /// `v` rendered at `w` by `h` device pixels, or `None` (over a bound, or
+    /// the document refuses).
+    fn render(&self, v: &Vector, w: u32, h: u32) -> Option<Arc<ImageData>> {
+        if w == 0 || h == 0 || u64::from(w) * u64::from(h) > VECTOR_MAX_PIXELS {
+            return None;
+        }
+        let key = (Arc::as_ptr(&v.doc) as usize, w, h, v.color);
+        if let Some(hit) = self.done.borrow().get(&key) {
+            return hit.clone();
+        }
+        let need = (w as usize) * (h as usize) * 4;
+        let made = if self.done.borrow().len() >= VECTOR_MAX_RENDERS
+            || self.bytes.get().saturating_add(need) > VECTOR_MAX_BYTES
+        {
+            None
+        } else {
+            let limits = px_image::Limits {
+                max_pixels: VECTOR_MAX_PIXELS,
+                max_frames: 1,
+                max_total_bytes: VECTOR_MAX_BYTES,
+            };
+            v.doc.render(w, h, v.color, &limits).ok().and_then(|img| {
+                let data = ImageData {
+                    width: img.width,
+                    height: img.height,
+                    rgba: img.rgba,
+                };
+                data.is_well_formed().then(|| Arc::new(data))
+            })
+        };
+        if made.is_some() {
+            self.bytes.set(self.bytes.get().saturating_add(need));
+        }
+        self.done.borrow_mut().insert(key, made.clone());
+        made
+    }
+}
+
+/// The device pixel an Au coordinate snaps to (as the rasterizer does).
+fn snap(au: i64) -> i64 {
+    (au + 30).div_euclid(60)
 }
 
 impl ImageSet {
@@ -153,10 +240,8 @@ pub(crate) fn content_items(
     borders: [Au; 4],
     rs: &ReplacedStyle,
     img: &Arc<ImageData>,
+    vector: Option<(&Vector, &VectorCache)>,
 ) -> Vec<Item> {
-    let Some(idx) = list.add_image(img) else {
-        return Vec::new();
-    };
     let inset = [
         Au(borders[0].0.saturating_add(rs.padding[0].0)),
         Au(borders[1].0.saturating_add(rs.padding[1].0)),
@@ -183,6 +268,18 @@ pub(crate) fn content_items(
     let dx = cx + rs.pos_x.resolve(au(cw - dw)).0 as i64;
     let dy = cy + rs.pos_y.resolve(au(ch - dh)).0 as i64;
     let dest = rect_of(dx, dy, dw, dh);
+    // An SVG is drawn again at the size it is shown (snapped as the rasterizer
+    // will), so it is drawn 1:1 and sharp.
+    let img = vector
+        .and_then(|(v, cache)| {
+            let w = snap(dx + dw) - snap(dx);
+            let h = snap(dy + dh) - snap(dy);
+            cache.render(v, u32::try_from(w).ok()?, u32::try_from(h).ok()?)
+        })
+        .unwrap_or_else(|| img.clone());
+    let Some(idx) = list.add_image(&img) else {
+        return Vec::new();
+    };
     let content_shape = shape.map(|s| s.inset(inset));
     let inside = dx >= cx && dy >= cy && dx + dw <= cx + cw && dy + dh <= cy + ch;
     let mut out = Vec::new();

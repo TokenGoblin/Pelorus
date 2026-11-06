@@ -36,7 +36,8 @@
 //! What `px-image` decodes (ADR 042): PNG including APNG, GIF, JPEG baseline and
 //! progressive, BMP and ICO. An animation shows its first frame. WebP is
 //! recognised and refused (no decoder). SVG is drawn by `px-image`'s static
-//! renderer at its intrinsic size (ADR 049); an SVG in an `<img>` or a CSS image
+//! renderer, at its intrinsic size for layout and again at the size it is drawn by
+//! paint (ADR 049, 051); an SVG in an `<img>` or a CSS image
 //! runs no script and loads nothing. Inline `<svg>` elements are drawn too (see
 //! `px_paint::svg`).
 
@@ -78,6 +79,30 @@ pub fn decode(bytes: &[u8]) -> Option<Arc<ImageData>> {
         rgba: img.rgba.clone(),
     };
     data.is_well_formed().then(|| Arc::new(data))
+}
+
+/// As [`decode`], and for an SVG also its document, which paint renders again
+/// at the size the picture is drawn (ADR 051). The raster is the document at
+/// its intrinsic size, as [`decode`] makes it.
+#[must_use]
+pub fn decode_with_vector(
+    bytes: &[u8],
+) -> Option<(Arc<ImageData>, Option<Arc<px_image::svg::Document>>)> {
+    if !px_image::svg::looks_like_svg(bytes)
+        || px_image::sniff(bytes) != Some(px_image::Format::Svg)
+    {
+        return decode(bytes).map(|d| (d, None));
+    }
+    let doc = px_image::svg::Document::parse(bytes).ok()?;
+    let (w, h) = doc.intrinsic_size();
+    let img = doc.render(w, h, [0, 0, 0, 255], &limits()).ok()?;
+    let data = ImageData {
+        width: img.width,
+        height: img.height,
+        rgba: img.rgba,
+    };
+    data.is_well_formed()
+        .then(|| (Arc::new(data), Some(Arc::new(doc))))
 }
 
 fn attr<'a>(node: &'a px_dom::Node, local: &str) -> Option<&'a str> {
@@ -417,10 +442,13 @@ pub fn load_local(source: &str, res: &mut crate::page::Resources) {
         let Ok(bytes) = std::fs::read(path) else {
             continue;
         };
-        if let Some(img) = decode(&bytes) {
+        if let Some((img, vector)) = decode_with_vector(&bytes) {
             total += img.rgba.len();
             if total > MAX_TOTAL_BYTES {
                 break;
+            }
+            if let Some(v) = vector {
+                res.vectors.insert(key.clone(), v);
             }
             res.images.insert(key, img);
         }

@@ -1659,16 +1659,23 @@ translate-only `transform`, `z-index` on flex/grid items. Still open:
 - Flex/grid items' `order` does not affect paint order; grid `z-index` ordering of
   overlapped items is by DOM order only.
 
-## SVG (ADR 049)
+## SVG (ADR 049, 051)
 
-- **Render SVG at the used size.** The picture is made once at the intrinsic size
-  before layout and then scaled as a bitmap, so an SVG shown larger than its
-  intrinsic size is blurry and an `<img>` of another aspect ratio is stretched
-  instead of re-running `preserveAspectRatio`. Needs the used size known when the
-  picture is made (layout-to-paint feedback, or vector items in the display list).
+- Done 2026-11-06 (ADR 051): SVG is rendered again at the used size at paint time
+  (sharp when enlarged, `preserveAspectRatio` re-run in a box of another shape), an
+  SVG with a `viewBox` and no size fills its container width, and page CSS
+  (`.icon path { fill: red }`, type/class/id with descendant and child combinators)
+  reaches inline `<svg>`.
+- SVG in `background-image` is still the intrinsic raster scaled (blurry when
+  enlarged). The tile size is known at paint (`imgpaint::layer_items`); render the
+  document there as `content_items` does.
+- A ratio-only `<svg>`/`<img>` fills the containing block width minus its own border
+  and padding; a horizontal margin is not subtracted, so it overflows by the margin.
+  Its min-content contribution is the intrinsic size.
+- Page CSS inside inline `<svg>` is the small subset only: no `@media`, pseudo-classes,
+  attribute or sibling selectors, `!important`, `inherit`; `<use>` shadow trees are
+  styled as the document itself.
 - Not drawn: `text`, `image`, `mask`, `pattern`, `marker`, `filter`, bounding-box
   `clipPath` units, nested-`svg` overflow clipping, radial focal points, animation.
-- Page stylesheets do not reach inside an inline `<svg>` (`.icon path { fill: red }`);
-  only its own `style=""`/`<style>` and the element's computed `color` do.
-- Inline `<svg>` with a `viewBox` and no `width`/`height` is 300x150 contained, not
-  100% wide as in browsers.
+- No device scale factor exists in paint yet; when one is added, multiply the render
+  size in `imgpaint::content_items` by it so SVG stays sharp on HiDPI.

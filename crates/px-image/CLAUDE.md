@@ -39,3 +39,9 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   bound lives in `doc.rs`/`render.rs`; anything that can multiply work (`use`,
   dashes, points, edges) is counted. A new feature needs a hostile test in
   `tests/svg.rs` first.
+  The same document is rendered again by `px-paint` at the size it is drawn
+  (`Document::render(w, h)`; ADR 051), so `render` must stay correct and bounded at
+  any size, and a render over a bound is an error the caller falls back from.
+  `Document::add_page_style` lets page CSS in (ADR 051): it is bounded in text,
+  rules and match work, never adds capability, and uses only this module's selector
+  subset.

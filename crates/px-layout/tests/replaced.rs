@@ -11,7 +11,7 @@ use app_units::Au;
 use px_dom::NodeId;
 use px_layout::fragment::{FragmentId, FragmentKind, FragmentTree};
 use px_layout::geom::px;
-use px_layout::replaced::layout_document_with_images;
+use px_layout::replaced::{layout_document_with_images, layout_document_with_pictures};
 
 const BASE: &str = "html, body, div { display: block; margin: 0; padding: 0 } \
                     div { font: 10px/10px Ahem } head, style, title { display: none }";
@@ -52,6 +52,25 @@ fn lay(body: &str, css: &str, images: &[(&str, u32, u32)]) -> Laid {
         .map(|(id, w, h)| (id_of(&arena, id), (*w, *h)))
         .collect();
     let tree = layout_document_with_images(&arena, &root, px(800), None, &table).expect("laid out");
+    Laid { tree, arena }
+}
+
+/// As `lay`, with the `ratio_only` elements marked (an SVG with a viewBox only).
+fn lay_ratio(body: &str, css: &str, images: &[(&str, u32, u32)], ratio_only: &[&str]) -> Laid {
+    let dom = px_dom::parse(&format!("<html><body>{body}</body></html>"));
+    let quirks = px_css::engine::quirks_mode_of(&dom);
+    let arena = dom.arena;
+    let mut engine = px_css::engine::StyleEngine::new(800.0, 600.0, quirks);
+    engine.add_author_stylesheet(&format!("{BASE} {css}"), "https://example.invalid/a.css");
+    let root = engine.style_root_for(&arena);
+    engine.resolve(&arena, &root).expect("a root element");
+    let table: BTreeMap<NodeId, (u32, u32)> = images
+        .iter()
+        .map(|(id, w, h)| (id_of(&arena, id), (*w, *h)))
+        .collect();
+    let ro = ratio_only.iter().map(|id| id_of(&arena, id)).collect();
+    let tree =
+        layout_document_with_pictures(&arena, &root, px(800), None, &table, &ro).expect("laid out");
     Laid { tree, arena }
 }
 
@@ -303,4 +322,40 @@ fn degenerate_pictures_and_huge_stated_sizes_do_not_break_layout() {
     );
     let (w, h) = l.size("a");
     assert!(w <= 1_000_000 && h <= 1_000_000);
+}
+
+#[test]
+fn a_ratio_only_picture_fills_the_containing_width() {
+    // Intrinsic 300x150 (the ratio 2:1), but no size of its own: 800 wide.
+    let l = lay_ratio(
+        "<img id=i>",
+        "img { display: block }",
+        &[("i", 300, 150)],
+        &["i"],
+    );
+    assert_eq!(l.size("i"), (800, 400));
+    // Inside a 200px box it is 200 wide; a stated width still wins.
+    let l = lay_ratio(
+        "<div style='width:200px'><img id=a><img id=b width=50></div>",
+        "img { display: block }",
+        &[("a", 300, 150), ("b", 300, 150)],
+        &["a", "b"],
+    );
+    assert_eq!(l.size("a"), (200, 100));
+    assert_eq!(l.size("b"), (50, 25));
+    // Without the mark, the intrinsic size.
+    let l = lay(
+        "<div style='width:200px'><img id=a></div>",
+        "img { display: block }",
+        &[("a", 300, 150)],
+    );
+    assert_eq!(l.size("a"), (300, 150));
+    // Max-width bounds it, the ratio follows.
+    let l = lay_ratio(
+        "<img id=i style='max-width:100px'>",
+        "img { display: block }",
+        &[("i", 300, 150)],
+        &["i"],
+    );
+    assert_eq!(l.size("i"), (100, 50));
 }

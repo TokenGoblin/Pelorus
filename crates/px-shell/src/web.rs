@@ -107,6 +107,7 @@ impl Net {
             blocked_inline: HashSet::new(),
             file: None,
             images: HashMap::new(),
+            vectors: HashMap::new(),
             fonts: Default::default(),
         };
         for text in styles {
@@ -142,10 +143,13 @@ impl Net {
             let Ok(fetched) = loader.image(&key) else {
                 continue;
             };
-            if let Some(img) = images::decode(&fetched.body) {
+            if let Some((img, vector)) = images::decode_with_vector(&fetched.body) {
                 total += img.rgba.len();
                 if total > images::MAX_TOTAL_BYTES {
                     break;
+                }
+                if let Some(v) = vector {
+                    res.vectors.insert(key.clone(), v);
                 }
                 res.images.insert(key, img);
             }

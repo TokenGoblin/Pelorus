@@ -403,3 +403,101 @@ fn mutated_attribute_values_never_panic() {
     }
     assert!(count > 200, "{count}");
 }
+
+// -- used-size rendering and page style (ADR 051) ------------------------------
+
+fn chain(items: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
+    items
+        .iter()
+        .map(|(t, i, c)| (t.to_string(), i.to_string(), c.to_string()))
+        .collect()
+}
+
+#[test]
+fn ratio_only_means_viewbox_without_absolute_size() {
+    let ro = |attrs: &str| {
+        Document::parse(format!("<svg {NS} {attrs}/>").as_bytes())
+            .unwrap()
+            .is_ratio_only()
+    };
+    assert!(ro("viewBox='0 0 24 24'"));
+    assert!(ro("width='100%' viewBox='0 0 24 24'"));
+    assert!(!ro("width='24' viewBox='0 0 24 24'"));
+    assert!(!ro("height='24' viewBox='0 0 24 24'"));
+    assert!(!ro("width='24' height='24'"));
+    assert!(!ro(""));
+}
+
+#[test]
+fn rendering_larger_is_sharp_and_reruns_preserve_aspect_ratio() {
+    let doc = Document::parse(
+        format!(
+            "<svg {NS} width='10' height='10' viewBox='0 0 10 10'><rect width='5' height='10'/></svg>"
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    // 4x: the rect's edge is exactly at x = 20, with no blur.
+    let big = doc
+        .render(40, 40, [0, 0, 0, 255], &Limits::DEFAULT)
+        .unwrap();
+    assert_eq!(px(&big, 19, 20), [0, 0, 0, 255]);
+    assert_eq!(px(&big, 20, 20)[3], 0);
+    // A 40x20 box: meet, centred, so the rect covers x 10..20 only.
+    let wide = doc
+        .render(40, 20, [0, 0, 0, 255], &Limits::DEFAULT)
+        .unwrap();
+    assert_eq!(px(&wide, 9, 10)[3], 0);
+    assert_eq!(px(&wide, 10, 10)[3], 255);
+    assert_eq!(px(&wide, 19, 10)[3], 255);
+    assert_eq!(px(&wide, 20, 10)[3], 0);
+}
+
+#[test]
+fn page_style_reaches_inside_and_ranks_correctly() {
+    // No context ancestors: `.icon path` cannot match, so attributes stand and
+    // the document's own style still beats the page's.
+    let mut doc = Document::parse(
+        format!(
+            "<svg {NS} width='4' height='4'><style>#own{{fill:#00f}}</style>\
+             <path id='own' d='M0 0H2V2H0z' fill='#0f0'/><path d='M2 2H4V4H2z' fill='#0f0'/></svg>"
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    doc.add_page_style(".icon path{fill:#f00} #own{fill:#fff}", &[]);
+    let img = doc.render(4, 4, [0, 0, 0, 255], &Limits::DEFAULT).unwrap();
+    assert_eq!(px(&img, 3, 3), [0, 255, 0, 255]);
+    assert_eq!(px(&img, 0, 0), [0, 0, 255, 255], "own style beats the page");
+
+    let mut doc = Document::parse(
+        format!(
+            "<svg {NS} width='4' height='4'><path d='M2 2H4V4H2z' fill='#0f0'/>\
+             <path class='k' d='M0 0H2V2H0z'/></svg>"
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    doc.add_page_style(
+        ".icon path{fill:#f00} .k{fill:#00f} @media print{.icon path{fill:#000}} \
+         a:hover path{fill:#000}",
+        &chain(&[("span", "", "icon big"), ("body", "", "")]),
+    );
+    let img = doc.render(4, 4, [0, 0, 0, 255], &Limits::DEFAULT).unwrap();
+    // A page rule beats a presentation attribute.
+    assert_eq!(px(&img, 3, 3), [255, 0, 0, 255]);
+    // `.k` (one class) is less specific than `.icon path` (class + type).
+    assert_eq!(px(&img, 0, 0), [255, 0, 0, 255]);
+}
+
+#[test]
+fn page_style_is_bounded() {
+    let mut doc = Document::parse(
+        format!("<svg {NS} width='2' height='2'><rect width='2' height='2'/></svg>").as_bytes(),
+    )
+    .unwrap();
+    let huge = "rect{fill:red}".repeat(2_000_000);
+    doc.add_page_style(&huge, &chain(&[("div", "", ""); 100]));
+    let img = doc.render(2, 2, [0, 0, 0, 255], &Limits::DEFAULT).unwrap();
+    assert_eq!(img.width, 2);
+}

@@ -6,7 +6,7 @@
 //! scheme, host or `..` is skipped); a web page's stylesheets were fetched by
 //! [`crate::web`] through `px-net` beforehand and arrive in [`Resources`].
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -99,6 +99,9 @@ pub struct Resources {
     /// Decoded pictures by key (see [`Resources::key`]): what the image loader
     /// fetched and `px-image` decoded. A picture that failed is simply absent.
     pub images: HashMap<String, Arc<px_paint::ImageData>>,
+    /// For a key in `images` that is an SVG: its document, which paint renders
+    /// again at the size the picture is drawn (ADR 051).
+    pub vectors: HashMap<String, Arc<px_image::svg::Document>>,
     /// The page's `@font-face` fonts that loaded (see [`crate::fonts`]); empty
     /// when it declares none or none arrived. Layout reads them through
     /// `px_layout::fontset::with_page_fonts`.
@@ -346,13 +349,14 @@ fn layout_inner(source: &str, page: &Resources, width: u32, height: u32) -> Resu
     let style_root = engine
         .style_document(&mut arena)
         .ok_or("style resolve failed")?;
-    let (images, sizes) = image_tables(&arena, &style_root, page, width);
-    let tree = px_layout::replaced::layout_document_with_images(
+    let (images, sizes, ratio_only) = image_tables(&arena, &style_root, page, width);
+    let tree = px_layout::replaced::layout_document_with_pictures(
         &arena,
         &style_root,
         px(width as i32),
         Some(px(height as i32)),
         &sizes,
+        &ratio_only,
     )
     .ok_or("layout failed")?;
 
@@ -436,20 +440,49 @@ fn image_tables(
     root: &px_css::view::StyleRoot,
     res: &Resources,
     width: u32,
-) -> (px_paint::ImageSet, BTreeMap<px_dom::NodeId, (u32, u32)>) {
+) -> (
+    px_paint::ImageSet,
+    BTreeMap<px_dom::NodeId, (u32, u32)>,
+    BTreeSet<px_dom::NodeId>,
+) {
     let mut set = px_paint::ImageSet::default();
     let mut sizes = BTreeMap::new();
-    // Inline `<svg>` elements are pictures drawn from their own markup.
+    let mut ratio_only = BTreeSet::new();
+    // Inline `<svg>` elements are pictures drawn from their own markup and the
+    // page's CSS.
+    let has_svg = arena.descendants(arena.document()).any(|n| {
+        arena
+            .get(n)
+            .and_then(|x| x.element_name())
+            .is_some_and(|q| &*q.local == "svg")
+    });
+    let page_css = if has_svg {
+        stylesheets(res, arena)
+            .into_iter()
+            .map(|(css, _)| css)
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    };
     let inline = px_css::view::with_dom(arena, root, |dom| {
-        px_paint::svg::inline_images(arena, &|n| px_css::image_style::text_color(dom, n))
+        px_paint::svg::inline_images(
+            arena,
+            &|n| px_css::image_style::text_color(dom, n),
+            &page_css,
+        )
     })
     .unwrap_or_default();
-    for (id, img) in inline {
-        sizes.insert(id, (img.width, img.height));
-        set.elements.insert(id, img);
+    for item in inline {
+        sizes.insert(item.node, (item.image.width, item.image.height));
+        if item.ratio_only {
+            ratio_only.insert(item.node);
+        }
+        set.vectors.insert(item.node, item.vector);
+        set.elements.insert(item.node, item.image);
     }
     if res.images.is_empty() {
-        return (set, sizes);
+        return (set, sizes, ratio_only);
     }
     for id in arena.descendants(arena.document()) {
         if arena
@@ -461,10 +494,25 @@ fn image_tables(
         }
         let found = crate::images::candidates(arena, id, width)
             .into_iter()
-            .find_map(|raw| res.key(&raw).and_then(|k| res.images.get(&k)));
-        if let Some(img) = found {
+            .find_map(|raw| {
+                let k = res.key(&raw)?;
+                Some((res.images.get(&k)?, res.vectors.get(&k)))
+            });
+        if let Some((img, doc)) = found {
             sizes.insert(id, (img.width, img.height));
             set.elements.insert(id, img.clone());
+            if let Some(doc) = doc {
+                if doc.is_ratio_only() {
+                    ratio_only.insert(id);
+                }
+                set.vectors.insert(
+                    id,
+                    px_paint::Vector {
+                        doc: doc.clone(),
+                        color: [0, 0, 0, 255],
+                    },
+                );
+            }
         }
     }
     for url in background_urls(arena, root) {
@@ -472,7 +520,7 @@ fn image_tables(
             set.urls.insert(url, img.clone());
         }
     }
-    (set, sizes)
+    (set, sizes, ratio_only)
 }
 
 /// The images a page asks for, as keys (see [`Resources::key`]) in request

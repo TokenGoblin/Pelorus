@@ -58,9 +58,9 @@ with `currentColor` taken from the element's computed `color`.
   layers; a work counter on the rasterizer; canvas pixels and bytes through
   `Limits`/`Budget`. A document that passes a bound is refused whole, and the
   page shows the `alt` text.
-- Inline `<svg>`: at most 256 per page and 64 MiB of pixels; page stylesheets
-  do not reach inside it, and its subtree gets no more authority than an SVG
-  file would.
+- Inline `<svg>`: at most 256 per page and 64 MiB of pixels; its subtree gets no
+  more authority than an SVG file would (page stylesheets reach it from
+  2026-11-06, ADR 051, through the same selector subset and extra bounds).
 
 **Numbers.** No floating point (ADR 042's rule for decode paths, applied to the
 whole renderer). Lengths and matrices are Q16.16 in an `i64` that saturates;
@@ -84,7 +84,10 @@ linear and radial gradients (units, transform, spread, `href` inheritance);
 `pattern`, `marker`, `filter`, `foreignObject`, bounding-box `clipPath` units,
 nested-`svg` overflow clipping, radial focal points, animation.
 
-**Two limitations of the bitmap approach.** The picture is rendered once at the
+**Two limitations of the bitmap approach** (superseded 2026-11-06 by ADR 051:
+the document is rendered again at the used size at paint time, a viewBox-only
+SVG fills its container, and page CSS reaches inline `<svg>`; what follows is
+the state as first accepted). The picture is rendered once at the
 intrinsic size, before layout, and then scaled like any raster. So (1) an SVG
 shown larger than its intrinsic size is blurry, and (2) an `<img>` given a
 different aspect ratio is stretched, where a browser would re-run the SVG's

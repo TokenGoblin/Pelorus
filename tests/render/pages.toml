@@ -361,3 +361,15 @@ source = "tests/render/pages/svg-background.html"
 [[page]]
 id = "svg-hostile"
 source = "tests/render/pages/svg-hostile.html"
+
+[[page]]
+id = "svg-used-size"
+source = "tests/render/pages/svg-used-size.html"
+
+[[page]]
+id = "svg-inline-fill"
+source = "tests/render/pages/svg-inline-fill.html"
+
+[[page]]
+id = "svg-inline-css"
+source = "tests/render/pages/svg-inline-css.html"
