@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<title>svg: css background-image with svg, repeat, size, position</title>
+<style>
+body { margin: 8px; font: 16px/1.2 "Noto Sans"; color: #222; background: #fff }
+.b { height: 96px; margin: 0 0 8px 0; border: 2px solid #607d8b }
+.tiled { background: url(img/tile.svg) }
+.once { background: #fafafa url(img/badge.svg) no-repeat 12px 50% }
+.sized { background: url(img/tile.svg) repeat-x 0 0 / 48px 48px, #fff3e0 }
+.cover { background: url(img/chart.svg) no-repeat right 8px bottom 4px / auto 80px }
+</style>
+<div class="b tiled"></div>
+<div class="b once"></div>
+<div class="b sized"></div>
+<div class="b cover"></div>

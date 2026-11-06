@@ -7,7 +7,7 @@
 //!
 //! 1. when its parent is `<picture>`: the first preceding `<source>` sibling
 //!    that has a `srcset`, whose `media` matches and whose `type` is a format
-//!    this browser decodes (a `type` of WebP, AVIF or SVG is skipped, as a
+//!    this browser decodes (a `type` of WebP or AVIF is skipped, as a
 //!    browser that does not support it would); its `srcset` candidates;
 //! 2. otherwise the `<img>`'s own `srcset` (its `src` counts as a `1x`
 //!    candidate when no descriptor is a width);
@@ -35,7 +35,10 @@
 //!
 //! What `px-image` decodes (ADR 042): PNG including APNG, GIF, JPEG baseline and
 //! progressive, BMP and ICO. An animation shows its first frame. WebP is
-//! recognised and refused (no decoder); SVG is never handed to a decoder.
+//! recognised and refused (no decoder). SVG is drawn by `px-image`'s static
+//! renderer at its intrinsic size (ADR 049); an SVG in an `<img>` or a CSS image
+//! runs no script and loads nothing. Inline `<svg>` elements are drawn too (see
+//! `px_paint::svg`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -318,6 +321,7 @@ fn supported_type(t: &str) -> bool {
                 | "image/jpg"
                 | "image/pjpeg"
                 | "image/gif"
+                | "image/svg+xml"
                 | "image/bmp"
                 | "image/x-icon"
                 | "image/vnd.microsoft.icon"
@@ -584,5 +588,23 @@ mod tests {
         assert!(decode(b"<html>").is_none());
         assert!(decode(b"RIFF\x00\x00\x00\x00WEBPVP8 ").is_none(), "WebP");
         assert!(decode(&[]).is_none());
+    }
+
+    #[test]
+    fn svg_decodes_to_its_intrinsic_size() {
+        let img = decode(
+            b"<svg xmlns='http://www.w3.org/2000/svg' width='20' height='10'><rect width='20' height='10' fill='red'/></svg>",
+        )
+        .unwrap();
+        assert_eq!((img.width, img.height), (20, 10));
+        assert_eq!(img.rgba.get(..4), Some(&[255u8, 0, 0, 255][..]));
+        // A document that merely mentions svg is not one.
+        assert!(decode(b"<html><svg/></html>").is_none());
+        let pic = "<picture><source srcset='a.svg' type='image/svg+xml'><img src=f.png></picture>";
+        assert_eq!(
+            cands(pic, 800),
+            ["a.svg"],
+            "an SVG source is no longer skipped"
+        );
     }
 }

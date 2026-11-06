@@ -141,6 +141,12 @@ fn pictures(
         }
     }
     px_css::view::with_dom(arena, style_root, |dom| {
+        for (id, img) in
+            px_paint::svg::inline_images(arena, &|n| px_css::image_style::text_color(dom, n))
+        {
+            sizes.insert(id, (img.width, img.height));
+            set.elements.insert(id, img);
+        }
         for id in arena.descendants(arena.document()) {
             for layer in px_css::image_style::background_layers(dom, id) {
                 if let Some(rel) = layer.url.strip_prefix("https://corpus.invalid/")

@@ -2455,6 +2455,11 @@ fn float_side(style: &ComputedValues) -> Option<crate::float::FloatSide> {
 ///
 /// Iterative, and a pre-order walk so the items come out in document order.
 fn partition_content(dom: px_css::view::Dom<'_>, arena: &Arena, node: NodeId) -> Vec<Content> {
+    // A replaced element's children are not rendered content (an inline `<svg>`
+    // is drawn as a picture; what is inside it is that picture's business).
+    if crate::replaced::has_picture(node) {
+        return Vec::new();
+    }
     partition_nodes(dom, arena, node, children_in_order(arena, node))
 }
 

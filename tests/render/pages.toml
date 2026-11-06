@@ -329,3 +329,19 @@ source = "tests/render/pages/gen-content.html"
 [[page]]
 id = "site-generated"
 source = "tests/render/pages/site-generated.html"
+
+[[page]]
+id = "svg-img"
+source = "tests/render/pages/svg-img.html"
+
+[[page]]
+id = "svg-inline"
+source = "tests/render/pages/svg-inline.html"
+
+[[page]]
+id = "svg-background"
+source = "tests/render/pages/svg-background.html"
+
+[[page]]
+id = "svg-hostile"
+source = "tests/render/pages/svg-hostile.html"

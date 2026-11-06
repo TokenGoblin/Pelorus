@@ -15,6 +15,7 @@ pub mod imgpaint;
 pub mod png;
 pub mod raster;
 pub mod round;
+pub mod svg;
 
 pub use build::{build, build_with_images, build_with_viewport};
 pub use display_list::{

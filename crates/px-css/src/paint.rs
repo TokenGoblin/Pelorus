@@ -166,7 +166,7 @@ fn corner_kind(shape: style::values::computed::corner_shape::CornerShape) -> Cor
 }
 
 /// Convert a resolved colour to 8-bit sRGB.
-fn rgba(color: style::color::AbsoluteColor) -> Rgba {
+pub(crate) fn rgba(color: style::color::AbsoluteColor) -> Rgba {
     let c = color.into_srgb_legacy();
     let channel = |v: f32| -> u8 {
         if v.is_nan() {

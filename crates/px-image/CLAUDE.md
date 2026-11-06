@@ -1,7 +1,8 @@
 # px-image
 
 First-party, std-only image decoders: PNG (including APNG), GIF, JPEG
-(baseline and progressive), BMP and ICO. Phase 15. ADR 042.
+(baseline and progressive), BMP and ICO, plus static SVG (`src/svg/`, ADR 049).
+Phase 15. ADR 042.
 
 Full specification: `docs/build-spec.md`. Root working agreement:
 `/CLAUDE.md` -- it applies here too; this file only adds what is local.
@@ -30,3 +31,11 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   crate. Do not make this crate depend on px-paint.
 - Every format has hostile-input tests (truncation at every byte, byte
   corruption, bombs, random bytes) and a fuzz target `image_decode`.
+- `svg/` is the one non-codec module: a static SVG renderer (ADR 049). It never
+  loads, runs or follows anything outside the document (no `<image>`, script,
+  `<foreignObject>`, external `href`/`url()`, `@import`; XML entities are never
+  defined). All numbers are saturating Q16.16 (`svg/fixed.rs`): no floats, and no
+  plain `+`/`*` on input-derived values (release builds trap on overflow). Every
+  bound lives in `doc.rs`/`render.rs`; anything that can multiply work (`use`,
+  dashes, points, edges) is counted. A new feature needs a hostile test in
+  `tests/svg.rs` first.

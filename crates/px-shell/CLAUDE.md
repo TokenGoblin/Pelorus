@@ -25,8 +25,9 @@ Full specification: `docs/build-spec.md`. Root working agreement:
   `src/images.rs` for the selection rule and the caps: 64 images, 8 MiB each
   compressed, 8 Mpx and 192 MiB of pixels decoded). Pictures go through
   `Loader::image`, a `Destination::Image` fetch on the same secure path, and are
-  decoded by `px-image` (PNG/APNG, GIF, JPEG, BMP, ICO; first frame only; WebP
-  and SVG are refused). A picture that fails for any reason is skipped and the
+  decoded by `px-image` (PNG/APNG, GIF, JPEG, BMP, ICO; first frame only; static
+  SVG is drawn at its intrinsic size and loads nothing, ADR 049; WebP is refused).
+  Inline `<svg>` elements are drawn too, from their own markup (`px_paint::svg`). A picture that fails for any reason is skipped and the
   page shows its `alt` text. Scripts, fonts, frames and forms are never
   requested and never run. Nothing persists:
   the cookie jar lives for one page load, there is no cache and no history store.
