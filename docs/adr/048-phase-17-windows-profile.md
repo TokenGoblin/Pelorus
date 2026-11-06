@@ -85,7 +85,12 @@ feature, only more of its items.
   stage two (`enter_content_profile`) still refuses on Windows, so
   `px-content` on Windows has only the creation-time profile.
 - The `sandbox_escape_*` suite and the runaway-tab memory test are Linux-only
-  and were **not** ported: they need `common::sandboxed`, `px_sandbox::probe`
+  and were **not** ported. The gate's `escape-attempts` item is therefore
+  per-OS in `cargo xtask sandbox`: Linux runs `sandbox_escape*`; Windows runs
+  `sandbox_escape_windows*` (`crates/px-content/tests/sandbox_escape_windows.rs`),
+  which checks only what the parent can read back about the real binary under
+  the real profile, and the gate prints that it is weaker. The Windows item
+  must never be satisfied by the Linux file being absent. Original note: they need `common::sandboxed`, `px_sandbox::probe`
   Windows bodies, and a Windows run to be believed. See
   `docs/research/phase-17-windows-unverified.md` for what CI must show.
 - `px-sandbox`'s unsafe grows by several blocks, each with a `SAFETY:`

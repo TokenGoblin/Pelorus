@@ -81,7 +81,7 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, DETACHED_PROCESS, CreateProcessAsUserW,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, DETACHED_PROCESS,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, OpenProcessToken,
     PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
@@ -146,6 +146,18 @@ const MITIGATIONS: u64 = 0x1 // DEP_ENABLE
 /// `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED`: the process may not create
 /// child processes. Belt and braces with the job's active-process limit.
 const CHILD_PROCESS_RESTRICTED: u32 = 0x01;
+
+/// Creation flag for "no console at all".
+///
+/// No console. `CREATE_NO_WINDOW` gives the child a hidden console, which
+/// Windows serves by starting a console host as a *child process*; under
+/// `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` that start is refused and
+/// every console-subsystem binary dies in the loader with 0xC0000142
+/// (STATUS_DLL_INIT_FAILED). Bisected on a hosted runner: the child-process
+/// attribute alone reproduces it, `DETACHED_PROCESS` with the full profile
+/// does not. The content process needs no console; its stdio is the three
+/// inherited handles above, which `STARTF_USESTDHANDLES` hands over.
+const NO_CONSOLE: u32 = DETACHED_PROCESS;
 
 /// A handle closed exactly once, when it goes out of scope.
 ///
@@ -254,15 +266,6 @@ fn create_job() -> Option<OwnedHandle> {
 /// Linux cap's address space (reserved-but-uncommitted pages are free here), so
 /// the two figures measure different things; ADR 048 says so.
 fn apply_limits(job: &OwnedHandle, memory: MemoryLimit) -> Result<(), PolicyError> {
-    apply_limits_with(job, memory, JOB_LIMITS, UI_RESTRICTIONS)
-}
-
-fn apply_limits_with(
-    job: &OwnedHandle,
-    memory: MemoryLimit,
-    limit_flags: u32,
-    ui_flags: u32,
-) -> Result<(), PolicyError> {
     let bytes = usize::try_from(memory.bytes()).map_err(|_| {
         failed(
             Rung::MemoryCap,
@@ -271,7 +274,7 @@ fn apply_limits_with(
     })?;
 
     let mut extended = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-    extended.BasicLimitInformation.LimitFlags = limit_flags;
+    extended.BasicLimitInformation.LimitFlags = JOB_LIMITS;
     extended.BasicLimitInformation.ActiveProcessLimit = ACTIVE_PROCESS_LIMIT;
     extended.ProcessMemoryLimit = bytes;
     // SAFETY: `job` is a live job handle owned by the caller. `extended` is a
@@ -294,7 +297,7 @@ fn apply_limits_with(
     }
 
     let ui = JOBOBJECT_BASIC_UI_RESTRICTIONS {
-        UIRestrictionsClass: ui_flags,
+        UIRestrictionsClass: UI_RESTRICTIONS,
     };
     // SAFETY: as above, with the UI-restrictions class and its structure.
     let ok = unsafe {
@@ -532,10 +535,6 @@ fn open_own_token() -> Option<OwnedHandle> {
 /// SIDs are disabled or restricted here; that is Phase 17's tightening, and
 /// claiming it now would name the mechanism for more than it does.
 fn restrict(token: &OwnedHandle) -> Result<OwnedHandle, PolicyError> {
-    restrict_with(token, DISABLE_MAX_PRIVILEGE)
-}
-
-fn restrict_with(token: &OwnedHandle, flags: u32) -> Result<OwnedHandle, PolicyError> {
     let mut restricted: HANDLE = std::ptr::null_mut();
     // SAFETY: `token` is a live token opened with TOKEN_DUPLICATE. The three
     // count arguments are zero with null array pointers, the documented way to
@@ -544,7 +543,7 @@ fn restrict_with(token: &OwnedHandle, flags: u32) -> Result<OwnedHandle, PolicyE
     let ok = unsafe {
         CreateRestrictedToken(
             token.raw(),
-            flags,
+            DISABLE_MAX_PRIVILEGE,
             0,
             std::ptr::null(),
             0,
@@ -790,84 +789,21 @@ pub(crate) struct Spawned {
 /// Returns only after the parent has read the job's limits and the child's
 /// integrity level back from the OS.
 pub(crate) fn spawn(executable: &Path, policy: &Policy) -> Result<Spawned, PolicyError> {
-    spawn_with_profile(executable, policy, &Knobs::SHIPPING)
-}
-
-/// What a diagnostic run may switch off. TEMPORARY.
-pub(crate) struct Knobs {
-    mitigations: u64,
-    lower: bool,
-    max_priv: bool,
-    ui: bool,
-    mem: bool,
-    active: bool,
-    job_list: bool,
-    empty_env: bool,
-    child_policy: bool,
-    detached: bool,
-}
-
-impl Knobs {
-    const SHIPPING: Self = Self {
-        mitigations: MITIGATIONS,
-        lower: true,
-        max_priv: true,
-        ui: true,
-        mem: true,
-        active: true,
-        job_list: true,
-        empty_env: true,
-        child_policy: true,
-        detached: false,
-    };
-    fn is_shipping(&self) -> bool {
-        self.mitigations == MITIGATIONS
-            && self.lower
-            && self.max_priv
-            && self.ui
-            && self.mem
-            && self.active
-            && self.job_list
-            && self.empty_env
-            && self.child_policy
-            && !self.detached
-    }
-}
-
-/// [`spawn`] with the mitigation word and the integrity lowering as parameters,
-/// so that a test can ask which part of the profile stops a given binary from
-/// starting. The shipping path passes [`MITIGATIONS`] and `true`; the readback
-/// of the integrity level is skipped only when lowering was not asked for.
-fn spawn_with_profile(
-    executable: &Path,
-    policy: &Policy,
-    knobs: &Knobs,
-) -> Result<Spawned, PolicyError> {
-    let mitigations: u64 = knobs.mitigations;
-    let lower = knobs.lower;
     let token = open_own_token().ok_or_else(|| {
         failed(
             Rung::RestrictedToken,
             "this process's token could not be opened",
         )
     })?;
-    let restricted = restrict_with(&token, if knobs.max_priv { DISABLE_MAX_PRIVILEGE } else { 0 })?;
-    if lower {
-        lower_integrity(&restricted)?;
-    }
+    let restricted = restrict(&token)?;
+    lower_integrity(&restricted)?;
     let job = create_job().ok_or_else(|| {
         failed(
             Rung::JobObject,
             "the job object could not be created for this content process",
         )
     })?;
-    apply_limits_with(
-        &job,
-        policy.memory,
-        (JOB_LIMITS & !(if knobs.mem { 0 } else { JOB_OBJECT_LIMIT_PROCESS_MEMORY }) & !(if knobs.active { 0 } else { JOB_OBJECT_LIMIT_ACTIVE_PROCESS }))
-            | (if knobs.mem { 0 } else { 0 }),
-        if knobs.ui { UI_RESTRICTIONS } else { 0 },
-    )?;
+    apply_limits(&job, policy.memory)?;
 
     // stdin: the parent writes, the child reads. stdout: the child writes, the
     // parent reads. Each parent end is made uninheritable so the child cannot
@@ -889,34 +825,30 @@ fn spawn_with_profile(
 
     // Read by the OS at creation, like the arrays above: they must outlive the
     // call, and they do, being locals of this function.
+    let mitigations: u64 = MITIGATIONS;
     let child_policy: u32 = CHILD_PROCESS_RESTRICTED;
 
     let mut attributes = AttributeList::with_capacity_for(4)?;
-    let no_child_policy = !knobs.child_policy;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
         inherited.as_ptr().cast::<c_void>(),
         std::mem::size_of_val(inherited.as_slice()),
     )?;
-    if knobs.job_list {
-        attributes.set(
-            PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
-            job_handles.as_ptr().cast::<c_void>(),
-            std::mem::size_of_val(&job_handles),
-        )?;
-    }
+    attributes.set(
+        PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
+        job_handles.as_ptr().cast::<c_void>(),
+        std::mem::size_of_val(&job_handles),
+    )?;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY as usize,
         std::ptr::addr_of!(mitigations).cast::<c_void>(),
         std::mem::size_of::<u64>(),
     )?;
-    if !no_child_policy {
-        attributes.set(
-            PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY as usize,
-            std::ptr::addr_of!(child_policy).cast::<c_void>(),
-            std::mem::size_of::<u32>(),
-        )?;
-    }
+    attributes.set(
+        PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY as usize,
+        std::ptr::addr_of!(child_policy).cast::<c_void>(),
+        std::mem::size_of::<u32>(),
+    )?;
 
     // SAFETY: STARTUPINFOEXW is a plain C struct of integers, pointers and
     // handles with no niche and no invalid bit pattern, so an all-zero value
@@ -963,18 +895,8 @@ fn spawn_with_profile(
             std::ptr::null(),
             std::ptr::null(),
             1,
-            EXTENDED_STARTUPINFO_PRESENT
-                | CREATE_UNICODE_ENVIRONMENT
-                | if knobs.detached {
-                    DETACHED_PROCESS
-                } else {
-                    CREATE_NO_WINDOW
-                },
-            if knobs.empty_env {
-                environment.as_ptr().cast::<c_void>()
-            } else {
-                std::ptr::null()
-            },
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | NO_CONSOLE,
+            environment.as_ptr().cast::<c_void>(),
             std::ptr::null(),
             std::ptr::addr_of!(startup).cast::<STARTUPINFOW>(),
             &mut information,
@@ -1008,11 +930,7 @@ fn spawn_with_profile(
     // wrong the child is ended before it can be used (invariant 8); dropping it
     // would also end it, via kill-on-close, but a kill that is explicit cannot
     // be lost by a later edit to Drop.
-    if let Err(error) = if knobs.is_shipping() {
-        child.verify(policy, true)
-    } else {
-        Ok(())
-    } {
+    if let Err(error) = child.verify(policy) {
         let _ = child.kill();
         return Err(error);
     }
@@ -1039,7 +957,7 @@ impl Child {
     /// Confirm, from the OS's own account, that this child is in its job, the
     /// job carries the limits asked for, and the child's token is low
     /// integrity.
-    fn verify(&self, policy: &Policy, lowered: bool) -> Result<(), PolicyError> {
+    fn verify(&self, policy: &Policy) -> Result<(), PolicyError> {
         let mut inside: i32 = 0;
         // SAFETY: `self.process` and `self.job` are live handles owned by this
         // struct; `inside` is live and aligned and written on success.
@@ -1051,7 +969,7 @@ impl Child {
             ));
         }
         verify_limits(&self.job, policy.memory)?;
-        if lowered && integrity_rid(&self.process)? != LOW_INTEGRITY_RID {
+        if integrity_rid(&self.process)? != LOW_INTEGRITY_RID {
             return Err(failed(
                 Rung::LowIntegrity,
                 "the child's token is not at low integrity",
@@ -1442,53 +1360,24 @@ mod tests {
         assert_eq!(MITIGATIONS.count_ones(), 12);
     }
 
-    /// Diagnostic, run only when `PX_DIAG_CONTENT` names binaries (`;`
-    /// separated): reports the exit code each dies with under the profile and
-    /// under reductions of it. Prints; asserts nothing.
+    /// The profile must not kill the program it confines. Every other test in
+    /// this module asks the OS about the child, and a child already dead from
+    /// `0xC0000142` (the loader refusing it under the child-process
+    /// restriction when it was given a console) answers those questions
+    /// exactly as a live one does. This is the only test that asks whether the
+    /// child is still there.
     #[test]
-    fn windows_diag_content_start() {
-        let Some(paths) = std::env::var_os("PX_DIAG_CONTENT") else {
+    fn sandbox_policy_windows_the_child_survives_its_own_start() {
+        let Some(mut spawned) = must_spawn() else {
             return;
         };
-        let paths = paths.to_string_lossy().into_owned();
-        let s = Knobs::SHIPPING;
-        let none = Knobs {
-            mitigations: 0,
-            lower: false,
-            max_priv: false,
-            ui: false,
-            mem: false,
-            active: false,
-            job_list: false,
-            empty_env: false,
-            child_policy: false,
-            detached: false,
-        };
-        let variants: Vec<(&str, Knobs)> = vec![
-            ("shipping", Knobs { ..s }),
-            ("shipping-detached", Knobs { detached: true, ..s }),
-            ("only-child-policy", Knobs { child_policy: true, ..none }),
-            ("only-child-policy-detached", Knobs { child_policy: true, detached: true, ..none }),
-            ("none-detached", Knobs { detached: true, ..none }),
-        ];
-        for path in paths.split(';').filter(|p| !p.is_empty()) {
-            let path = std::path::PathBuf::from(path);
-            for (name, knobs) in &variants {
-                match spawn_with_profile(&path, &Policy::content(), knobs) {
-                    Err(error) => eprintln!("DIAG {} {name}: spawn refused: {error}", path.display()),
-                    Ok(mut spawned) => {
-                        std::thread::sleep(std::time::Duration::from_millis(1200));
-                        let state = spawned.child.try_wait();
-                        eprintln!("DIAG {} {name}: after 1.2s {state:x?}", path.display());
-                        // SAFETY: a live process handle owned by `spawned`.
-                        // Needed because a job nobody is in terminates
-                        // "successfully" without ending the child.
-                        let _ = unsafe { TerminateProcess(spawned.child.process.raw(), 1) };
-                        let _ = spawned.child.kill();
-                        let _ = spawned.child.wait();
-                    }
-                }
-            }
-        }
+        std::thread::sleep(std::time::Duration::from_millis(750));
+        let state = spawned.child.try_wait();
+        let _ = spawned.child.kill();
+        let _ = spawned.child.wait();
+        assert!(
+            matches!(state, Ok(None)),
+            "the confined child ended on its own within 750 ms: {state:x?}"
+        );
     }
 }

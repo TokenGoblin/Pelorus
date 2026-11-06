@@ -59,3 +59,25 @@ certainly be one of them.
   (`sandbox_memory_*`): Linux-only today.
 - Prohibit-dynamic-code and control-flow-guard mitigations.
 - GPU profile (`verify_gpu_profile` still refuses on Windows).
+
+## Found by CI (2026-11-06)
+
+First real Windows run of this profile, bisected on a hosted runner:
+
+- **The content process died at load with `0xC0000142`**
+  (`STATUS_DLL_INIT_FAILED`) under the full profile, so every test that talks to
+  a sandboxed `px-content` on Windows failed with `Closed` / `PeerClosed` and
+  nothing the profile's readback tests asserted noticed (they inspect a dead
+  child exactly as they inspect a live one). Cause: `CREATE_NO_WINDOW` gives the
+  child a hidden console, served by a console-host *child process*, which
+  `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` refuses. The attribute alone
+  reproduced it for `px-content` and a trivial Rust binary; the job limits, the
+  empty environment, the maximum-privilege strip, low integrity and the mitigation
+  word each started fine on their own. Fix: `DETACHED_PROCESS`. New test:
+  `sandbox_policy_windows_the_child_survives_its_own_start`.
+- Item 3 above is therefore partly answered: a Low-integrity restricted-token child
+  does start, with mitigations, once it has no console.
+- The Windows `FLOOR` includes `LowIntegrity` (ADR 048); `ladder_edges.rs` had not
+  been told and failed only on Windows.
+- The gate's `escape-attempts` item has a Windows equivalent
+  (`sandbox_escape_windows*`); it is weaker than Linux's and says so.
