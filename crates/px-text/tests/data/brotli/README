@@ -1,0 +1,6 @@
+Brotli test vectors for crates/px-text/src/brotli.rs. Each X.br is the reference
+encoder's (Google brotli 1.2.1, Python binding) output for X.raw. Qualities and
+window sizes: text q11/w22, tiny q5/w16, html q11/w22, rand q1/w16 (stored),
+zeros q9/w18, mixed q11/w24. The inputs are deterministic (seeded word soup, a
+counter pattern, zeros, seeded noise); the files are the data, no generator is
+kept in the tree.

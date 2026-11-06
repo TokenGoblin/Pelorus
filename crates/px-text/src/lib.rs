@@ -18,15 +18,19 @@
 //! breaking are separate units; see docs/phase-09-plan.md and this crate's
 //! CLAUDE.md.
 
+mod brotli_tables;
 mod cmap;
 pub mod font;
 pub mod glyf;
 pub mod registry;
 pub mod sfnt;
 pub mod sysfonts;
+pub mod woff;
+mod woff2;
 
 // Phase 9 units 2, 6 and 7 (ADR 036).
 pub mod bidi;
+pub mod brotli;
 pub mod linebreak;
 pub mod shaper;
 

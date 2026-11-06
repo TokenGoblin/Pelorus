@@ -35,7 +35,7 @@
 pub mod bmp;
 pub mod gif;
 pub mod ico;
-mod inflate;
+pub mod inflate;
 pub mod jpeg;
 pub mod limits;
 pub mod png;
