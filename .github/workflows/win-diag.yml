@@ -14,6 +14,7 @@ jobs:
       - name: Diagnose
         shell: bash
         run: |
-          export PX_DIAG_CONTENT="$(pwd)/target/debug/px-content.exe;$(pwd)/target/debug/px-xtask.exe"
+          export PX_DIAG_CONTENT="$(cygpath -w "$(pwd)/target/debug/px-content.exe");$(cygpath -w "$(pwd)/target/debug/px-xtask.exe")"
+          echo "$PX_DIAG_CONTENT"
           ls -la target/debug/*.exe
           cargo test --locked -p px-sandbox windows_diag_content_start -- --nocapture --test-threads=1
