@@ -14,7 +14,7 @@ pub enum FontError {
     Truncated,
     /// Not an sfnt at all.
     BadMagic,
-    /// A recognised but unsupported container or outline format (`OTTO`, `ttcf`).
+    /// A recognised but unsupported format (CFF2, `endchar` accent composition).
     Unsupported(&'static str),
     /// A required table is absent.
     MissingTable(&'static str),
@@ -92,6 +92,8 @@ const VERSION_TRUETYPE: u32 = 0x0001_0000;
 const VERSION_TRUE: u32 = 0x7472_7565;
 const VERSION_OTTO: u32 = 0x4F54_544F;
 const VERSION_TTCF: u32 = 0x7474_6366;
+/// Most faces a `ttcf` header may declare.
+pub const MAX_COLLECTION_FACES: u32 = 256;
 
 /// The table directory: tag and span of each table.
 #[derive(Clone, Debug, Default)]
@@ -100,25 +102,61 @@ pub(crate) struct Directory {
 }
 
 impl Directory {
+    /// The table directory of the first face (a collection's first font, or the
+    /// only font of a plain file).
     pub(crate) fn parse(data: &[u8]) -> Result<Directory, FontError> {
-        let version = u32_at(data, 0).ok_or(FontError::Truncated)?;
+        Self::parse_face(data, 0)
+    }
+
+    /// Every table, in directory order.
+    pub(crate) fn tables(&self) -> &[([u8; 4], Span)] {
+        &self.entries
+    }
+
+    /// The table directory of face `index`. A plain sfnt has one face (index 0);
+    /// a `ttcf` collection has up to [`MAX_COLLECTION_FACES`].
+    pub(crate) fn parse_face(data: &[u8], index: u32) -> Result<Directory, FontError> {
+        let mut base = 0usize;
+        let mut version = u32_at(data, 0).ok_or(FontError::Truncated)?;
+        if version == VERSION_TTCF {
+            let count = u32_at(data, 8).ok_or(FontError::Truncated)?;
+            if count == 0 || count > MAX_COLLECTION_FACES {
+                return Err(FontError::Malformed("collection face count"));
+            }
+            if index >= count {
+                return Err(FontError::Malformed("collection face index"));
+            }
+            let at = (index as usize)
+                .checked_mul(4)
+                .and_then(|o| o.checked_add(12))
+                .ok_or(FontError::Truncated)?;
+            base = u32_at(data, at).ok_or(FontError::Truncated)? as usize;
+            version = u32_at(data, base).ok_or(FontError::Truncated)?;
+        } else if index != 0 {
+            return Err(FontError::Malformed("collection face index"));
+        }
         match version {
-            VERSION_TRUETYPE | VERSION_TRUE => {}
-            VERSION_OTTO => return Err(FontError::Unsupported("CFF outlines")),
-            VERSION_TTCF => return Err(FontError::Unsupported("font collection")),
+            VERSION_TRUETYPE | VERSION_TRUE | VERSION_OTTO => {}
             _ => return Err(FontError::BadMagic),
         }
-        let count = usize::from(u16_at(data, 4).ok_or(FontError::Truncated)?);
+        let count_at = base.checked_add(4).ok_or(FontError::Truncated)?;
+        let count = usize::from(u16_at(data, count_at).ok_or(FontError::Truncated)?);
         let mut entries = Vec::with_capacity(count.min(64));
         for i in 0..count {
-            let record = 12 + i * 16;
+            let record = i
+                .checked_mul(16)
+                .and_then(|o| o.checked_add(base))
+                .and_then(|o| o.checked_add(12))
+                .ok_or(FontError::Truncated)?;
+            let tag_end = record.checked_add(4).ok_or(FontError::Truncated)?;
             let tag: [u8; 4] = data
-                .get(record..record + 4)
+                .get(record..tag_end)
                 .ok_or(FontError::Truncated)?
                 .try_into()
                 .map_err(|_| FontError::Truncated)?;
-            let offset = u32_at(data, record + 8).ok_or(FontError::Truncated)? as usize;
-            let len = u32_at(data, record + 12).ok_or(FontError::Truncated)? as usize;
+            let offset =
+                u32_at(data, record.saturating_add(8)).ok_or(FontError::Truncated)? as usize;
+            let len = u32_at(data, record.saturating_add(12)).ok_or(FontError::Truncated)? as usize;
             let end = offset.checked_add(len).ok_or(FontError::Truncated)?;
             if end > data.len() {
                 return Err(FontError::Truncated);

@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>web fonts: CFF in every container</title>
+<style>
+  /* The same CFF face as plain OpenType, WOFF 1.0, WOFF 2.0 and the first face of a
+     TrueType Collection: four identical rows. The fifth row's first source is
+     missing and its second is WOFF 2.0; the last uses no web font. */
+  @font-face { font-family: 'C otf'; src: url(@fonts/PxCff-Regular.otf); }
+  @font-face { font-family: 'C woff'; src: url(@fonts/PxCff-Regular.woff) format('woff'); }
+  @font-face { font-family: 'C woff2'; src: url(@fonts/PxCff-Regular.woff2) format('woff2'); }
+  @font-face { font-family: 'C ttc'; src: url(@fonts/PxCff.ttc); }
+  @font-face { font-family: 'C second'; src: url(@fonts/no-such.otf) format('opentype'), url(@fonts/PxCff-Regular.woff2) format('woff2'); }
+  body { margin: 16px; font: 16px/1.2 'Noto Sans'; color: #555; background: #fff; }
+  p { margin: 0 0 8px; }
+  .s { font-size: 44px; color: #1b1b1f; margin-left: 12px; }
+</style>
+<p>OpenType<span class="s" style="font-family:'C otf','Noto Sans'">Rg Hb 042</span></p>
+<p>WOFF<span class="s" style="font-family:'C woff','Noto Sans'">Rg Hb 042</span></p>
+<p>WOFF2<span class="s" style="font-family:'C woff2','Noto Sans'">Rg Hb 042</span></p>
+<p>TTC face 0<span class="s" style="font-family:'C ttc','Noto Sans'">Rg Hb 042</span></p>
+<p>2nd source<span class="s" style="font-family:'C second','Noto Sans'">Rg Hb 042</span></p>
+<p>Fallback<span class="s" style="font-family:'Nope','Noto Sans'">Rg Hb 042</span></p>

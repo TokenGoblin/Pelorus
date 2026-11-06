@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>web fonts: CFF/OpenType outlines</title>
+<style>
+  /* Type 2 charstrings drawn through the CFF interpreter: rounded hollow bars with
+     curved corners (capitals), solid rounded bars with a round dot (lower case),
+     and digit bars whose edges are curves (flex, hhcurveto, vvcurveto, ...). The
+     bold face is a second .otf of the same family, matched by weight. */
+  @font-face { font-family: 'Px Cff'; font-weight: 400; src: url(@fonts/PxCff-Regular.otf) format('opentype'); }
+  @font-face { font-family: 'Px Cff'; font-weight: 700; src: url(@fonts/PxCff-Bold.otf) format('opentype'); }
+  body { margin: 16px; font: 56px/1.35 'Px Cff', 'Noto Sans'; color: #1b1b1f; background: #fff; }
+  p { margin: 0; }
+  .k { font: 16px 'Noto Sans'; color: #555; }
+  .big { font-size: 120px; line-height: 1.2; color: #0b57d0; }
+</style>
+<p>ABCDEFG HJK <span class="k">capitals, 400</span></p>
+<p>abcdefghij <span class="k">lower case</span></p>
+<p>0123456789 <span class="k">digits</span></p>
+<p style="font-weight:700">ABCDEF abcdef 0123 <span class="k">700</span></p>
+<p class="big">Qa7</p>

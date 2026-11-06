@@ -1,13 +1,18 @@
-//! [`Font`]: a validated handle over the bytes of one TrueType font.
+//! [`Font`]: a validated handle over the bytes of one TrueType or CFF/OpenType font.
 //!
 //! [`Font::from_bytes`] checks every table it will later read (the table directory,
-//! `head`, `hhea`, `maxp`, that `hmtx`, `loca` and `cmap` are large enough) so the
-//! accessors can only fail by returning `None` or an error, never by reading out of
-//! bounds. All metrics are integers in font units; scaling to pixels or `Au` is
-//! the caller's one documented step.
+//! `head`, `hhea`, `maxp`, that `hmtx`, `cmap` and the outline tables are large
+//! enough) so the accessors can only fail by returning `None` or an error, never by
+//! reading out of bounds. All metrics are integers in font units; scaling to pixels
+//! or `Au` is the caller's one documented step.
+//!
+//! Outlines come from `glyf` (TrueType) or `CFF ` (Type 2 charstrings, see
+//! [`crate::cff`]). A `ttcf` collection reads as its first face; use
+//! [`crate::woff::to_sfnt_face`] to pick another.
 
 use std::sync::Arc;
 
+use crate::cff::Cff;
 use crate::cmap::Cmap;
 use crate::glyf::{GlyfTables, Outline};
 use crate::sfnt::{Directory, FontError, Span, i16_at, u16_at, u32_at};
@@ -19,15 +24,24 @@ pub struct FontId(pub u32);
 /// `head.magicNumber`.
 const HEAD_MAGIC: u32 = 0x5F0F_3CF5;
 
-/// A parsed TrueType font. Cloning shares the bytes.
+/// Where a font's outlines live.
+#[derive(Clone, Debug)]
+enum Outlines {
+    Glyf {
+        glyf: Span,
+        loca: Span,
+        long_loca: bool,
+    },
+    Cff(Cff),
+}
+
+/// A parsed TrueType or CFF/OpenType font. Cloning shares the bytes.
 #[derive(Clone, Debug)]
 pub struct Font {
     data: Arc<[u8]>,
     cmap: Cmap,
-    glyf: Span,
-    loca: Span,
+    outlines: Outlines,
     hmtx: Span,
-    long_loca: bool,
     units_per_em: u16,
     ascent: i16,
     descent: i16,
@@ -45,9 +59,11 @@ impl Font {
         let hhea = dir.require("hhea")?;
         let maxp = dir.require("maxp")?;
         let hmtx = dir.require("hmtx")?;
-        let loca = dir.require("loca")?;
-        let glyf = dir.require("glyf")?;
         let cmap_span = dir.require("cmap")?;
+        let has_glyf = dir.find(b"glyf").is_some();
+        if !has_glyf && dir.find(b"CFF2").is_some() {
+            return Err(FontError::Unsupported("CFF2 outlines"));
+        }
 
         let h = head.slice(&data);
         if head.len < 54 || u32_at(h, 12) != Some(HEAD_MAGIC) {
@@ -57,11 +73,6 @@ impl Font {
         if !(16..=16384).contains(&units_per_em) {
             return Err(FontError::Malformed("unitsPerEm out of range"));
         }
-        let long_loca = match i16_at(h, 50) {
-            Some(0) => false,
-            Some(1) => true,
-            _ => return Err(FontError::Malformed("indexToLocFormat")),
-        };
 
         let hh = hhea.slice(&data);
         if hhea.len < 36 {
@@ -79,18 +90,36 @@ impl Font {
         if hmtx.len < usize::from(num_hmetrics) * 4 {
             return Err(FontError::Malformed("hmtx too short"));
         }
-        let loca_entry = if long_loca { 4 } else { 2 };
-        if loca.len < (usize::from(num_glyphs) + 1) * loca_entry {
-            return Err(FontError::Malformed("loca too short"));
-        }
+        let outlines = if has_glyf {
+            let loca = dir.require("loca")?;
+            let glyf = dir.require("glyf")?;
+            let long_loca = match i16_at(h, 50) {
+                Some(0) => false,
+                Some(1) => true,
+                _ => return Err(FontError::Malformed("indexToLocFormat")),
+            };
+            let loca_entry = if long_loca { 4 } else { 2 };
+            if loca.len < (usize::from(num_glyphs) + 1) * loca_entry {
+                return Err(FontError::Malformed("loca too short"));
+            }
+            Outlines::Glyf {
+                glyf,
+                loca,
+                long_loca,
+            }
+        } else {
+            let cff = Cff::parse(&data, dir.require("CFF ")?)?;
+            if cff.num_glyphs() < usize::from(num_glyphs) {
+                return Err(FontError::Malformed("CharStrings shorter than maxp"));
+            }
+            Outlines::Cff(cff)
+        };
         let cmap = Cmap::parse(&data, cmap_span)?;
         Ok(Font {
             data,
             cmap,
-            glyf,
-            loca,
+            outlines,
             hmtx,
-            long_loca,
             units_per_em,
             ascent,
             descent,
@@ -148,14 +177,44 @@ impl Font {
         u16_at(hmtx, usize::from(index) * 4)
     }
 
-    /// The outline of `glyph` in font units.
+    /// The outline of `glyph` in font units. CFF cubics come back as the
+    /// quadratics [`crate::cff`] documents.
     pub fn outline(&self, glyph: u16) -> Result<Outline, FontError> {
-        GlyfTables {
-            glyf: self.glyf.slice(&self.data),
-            loca: self.loca.slice(&self.data),
-            long_loca: self.long_loca,
-            num_glyphs: self.num_glyphs,
+        match &self.outlines {
+            Outlines::Glyf {
+                glyf,
+                loca,
+                long_loca,
+            } => GlyfTables {
+                glyf: glyf.slice(&self.data),
+                loca: loca.slice(&self.data),
+                long_loca: *long_loca,
+                num_glyphs: self.num_glyphs,
+            }
+            .outline(glyph),
+            Outlines::Cff(cff) => {
+                if glyph >= self.num_glyphs {
+                    return Err(FontError::NoSuchGlyph);
+                }
+                cff.glyph(&self.data, usize::from(glyph)).map(|(o, _)| o)
+            }
         }
-        .outline(glyph)
+    }
+
+    /// `true` when the outlines are CFF charstrings rather than `glyf`.
+    pub fn is_cff(&self) -> bool {
+        matches!(self.outlines, Outlines::Cff(_))
+    }
+
+    /// The width a CFF charstring declares for `glyph` (`None` for a `glyf` font
+    /// or a bad glyph). Layout uses `hmtx` ([`Font::advance`]); this is for checks.
+    pub fn charstring_width(&self, glyph: u16) -> Option<i32> {
+        match &self.outlines {
+            Outlines::Cff(cff) if glyph < self.num_glyphs => cff
+                .glyph(&self.data, usize::from(glyph))
+                .ok()
+                .map(|(_, w)| w),
+            _ => None,
+        }
     }
 }

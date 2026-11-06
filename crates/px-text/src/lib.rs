@@ -19,6 +19,7 @@
 //! CLAUDE.md.
 
 mod brotli_tables;
+mod cff;
 mod cmap;
 pub mod font;
 pub mod glyf;

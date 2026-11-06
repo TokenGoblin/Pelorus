@@ -361,3 +361,11 @@ source = "tests/render/pages/svg-background.html"
 [[page]]
 id = "svg-hostile"
 source = "tests/render/pages/svg-hostile.html"
+
+[[page]]
+id = "webfont-cff"
+source = "tests/render/pages/webfont-cff.html"
+
+[[page]]
+id = "webfont-cff-containers"
+source = "tests/render/pages/webfont-cff-containers.html"

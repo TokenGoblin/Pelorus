@@ -217,16 +217,18 @@ fn a_zlib_bomb_in_a_woff_table_stops_at_the_declared_size() {
 
 #[test]
 fn unsupported_flavours_are_named_not_misread() {
-    let mut otto = ICONS_TTF.to_vec();
-    otto[..4].copy_from_slice(b"OTTO");
-    assert_eq!(
-        woff::load_font(&otto).unwrap_err(),
-        FontError::Unsupported("CFF outlines")
-    );
+    // A `ttcf` header on a file that is not a collection is a bad collection.
     let mut ttc = ICONS_TTF.to_vec();
     ttc[..4].copy_from_slice(b"ttcf");
     assert!(woff::load_font(&ttc).is_err());
     assert!(woff::load_font(b"not a font at all").is_err());
+    // WOFF 2.0 collections are named, not misread.
+    let mut f = ICONS_WOFF2.to_vec();
+    f[4..8].copy_from_slice(b"ttcf");
+    assert_eq!(
+        woff::load_font(&f).unwrap_err(),
+        FontError::Unsupported("WOFF2 font collection")
+    );
 }
 
 #[test]

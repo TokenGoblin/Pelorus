@@ -97,8 +97,8 @@ fn hostile_font_files_are_skipped_and_the_page_still_lays_out() {
     for i in (40..flipped.len()).step_by(7) {
         flipped[i] ^= 0x5a;
     }
-    let mut otto = fixture("PxIcons-Regular.ttf");
-    otto[..4].copy_from_slice(b"OTTO");
+    let mut otto = fixture("PxCff-Regular.otf");
+    otto.truncate(otto.len() / 2);
     let mut huge = fixture("PxIcons-Regular.ttf");
     huge.resize(px_net::browse::MAX_FONT_BYTES + 1, 0);
     for (name, bytes) in [
@@ -152,6 +152,64 @@ fn only_a_bounded_number_of_font_rules_is_loaded() {
         px_layout::fontset::MAX_FACE_RULES
     );
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// -- CFF/OpenType and collections ----------------------------------------------------
+
+#[test]
+fn cff_fonts_and_collection_faces_are_used_by_a_page() {
+    let dir = temp_dir("cff");
+    for (name, from) in [
+        ("r.otf", "PxCff-Regular.otf"),
+        ("r.woff", "PxCff-Regular.woff"),
+        ("r.woff2", "PxCff-Regular.woff2"),
+        ("b.otf", "PxCff-Bold.otf"),
+        ("c.ttc", "PxCff.ttc"),
+    ] {
+        std::fs::write(dir.join(name), fixture(from)).unwrap();
+    }
+    // Px Cff: 600/1000 em per letter at 20px = 12; Bold 700 = 14.
+    for (file, want) in [
+        ("r.otf", 4 * 12),
+        ("r.woff", 4 * 12),
+        ("r.woff2", 4 * 12),
+        ("b.otf", 4 * 14),
+        ("c.ttc", 4 * 12),
+    ] {
+        let css = format!("@font-face{{font-family:'Px C';src:url({file})}}");
+        let src = page_with(&css, "'Px C'");
+        std::fs::write(dir.join("p.html"), &src).unwrap();
+        let loaded = Location::File(dir.join("p.html")).load(&mut Net::default());
+        assert!(!loaded.failed);
+        assert_eq!(loaded.res.fonts.faces.len(), 1, "{file}");
+        assert_eq!(link_width(&loaded.source, &loaded.res), want, "{file}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn generic_families_accept_collection_faces() {
+    use px_text::sysfonts::{FakeFs, GenericFamily, ScanLimits, SystemFonts};
+    let mut fs = FakeFs::new();
+    fs.file("/f/PxCff.ttc", fixture("PxCff.ttc"));
+    let sys = SystemFonts::scan(&fs, &["/f".into()], &ScanLimits::default());
+    assert_eq!(sys.len(), 2, "both faces of the collection");
+    let read = |f: &px_text::sysfonts::SystemFace| {
+        use px_text::sysfonts::DirReader;
+        fs.read_bytes(&f.path, 1 << 24).ok()
+    };
+    let prefs = |g: GenericFamily| -> Vec<String> {
+        match g {
+            GenericFamily::Serif => vec!["Px Cff".into()],
+            _ => vec!["Missing".into()],
+        }
+    };
+    let got = px_shell::fonts::resolve_generics(&sys, &read, &prefs);
+    assert_eq!(got.len(), 1);
+    let f = px_layout::text::font_of(got[0].1).unwrap();
+    assert!(f.is_cff());
+    let a = f.glyph_index('A').unwrap();
+    assert_eq!(f.advance(a), Some(600), "weight 400 picks face 0");
 }
 
 // -- Generic families from an in-memory font directory --------------------------

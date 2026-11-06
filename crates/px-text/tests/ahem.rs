@@ -178,10 +178,11 @@ fn garbage_is_rejected() {
         Font::from_bytes(&b"not a font at all"[..]).unwrap_err(),
         FontError::BadMagic
     );
-    assert!(matches!(
+    // An OTTO header with no tables is a font with no `head`, not a refusal.
+    assert_eq!(
         Font::from_bytes(&b"OTTO\0\0\0\0\0\0\0\0"[..]).unwrap_err(),
-        FontError::Unsupported(_)
-    ));
+        FontError::MissingTable("head")
+    );
     let zeros = vec![0u8; 4096];
     assert!(Font::from_bytes(zeros).is_err());
     let ones = vec![0xFFu8; 4096];
